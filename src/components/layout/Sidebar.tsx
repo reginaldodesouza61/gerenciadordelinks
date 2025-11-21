@@ -120,8 +120,8 @@ export function Sidebar() {
   
   return (
     <>
-      <div className="bg-white border-r h-full w-full md:w-64">
-        <div className="p-3 md:p-4 border-b">
+      <div className="bg-white h-full w-full flex flex-col">
+        <div className="p-3 md:p-4 border-b shrink-0">
           <h2 className="font-semibold text-sm md:text-base">Categorias</h2>
           <Button 
             variant="outline" 
@@ -146,9 +146,9 @@ export function Sidebar() {
           )}
         </div>
         
-        <ScrollArea className="flex-1 h-full">
+        <div className="flex-1 overflow-y-auto">
           <div className="p-2 md:p-3">
-            {categorias.map(categoria => (
+            {categorias && categorias.length > 0 ? categorias.map(categoria => (
               <div key={categoria.id} className="mb-1">
                 <div 
                   className={cn(
@@ -165,7 +165,7 @@ export function Sidebar() {
                     ) : (
                       <ChevronRight className="h-4 w-4 mr-1" />
                     )}
-                    <span>{categoria.nome}</span>
+                    <span className="text-sm">{categoria.nome}</span>
                   </button>
                   
                   <div className="flex items-center space-x-1">
@@ -218,7 +218,7 @@ export function Sidebar() {
                           )}
                         >
                           <button 
-                            className="text-left flex-1 truncate"
+                            className="text-left flex-1 truncate text-xs"
                             onClick={() => setSelectedSubcategoryId(selectedSubcategoryId === subcategoria.id ? null : subcategoria.id)}
                           >
                             {subcategoria.nome}
@@ -257,9 +257,14 @@ export function Sidebar() {
                   </div>
                 )}
               </div>
-            ))}
+            )) : (
+              <div className="text-center py-8">
+                <p className="text-gray-500 text-sm">Nenhuma categoria encontrada</p>
+                <p className="text-gray-400 text-xs mt-1">Clique em "Nova categoria" para começar</p>
+              </div>
+            )}
           </div>
-        </ScrollArea>
+        </div>
       </div>
       
       {/* Category Dialog */}
