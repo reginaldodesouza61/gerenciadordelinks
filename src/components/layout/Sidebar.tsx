@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useLinkStore } from '@/lib/store/linkStore';
-import { useAuthStore } from '@/lib/store/authStore';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { ChevronDown, ChevronRight, Plus, Edit2, Trash, Tag } from 'lucide-react';
@@ -12,7 +11,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Categoria, Subcategoria } from '@/types/supabase';
 
 export function Sidebar() {
-  const { user } = useAuthStore();
   const { 
     categorias, 
     subcategorias, 
@@ -27,8 +25,7 @@ export function Sidebar() {
     updateSubcategoria,
     deleteSubcategoria,
     setSelectedCategoryId,
-    setSelectedSubcategoryId,
-    searchLinks
+    setSelectedSubcategoryId
   } = useLinkStore();
   
   const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
@@ -121,32 +118,15 @@ export function Sidebar() {
     }
   };
   
-  // Filtra links quando clica na etiqueta da categoria
-  const handleCategoryTagClick = async (categoryId: string) => {
-    if (!user) return;
-    const newCategoryId = selectedCategoryId === categoryId ? null : categoryId;
-    setSelectedCategoryId(newCategoryId);
-    setSelectedSubcategoryId(null);
-    
-    await searchLinks(user.id, newCategoryId || undefined, undefined);
-  };
-  
-  // Filtra links quando clica na etiqueta da subcategoria
-  const handleSubcategoryClick = async (subcategoryId: string) => {
-    if (!user) return;
-    setSelectedSubcategoryId(subcategoryId);
-    await searchLinks(user.id, undefined, subcategoryId);
-  };
-
   return (
     <>
-      <div className="bg-white border-r h-full w-64">
-        <div className="p-4 border-b">
-          <h2 className="font-semibold">Categorias</h2>
+      <div className="bg-white border-r h-full w-full md:w-64">
+        <div className="p-3 md:p-4 border-b">
+          <h2 className="font-semibold text-sm md:text-base">Categorias</h2>
           <Button 
             variant="outline" 
             size="sm" 
-            className="w-full mt-2"
+            className="w-full mt-2 text-xs md:text-sm"
             onClick={() => openCategoryDialog()}
           >
             <Plus className="h-4 w-4 mr-2" /> Nova categoria
@@ -156,10 +136,9 @@ export function Sidebar() {
               variant="ghost"
               size="sm"
               className="w-full mt-2 text-xs"
-              onClick={async () => {
+              onClick={() => {
                 setSelectedCategoryId(null);
                 setSelectedSubcategoryId(null);
-                if (user) await searchLinks(user.id);
               }}
             >
               Mostrar todos os links
@@ -167,8 +146,8 @@ export function Sidebar() {
           )}
         </div>
         
-        <ScrollArea className="h-[calc(100vh-180px)]">
-          <div className="p-2">
+        <ScrollArea className="flex-1 h-full">
+          <div className="p-2 md:p-3">
             {categorias.map(categoria => (
               <div key={categoria.id} className="mb-1">
                 <div 
@@ -196,7 +175,7 @@ export function Sidebar() {
                       className="h-7 w-7"
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleCategoryTagClick(categoria.id);
+                        setSelectedCategoryId(selectedCategoryId === categoria.id ? null : categoria.id);
                       }}
                     >
                       <Tag className="h-4 w-4" />
@@ -240,7 +219,7 @@ export function Sidebar() {
                         >
                           <button 
                             className="text-left flex-1 truncate"
-                            onClick={() => handleSubcategoryClick(subcategoria.id)}
+                            onClick={() => setSelectedSubcategoryId(selectedSubcategoryId === subcategoria.id ? null : subcategoria.id)}
                           >
                             {subcategoria.nome}
                           </button>
