@@ -28,6 +28,8 @@ export function Sidebar() {
     setSelectedSubcategoryId
   } = useLinkStore();
   
+  console.log('Sidebar renderizada - categorias:', categorias);
+  
   const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
   
   // State for category dialog
@@ -120,13 +122,12 @@ export function Sidebar() {
   
   return (
     <>
-      <div className="bg-white h-full w-full flex flex-col">
-        <div className="p-3 md:p-4 border-b shrink-0">
-          <h2 className="font-semibold text-sm md:text-base">Categorias</h2>
+      <div className="h-full w-full flex flex-col bg-white">
+        <div className="p-3 border-b flex-shrink-0">
           <Button 
             variant="outline" 
             size="sm" 
-            className="w-full mt-2 text-xs md:text-sm"
+            className="w-full mb-2"
             onClick={() => openCategoryDialog()}
           >
             <Plus className="h-4 w-4 mr-2" /> Nova categoria
@@ -135,7 +136,7 @@ export function Sidebar() {
             <Button
               variant="ghost"
               size="sm"
-              className="w-full mt-2 text-xs"
+              className="w-full text-xs"
               onClick={() => {
                 setSelectedCategoryId(null);
                 setSelectedSubcategoryId(null);
@@ -146,9 +147,8 @@ export function Sidebar() {
           )}
         </div>
         
-        <div className="flex-1 overflow-y-auto">
-          <div className="p-2 md:p-3">
-            {categorias && categorias.length > 0 ? categorias.map(categoria => (
+        <div className="flex-1 overflow-y-auto p-3">
+          {categorias && categorias.length > 0 ? categorias.map(categoria => (
               <div key={categoria.id} className="mb-1">
                 <div 
                   className={cn(
@@ -263,7 +263,6 @@ export function Sidebar() {
                 <p className="text-gray-400 text-xs mt-1">Clique em "Nova categoria" para começar</p>
               </div>
             )}
-          </div>
         </div>
       </div>
       

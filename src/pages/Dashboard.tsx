@@ -49,8 +49,8 @@ export default function Dashboard() {
         {/* Mobile Sidebar Overlay */}
         {isMobileSidebarOpen && (
           <div className="md:hidden fixed inset-0 z-50 bg-black bg-opacity-50" onClick={() => setIsMobileSidebarOpen(false)}>
-            <div className="bg-white h-full w-80 max-w-[85vw] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-              <div className="p-3 border-b flex justify-between items-center shrink-0">
+            <div className="bg-white h-full w-80 max-w-[85vw] shadow-xl" onClick={(e) => e.stopPropagation()}>
+              <div className="p-3 border-b flex justify-between items-center">
                 <h2 className="font-semibold text-base">Categorias</h2>
                 <Button
                   variant="ghost"
@@ -60,9 +60,7 @@ export default function Dashboard() {
                   <X className="h-4 w-4" />
                 </Button>
               </div>
-              <div className="flex-1 overflow-hidden">
-                <Sidebar />
-              </div>
+              <Sidebar />
             </div>
           </div>
         )}
