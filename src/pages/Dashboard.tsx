@@ -9,20 +9,18 @@ export default function Dashboard() {
   const { fetchCategorias, fetchSubcategorias } = useLinkStore();
   const [isMobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Fetch categories and subcategories on mount (once)
   useEffect(() => {
     fetchCategorias();
     fetchSubcategorias();
   }, [fetchCategorias, fetchSubcategorias]);
 
   const toggleMobileMenu = () => setMobileMenuOpen(prev => !prev);
-
   const handleLinkClick = () => {
     if (isMobileMenuOpen) setMobileMenuOpen(false);
   };
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50 overflow-hidden">
+    <div className="flex flex-col h-screen bg-gray-50">
       {/* Header */}
       <Header toggleMobileMenu={toggleMobileMenu} isMobileMenuOpen={isMobileMenuOpen} />
 
@@ -38,7 +36,7 @@ export default function Dashboard() {
           <Sidebar onLinkClick={handleLinkClick} />
         </div>
 
-        {/* Overlay for mobile */}
+        {/* Overlay para mobile */}
         {isMobileMenuOpen && (
           <div
             className="fixed inset-0 bg-black/20 z-40 md:hidden"
@@ -46,7 +44,7 @@ export default function Dashboard() {
           />
         )}
 
-        {/* Main content */}
+        {/* Conteúdo principal */}
         <div className="flex-1 overflow-auto md:ml-64">
           <LinkContainer />
         </div>
