@@ -16,6 +16,9 @@ interface LinkState {
   searchResults: Link[];
   selectedCategoryId: string | null;
   selectedSubcategoryId: string | null;
+  favoriteIds: string[];
+  recentIds: string[];
+  activeFilter: 'all' | 'favorites' | 'recent';
   
   // Fetch data
   fetchLinks: (userId: string) => Promise<void>;
@@ -27,6 +30,8 @@ interface LinkState {
   addLink: (link: Omit<Link, 'id' | 'created_at'>) => Promise<string>;
   updateLink: (id: string, link: Partial<Link>) => Promise<void>;
   deleteLink: (id: string) => Promise<void>;
+  toggleFavorite: (id: string) => void;
+  trackRecentLink: (id: string) => void;
   
   // Categories CRUD
   addCategoria: (nome: string) => Promise<void>;
@@ -50,6 +55,7 @@ interface LinkState {
   searchLinks: (userId: string) => Promise<void>;
   setSelectedCategoryId: (categoryId: string | null) => void;
   setSelectedSubcategoryId: (subcategoryId: string | null) => void;
+  setActiveFilter: (filter: 'all' | 'favorites' | 'recent') => void;
   
   // Link preview
   getLinkPreview: (url: string) => Promise<string | null>;
@@ -66,6 +72,9 @@ export const useLinkStore = create<LinkState>((set, get) => ({
   searchResults: [],
   selectedCategoryId: null,
   selectedSubcategoryId: null,
+  favoriteIds: JSON.parse(localStorage.getItem('favoriteLinks') || '[]'),
+  recentIds: JSON.parse(localStorage.getItem('recentLinks') || '[]'),
+  activeFilter: 'all',
   
   fetchLinks: async (userId: string) => {
     set({ loading: true });
@@ -218,6 +227,30 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     } finally {
       set({ loading: false });
     }
+  },
+  
+  toggleFavorite: (id) => {
+    const { favoriteIds } = get();
+    const newFavorites = favoriteIds.includes(id)
+      ? favoriteIds.filter(favId => favId !== id)
+      : [id, ...favoriteIds];
+    
+    set({ favoriteIds: newFavorites });
+    localStorage.setItem('favoriteLinks', JSON.stringify(newFavorites));
+    
+    if (favoriteIds.includes(id)) {
+      toast.success('Removido dos favoritos');
+    } else {
+      toast.success('Adicionado aos favoritos');
+    }
+  },
+  
+  trackRecentLink: (id) => {
+    const { recentIds } = get();
+    const newRecents = [id, ...recentIds.filter(recentId => recentId !== id)].slice(0, 10);
+    
+    set({ recentIds: newRecents });
+    localStorage.setItem('recentLinks', JSON.stringify(newRecents));
   },
   
   addCategoria: async (nome) => {
@@ -441,6 +474,10 @@ export const useLinkStore = create<LinkState>((set, get) => ({
   
   setSelectedSubcategoryId: (subcategoryId) => {
     set({ selectedSubcategoryId: subcategoryId });
+  },
+  
+  setActiveFilter: (filter) => {
+    set({ activeFilter: filter });
   },
   
   searchLinks: async (userId: string) => {

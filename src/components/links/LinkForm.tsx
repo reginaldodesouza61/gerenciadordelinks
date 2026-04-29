@@ -10,7 +10,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { CredentialManager } from '@/components/credentials/CredentialManager';
 import { Link } from '@/types/supabase';
-import { Key } from 'lucide-react';
+import { Key, Link as LinkIcon, Type, Tag, AlignLeft, Sparkles, Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface LinkFormProps {
   open: boolean;
@@ -34,6 +35,7 @@ export function LinkForm({ open, onOpenChange, editingLink }: LinkFormProps) {
   const [descricao, setDescricao] = useState('');
   const [credentialsDialogOpen, setCredentialsDialogOpen] = useState(false);
   const [savedLinkId, setSavedLinkId] = useState<string | null>(null);
+  const [isExtracting, setIsExtracting] = useState(false);
   
   const [availableSubcategorias, setAvailableSubcategorias] = useState(subcategorias);
   
@@ -74,7 +76,7 @@ export function LinkForm({ open, onOpenChange, editingLink }: LinkFormProps) {
     if (isValidUrl && isNewLink && hasEmptyFields) {
       const timer = setTimeout(() => {
         fetchUrlMetadata(url);
-      }, 1000);
+      }, 1500);
       
       return () => clearTimeout(timer);
     }
@@ -82,52 +84,51 @@ export function LinkForm({ open, onOpenChange, editingLink }: LinkFormProps) {
   
   // Function to fetch metadata from URL
   const fetchUrlMetadata = async (urlToFetch: string) => {
+    if (!urlToFetch) return;
+    
+    // Ensure URL is properly formatted
+    let formattedUrl = urlToFetch.trim();
+    if (!formattedUrl.startsWith('http')) {
+      formattedUrl = `https://${formattedUrl}`;
+    }
+    
+    setIsExtracting(true);
     try {
-      if (!urlToFetch || !urlToFetch.startsWith('http')) {
-        return;
-      }
-      
-      // Use metadata extraction proxy service
-      const metadataUrl = `https://api.microlink.io/?url=${encodeURIComponent(urlToFetch)}&audio=false&video=false`;
+      // Use Microlink as primary API
+      const metadataUrl = `https://api.microlink.io/?url=${encodeURIComponent(formattedUrl)}&audio=false&video=false&palette=false`;
       
       const response = await fetch(metadataUrl);
-      if (!response.ok) {
-        throw new Error(`Failed to fetch metadata: ${response.statusText}`);
-      }
-      
       const data = await response.json();
       
-      if (data?.status === 'success') {
-        // If title is empty, use metadata title
-        if (!titulo && data.data.title) {
-          setTitulo(data.data.title);
+      if (data?.status === 'success' && data.data) {
+        const { title, description } = data.data;
+        
+        if (title) {
+          setTitulo(title);
         }
         
-        // Build metadata description
-        const metadata = [];
-        
-        if (data.data.description) {
-          metadata.push(`📝 Descrição: ${data.data.description}`);
+        if (description) {
+          setDescricao(description);
         }
         
-        if (data.data.publisher) {
-          metadata.push(`🔖 Fonte: ${data.data.publisher}`);
-        }
-        
-        if (data.data.author) {
-          metadata.push(`✍️ Autor: ${data.data.author}`);
-        }
-        
-        // Set combined metadata as description
-        if (metadata.length > 0 && !descricao) {
-          setDescricao(metadata.join('\n\n'));
-        }
-        
-        toast.success('Metadados extraídos com sucesso!');
+        toast.success('Informações atualizadas!', {
+          icon: <Sparkles className="h-4 w-4 text-amber-500" />
+        });
+      } else {
+        // Fallback to a simpler favicon service if full metadata fails
+        throw new Error('Microlink failed');
       }
     } catch (error) {
       console.error('Error fetching metadata:', error);
-      toast.error('Não foi possível extrair metadados');
+      
+      // If full metadata fails, at least we try to fix the URL if it was invalid
+      if (!urlToFetch.startsWith('http')) {
+        setUrl(formattedUrl);
+      }
+      
+      toast.error('Não foi possível extrair tudo, mas a URL foi validada');
+    } finally {
+      setIsExtracting(false);
     }
   };
   
@@ -137,14 +138,13 @@ export function LinkForm({ open, onOpenChange, editingLink }: LinkFormProps) {
     setCategoriaId('');
     setSubcategoriaId(null);
     setDescricao('');
+    setSavedLinkId(null);
   };
   
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!user) return;
-    
-    if (!url.trim() || !titulo.trim() || !categoriaId) {
+    if (!user || !url.trim() || !titulo.trim() || !categoriaId) {
       return;
     }
     
@@ -157,10 +157,8 @@ export function LinkForm({ open, onOpenChange, editingLink }: LinkFormProps) {
           subcategoria_id: subcategoriaId,
           descricao: descricao || null
         });
-        // If editing, use existing link ID for credentials
         setSavedLinkId(editingLink.id);
       } else {
-        // If adding new link, get the new ID for credentials
         const newLinkId = await addLink({
           titulo,
           url,
@@ -172,8 +170,7 @@ export function LinkForm({ open, onOpenChange, editingLink }: LinkFormProps) {
         setSavedLinkId(newLinkId);
       }
       
-      // Ask if user wants to add credentials
-      const shouldAddCredentials = window.confirm('Deseja adicionar credenciais para este link?');
+      const shouldAddCredentials = window.confirm('Deseja associar credenciais (usuário/senha) a este link?');
       if (shouldAddCredentials) {
         setCredentialsDialogOpen(true);
       } else {
@@ -185,7 +182,6 @@ export function LinkForm({ open, onOpenChange, editingLink }: LinkFormProps) {
     }
   };
   
-  // Handler for when credentials dialog is closed
   const handleCredentialsDialogClose = (open: boolean) => {
     setCredentialsDialogOpen(open);
     if (!open) {
@@ -197,134 +193,141 @@ export function LinkForm({ open, onOpenChange, editingLink }: LinkFormProps) {
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center justify-between">
-            <span>{editingLink ? 'Editar Link' : 'Adicionar Novo Link'}</span>
-            {editingLink && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="flex items-center"
-                onClick={() => {
-                  setSavedLinkId(editingLink.id);
-                  setCredentialsDialogOpen(true);
-                }}
-              >
-                <Key className="h-4 w-4 mr-1" />
-                <span>Credenciais</span>
-              </Button>
-            )}
-          </DialogTitle>
-        </DialogHeader>
-        
-        <form onSubmit={handleSubmit}>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label htmlFor="title">Título</Label>
-              <Input 
-                id="title"
-                value={titulo} 
-                onChange={(e) => setTitulo(e.target.value)} 
-                placeholder="Título do link"
-                required
-              />
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="url">URL</Label>
-              <div className="flex gap-2">
+        <DialogContent className="sm:max-w-lg glass-card border-none overflow-hidden">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between text-2xl font-bold tracking-tight">
+              <span className="text-gradient">{editingLink ? 'Editar Link' : 'Novo Link'}</span>
+              {editingLink && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="rounded-full gap-2 border-primary/20 hover:bg-primary/5"
+                  onClick={() => {
+                    setSavedLinkId(editingLink.id);
+                    setCredentialsDialogOpen(true);
+                  }}
+                >
+                  <Key className="h-3.5 w-3.5 text-primary" />
+                  <span className="text-xs">Senhas</span>
+                </Button>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          
+          <form onSubmit={handleSubmit} className="space-y-6 py-4">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="url" className="flex items-center gap-2 text-xs font-bold text-muted-foreground">
+                  <LinkIcon className="h-3.5 w-3.5" /> Endereço URL
+                </Label>
+                <div className="flex gap-2">
+                  <Input 
+                    id="url"
+                    type="url"
+                    value={url} 
+                    onChange={(e) => setUrl(e.target.value)} 
+                    placeholder="https://exemplo.com"
+                    className="h-11 rounded-xl bg-muted/30 border-none focus-visible:ring-primary"
+                    required
+                  />
+                  <Button 
+                    type="button" 
+                    variant="secondary" 
+                    className="h-11 px-4 rounded-xl gap-2 font-semibold"
+                    onClick={() => fetchUrlMetadata(url)}
+                    disabled={!url || !url.startsWith('http') || isExtracting}
+                  >
+                    {isExtracting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                    <span className="hidden sm:inline">Auto</span>
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="title" className="flex items-center gap-2 text-xs font-bold text-muted-foreground">
+                  <Type className="h-3.5 w-3.5" /> Título do Link
+                </Label>
                 <Input 
-                  id="url"
-                  type="url"
-                  value={url} 
-                  onChange={(e) => setUrl(e.target.value)} 
-                  placeholder="https://exemplo.com"
+                  id="title"
+                  value={titulo} 
+                  onChange={(e) => setTitulo(e.target.value)} 
+                  placeholder="Ex: Documentação React"
+                  className="h-11 rounded-xl bg-muted/30 border-none focus-visible:ring-primary"
                   required
                 />
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  onClick={() => fetchUrlMetadata(url)}
-                  disabled={!url || !url.startsWith('http')}
-                >
-                  Extrair
-                </Button>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Clique em "Extrair" para obter automaticamente os metadados do site
-              </p>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="category" className="flex items-center gap-2 text-xs font-bold text-muted-foreground">
+                    <Tag className="h-3.5 w-3.5" /> Categoria
+                  </Label>
+                  <Select value={categoriaId} onValueChange={setCategoriaId} required>
+                    <SelectTrigger id="category" className="h-11 rounded-xl bg-muted/30 border-none">
+                      <SelectValue placeholder="Selecione..." />
+                    </SelectTrigger>
+                    <SelectContent className="glass">
+                      {categorias.map(categoria => (
+                        <SelectItem key={categoria.id} value={categoria.id} className="rounded-lg">
+                          {categoria.nome}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="subcategory" className="flex items-center gap-2 text-xs font-bold text-muted-foreground">
+                    <Tag className="h-3.5 w-3.5 opacity-50" /> Subcategoria
+                  </Label>
+                  <Select value={subcategoriaId || ''} onValueChange={setSubcategoriaId}>
+                    <SelectTrigger id="subcategory" disabled={!categoriaId || availableSubcategorias.length === 0} className="h-11 rounded-xl bg-muted/30 border-none">
+                      <SelectValue placeholder="Opcional..." />
+                    </SelectTrigger>
+                    <SelectContent className="glass">
+                      {availableSubcategorias.map(subcategoria => (
+                        <SelectItem key={subcategoria.id} value={subcategoria.id} className="rounded-lg">
+                          {subcategoria.nome}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="description" className="flex items-center gap-2 text-xs font-bold text-muted-foreground">
+                  <AlignLeft className="h-3.5 w-3.5" /> Descrição
+                </Label>
+                <Textarea 
+                  id="description"
+                  value={descricao} 
+                  onChange={(e) => setDescricao(e.target.value)}
+                  placeholder="Sobre o que é este link?"
+                  rows={3}
+                  className="rounded-xl bg-muted/30 border-none focus-visible:ring-primary resize-none"
+                />
+              </div>
             </div>
             
-            <div className="space-y-2">
-              <Label htmlFor="category">Categoria</Label>
-              <Select 
-                value={categoriaId} 
-                onValueChange={setCategoriaId}
-                required
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button 
+                type="button"
+                variant="ghost" 
+                onClick={() => onOpenChange(false)}
+                className="rounded-xl font-semibold"
               >
-                <SelectTrigger id="category">
-                  <SelectValue placeholder="Selecione uma categoria" />
-                </SelectTrigger>
-                <SelectContent>
-                  {categorias.map(categoria => (
-                    <SelectItem key={categoria.id} value={categoria.id}>
-                      {categoria.nome}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="subcategory">Subcategoria (opcional)</Label>
-              <Select 
-                value={subcategoriaId || ''} 
-                onValueChange={setSubcategoriaId}
-              >
-                <SelectTrigger id="subcategory" disabled={!categoriaId || availableSubcategorias.length === 0}>
-                  <SelectValue placeholder="Selecione uma subcategoria" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableSubcategorias.map(subcategoria => (
-                    <SelectItem key={subcategoria.id} value={subcategoria.id}>
-                      {subcategoria.nome}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div className="space-y-2">
-              <Label htmlFor="description">Descrição (opcional)</Label>
-              <Textarea 
-                id="description"
-                value={descricao} 
-                onChange={(e) => setDescricao(e.target.value)}
-                placeholder="Breve descrição do link"
-                rows={3}
-              />
-            </div>
-          </div>
-          
-          <DialogFooter className="mt-4">
-            <Button 
-              type="button"
-              variant="outline" 
-              onClick={() => onOpenChange(false)}
-            >
-              Cancelar
-            </Button>
-            <Button type="submit">
-              {editingLink ? 'Salvar alterações' : 'Adicionar link'}
-            </Button>
-          </DialogFooter>
-        </form>
+                Cancelar
+              </Button>
+              <Button type="submit" className="rounded-xl font-bold px-8 shadow-lg shadow-primary/20">
+                {editingLink ? 'Salvar Alterações' : 'Criar Link'}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
-      {/* Credential Manager Dialog */}
       {savedLinkId && (
         <CredentialManager
           open={credentialsDialogOpen}
