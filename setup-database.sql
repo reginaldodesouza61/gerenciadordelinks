@@ -111,3 +111,42 @@ INSERT INTO public.categorias (nome) VALUES
 ('Pessoal'),
 ('Favoritos')
 ON CONFLICT DO NOTHING;
+
+-- Notes System Tables
+
+-- Note Sections
+CREATE TABLE IF NOT EXISTS public.note_sections (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    nome VARCHAR(100) NOT NULL,
+    user_id UUID REFERENCES auth.users(id) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
+
+-- Note Pages
+CREATE TABLE IF NOT EXISTS public.note_pages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    titulo VARCHAR(255) NOT NULL,
+    conteudo TEXT,
+    section_id UUID REFERENCES public.note_sections(id) ON DELETE CASCADE NOT NULL,
+    parent_id UUID REFERENCES public.note_pages(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES auth.users(id) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);
+
+-- Note Link Relations
+CREATE TABLE IF NOT EXISTS public.note_link_relations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    note_id UUID REFERENCES public.note_pages(id) ON DELETE CASCADE NOT NULL,
+    link_id UUID REFERENCES public.links(id) ON DELETE CASCADE NOT NULL,
+    user_id UUID REFERENCES auth.users(id) NOT NULL,
+    UNIQUE(note_id, link_id)
+);
+
+-- RLS for Notes
+ALTER TABLE public.note_sections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.note_pages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.note_link_relations ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage their own note sections" ON public.note_sections FOR ALL TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can manage their own note pages" ON public.note_pages FOR ALL TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can manage their own note link relations" ON public.note_link_relations FOR ALL TO authenticated USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);

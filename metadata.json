@@ -1,0 +1,8 @@
+{
+  "name": "Gerenciador de Links",
+  "description": "Aplicativo web moderno para organizar e gerenciar links, credenciais e categorias.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
