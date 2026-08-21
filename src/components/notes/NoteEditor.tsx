@@ -22,6 +22,7 @@ import { ImageBlock } from './dev/ImageBlock';
 import { InsertLinkModal } from './dev/InsertLinkModal';
 import { RelatedLinksDrawer } from './dev/RelatedLinksDrawer';
 import { AiAssistantModal } from './AiAssistantModal';
+import { ScreenCropModal } from './ScreenCropModal';
 import { SettingsModal } from '@/components/settings/SettingsModal';
 import { captureScreen, fileToDataUrl } from '@/lib/screenCapture';
 import { toast } from 'sonner';
@@ -630,6 +631,10 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   const [aiSelectedText, setAiSelectedText] = useState('');
   const [aiFullBlockText, setAiFullBlockText] = useState('');
 
+  // Screen Capture & Crop State
+  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
+  const [capturedRawImage, setCapturedRawImage] = useState<{ dataUrl: string; width: number; height: number } | null>(null);
+
   const canvasRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastLoadedPageIdRef = useRef<string | null>(null);
@@ -955,9 +960,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   const handleCaptureScreen = async () => {
     try {
       toast.info('Selecione a tela, janela ou aba para capturar...');
-      const { dataUrl, width, height } = await captureScreen();
-      insertImageBlock(dataUrl, width, height, 'Captura de Tela');
-      toast.success('Captura de tela adicionada à anotação!');
+      const captureResult = await captureScreen();
+      setCapturedRawImage(captureResult);
+      setIsCropModalOpen(true);
     } catch (err) {
       const error = err as Error | { name?: string; message?: string };
       if (error?.name === 'NotAllowedError' || error?.message?.includes('Permission denied')) {
@@ -1375,6 +1380,17 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
         accept="image/*"
         className="hidden"
         onChange={handleFileInputChange}
+      />
+
+      {/* Screen Crop / Selection Modal */}
+      <ScreenCropModal
+        open={isCropModalOpen}
+        onOpenChange={setIsCropModalOpen}
+        rawImageData={capturedRawImage}
+        onConfirmCrop={(croppedUrl, width, height) => {
+          insertImageBlock(croppedUrl, width, height, 'Recorte de Tela');
+          toast.success('Recorte de tela adicionado à anotação!');
+        }}
       />
 
       {/* Settings Modal (Configurar token Gemini, informações do desenvolvedor e sistema) */}
