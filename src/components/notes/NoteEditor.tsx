@@ -886,10 +886,10 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
       id: `vault_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       x: pos.x,
       y: pos.y,
-      width: 480,
-      height: 290,
+      width: 520,
+      height: 340,
       type: 'vault',
-      vaultTitle: 'Tokens & Credenciais Seguras',
+      vaultTitle: 'Cofre de Credenciais & Senhas',
       secrets: [],
     };
     const nextBlocks = [...cleaned, newBlock];
@@ -1105,8 +1105,8 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   return (
     <div className="flex flex-col h-full bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-slate-200 dark:border-zinc-800 overflow-hidden transition-colors">
       {/* Title Header */}
-      <div className="px-6 py-3.5 border-b border-border bg-white dark:bg-zinc-900 z-20 shrink-0 flex items-center justify-between gap-4">
-        <div className="flex items-start gap-3 flex-1 min-w-0">
+      <div className="px-6 py-4 border-b border-border bg-white dark:bg-zinc-900 z-20 shrink-0 flex flex-col gap-3">
+        <div className="flex items-start gap-3 flex-1 min-w-0 w-full">
           {isSidebarCollapsed && onToggleSidebar && (
             <Button
               variant="ghost"
@@ -1120,13 +1120,13 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
           )}
           <div className="flex flex-col w-full min-w-0">
             <input
-              className="text-2xl font-bold border-none outline-none w-full bg-transparent placeholder-slate-300 dark:placeholder-zinc-600 text-slate-800 dark:text-zinc-100"
+              className="text-2xl font-bold border-none outline-none w-full bg-transparent placeholder-slate-300 dark:placeholder-zinc-600 text-slate-800 dark:text-zinc-100 truncate"
               value={page.titulo}
               onChange={(e) => updatePage(page.id, { titulo: e.target.value })}
               placeholder="Título da anotação..."
             />
             {formattedDate && (
-              <span className="text-[11px] text-slate-400 dark:text-zinc-500 font-medium capitalize mt-0.5">
+              <span className="text-[11px] text-slate-400 dark:text-zinc-500 font-medium capitalize mt-0.5 whitespace-nowrap">
                 {formattedDate}
               </span>
             )}
@@ -1134,7 +1134,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
         </div>
 
         {/* Developer Action Bar / Quick Insert Buttons */}
-        <div className="flex items-center gap-1.5 shrink-0 select-none">
+        <div className="flex items-center flex-wrap gap-1.5 shrink-0 select-none">
           {/* Gemini AI Assistant Button */}
           <Button
             size="sm"
@@ -1213,10 +1213,10 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
             variant="outline"
             onClick={handleAddVaultBlock}
             className="h-8 px-2.5 text-xs bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100/80 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800 rounded-md gap-1.5 shadow-2xs font-medium"
-            title="Inserir cofre para guardar tokens de API, senhas e variáveis .env"
+            title="Inserir cofre para guardar credenciais, logins, senhas, links e tokens"
           >
             <ShieldCheck size={14} className="text-amber-600 dark:text-amber-400" />
-            <span className="hidden sm:inline">Tokens & Senhas</span>
+            <span className="hidden sm:inline">Credenciais</span>
           </Button>
 
           {/* Insert Registered Link Card */}

@@ -39,7 +39,9 @@ export type SecretEnv = 'local' | 'dev' | 'staging' | 'prod' | 'global';
 export interface SecretItem {
   id: string;
   key: string;
+  username?: string;
   value: string;
+  url?: string;
   type: SecretType;
   env?: SecretEnv;
   notes?: string;
