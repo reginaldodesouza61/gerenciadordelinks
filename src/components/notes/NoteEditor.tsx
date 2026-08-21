@@ -10,7 +10,7 @@ import {
   Strikethrough, List, ListOrdered, AlignLeft, AlignCenter, AlignRight, AlignJustify,
   Highlighter, Palette, TableProperties, Plus, ChevronRight, Combine,
   Code2, ShieldCheck, Link as LinkIcon, Type, Terminal, KeyRound, Sparkles, Wand2,
-  Camera, Image as ImageIcon, Upload, Download, Copy, ChevronDown, Undo2, Redo2
+  Camera, Image as ImageIcon, Upload, Download, Copy, ChevronDown, Undo2, Redo2, PanelLeftOpen
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -1150,13 +1150,14 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
         <div className="flex items-start gap-3 flex-1 min-w-0 w-full">
           {isSidebarCollapsed && onToggleSidebar && (
             <Button
-              variant="ghost"
-              size="icon"
+              variant="outline"
+              size="sm"
               onClick={onToggleSidebar}
-              className="h-8 w-8 text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-100 shrink-0 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-md mt-0.5"
-              title="Expandir menu lateral"
+              className="h-8 gap-1.5 px-2.5 text-xs font-semibold text-slate-700 dark:text-zinc-200 border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 shrink-0 rounded-lg shadow-xs mt-0.5"
+              title="Expandir menu lateral de seções e notas"
             >
-              <ChevronRight size={18} />
+              <PanelLeftOpen size={14} className="text-indigo-600 dark:text-indigo-400" />
+              <span className="hidden sm:inline">Seções</span>
             </Button>
           )}
           <div className="flex flex-col w-full min-w-0">

@@ -3,7 +3,7 @@ import { useNoteStore } from '@/lib/store/noteStore';
 import { Button } from '@/components/ui/button';
 import { 
   Plus, Edit2, Trash, ChevronDown, ChevronRight, FileText, Folder, 
-  ChevronLeft, Trash2, RotateCcw, GripVertical, ChevronUp
+  ChevronLeft, Trash2, RotateCcw, GripVertical, ChevronUp, PanelLeftClose
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -453,11 +453,11 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
           <Button
             variant="ghost"
             size="icon"
-            className="h-10 w-10 text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-xl"
+            className="h-10 w-10 text-slate-400 dark:text-zinc-500 hover:text-slate-700 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-xl shrink-0"
             onClick={onCollapse}
-            title="Recolher menu lateral"
+            title="Recolher menu lateral de seções"
           >
-            <ChevronLeft size={20} />
+            <PanelLeftClose size={18} />
           </Button>
         )}
       </div>
