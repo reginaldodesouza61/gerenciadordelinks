@@ -171,15 +171,12 @@ export async function decryptSecretField(cipherTextOrPayload?: string): Promise<
   }
 }
 
-export async function encryptSecretItem<T extends Record<string, unknown>>(item: T): Promise<T> {
-  const sensitiveKeys = [
-    'value', 'password', 'transactionPassword', 'clientSecret', 
-    'dbPassword', 'token', 'jwtSecret', 'pixKey', 'cardNumber', 'cardCvv', 'customFields'
-  ];
+const NON_ENCRYPTED_KEYS = new Set(['id', 'type', 'env', 'customFields']);
 
+export async function encryptSecretItem<T extends Record<string, unknown>>(item: T): Promise<T> {
   const cloned = { ...item };
-  for (const key of sensitiveKeys) {
-    if (cloned[key] && typeof cloned[key] === 'string') {
+  for (const key of Object.keys(cloned)) {
+    if (!NON_ENCRYPTED_KEYS.has(key) && typeof cloned[key] === 'string' && cloned[key]) {
       (cloned as Record<string, unknown>)[key] = await encryptSecretField(cloned[key] as string);
     }
   }
@@ -188,7 +185,8 @@ export async function encryptSecretItem<T extends Record<string, unknown>>(item:
     cloned.customFields = await Promise.all(
       (cloned.customFields as SecretItemCustomField[]).map(async (cf) => ({
         ...cf,
-        value: (await encryptSecretField(cf.value)) || ''
+        label: cf.label ? ((await encryptSecretField(cf.label)) || cf.label) : cf.label,
+        value: cf.value ? ((await encryptSecretField(cf.value)) || cf.value) : cf.value
       }))
     );
   }
@@ -197,15 +195,14 @@ export async function encryptSecretItem<T extends Record<string, unknown>>(item:
 }
 
 export async function decryptSecretItem<T extends Record<string, unknown>>(item: T): Promise<T> {
-  const sensitiveKeys = [
-    'value', 'password', 'transactionPassword', 'clientSecret', 
-    'dbPassword', 'token', 'jwtSecret', 'pixKey', 'cardNumber', 'cardCvv', 'customFields'
-  ];
-
   const cloned = { ...item };
-  for (const key of sensitiveKeys) {
-    if (cloned[key] && typeof cloned[key] === 'string') {
-      (cloned as Record<string, unknown>)[key] = await decryptSecretField(cloned[key] as string);
+  for (const key of Object.keys(cloned)) {
+    if (!NON_ENCRYPTED_KEYS.has(key) && typeof cloned[key] === 'string' && cloned[key]) {
+      const val = cloned[key] as string;
+      const decrypted = await decryptSecretField(val);
+      if (decrypted !== undefined) {
+        (cloned as Record<string, unknown>)[key] = decrypted;
+      }
     }
   }
 
@@ -213,10 +210,44 @@ export async function decryptSecretItem<T extends Record<string, unknown>>(item:
     cloned.customFields = await Promise.all(
       (cloned.customFields as SecretItemCustomField[]).map(async (cf) => ({
         ...cf,
-        value: (await decryptSecretField(cf.value)) || ''
+        label: cf.label ? ((await decryptSecretField(cf.label)) ?? cf.label) : cf.label,
+        value: cf.value ? ((await decryptSecretField(cf.value)) ?? cf.value) : cf.value
       }))
     );
   }
 
   return cloned;
+}
+
+/**
+ * Parses note content blocks and ensures every secret in vault blocks is encrypted
+ * before sending/updating in Supabase database.
+ */
+export async function sanitizeAndEncryptNoteContent(conteudoJson: string): Promise<string> {
+  if (!conteudoJson) return conteudoJson;
+  try {
+    const blocks = JSON.parse(conteudoJson);
+    if (!Array.isArray(blocks)) return conteudoJson;
+
+    let modified = false;
+    const processedBlocks = await Promise.all(
+      blocks.map(async (block) => {
+        if (block && block.type === 'vault' && Array.isArray(block.secrets)) {
+          const encryptedSecrets = await Promise.all(
+            block.secrets.map((s: Record<string, unknown>) => encryptSecretItem(s))
+          );
+          modified = true;
+          return { ...block, secrets: encryptedSecrets };
+        }
+        return block;
+      })
+    );
+
+    if (modified) {
+      return JSON.stringify(processedBlocks);
+    }
+    return conteudoJson;
+  } catch {
+    return conteudoJson;
+  }
 }

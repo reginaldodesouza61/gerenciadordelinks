@@ -503,10 +503,11 @@ export function SecretVaultBlock({
   };
 
   // Delete secret item
-  const handleDeleteItem = (id: string, e: React.MouseEvent) => {
+  const handleDeleteItem = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const updated = secrets.filter((s) => s.id !== id);
-    updateBlock(block.id, { secrets: updated });
+    const remaining = secrets.filter((s) => s.id !== id);
+    const encryptedRemaining = await Promise.all(remaining.map((s) => encryptSecretItem(s)));
+    updateBlock(block.id, { secrets: encryptedRemaining });
     toast.success('Credencial removida do cofre');
   };
 

@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { supabase } from '../supabase';
 import { NoteSection, NotePage, NoteLinkRelation, DeletedNoteItem } from '@/types/notes';
 import { toast } from 'sonner';
-import { encryptSecretField, decryptSecretField } from '@/lib/encryption';
+import { encryptSecretField, decryptSecretField, sanitizeAndEncryptNoteContent } from '@/lib/encryption';
 
 const TRASH_STORAGE_KEY = 'meuhub_deleted_notes_vault';
 const ACTIVE_PAGE_STORAGE_KEY = 'meuhub_active_page_id';
@@ -490,11 +490,17 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   },
 
   updatePage: async (id, updates) => {
+    let finalUpdates = updates;
+    if (updates.conteudo) {
+      const encryptedConteudo = await sanitizeAndEncryptNoteContent(updates.conteudo);
+      finalUpdates = { ...updates, conteudo: encryptedConteudo };
+    }
+
     set(state => ({
-      pages: state.pages.map(p => p.id === id ? { ...p, ...updates } : p)
+      pages: state.pages.map(p => p.id === id ? { ...p, ...finalUpdates } : p)
     }));
 
-    const payload: Partial<NotePage> = { ...updates };
+    const payload: Partial<NotePage> = { ...finalUpdates };
 
     const { error } = await supabase.from('note_pages').update(payload).eq('id', id);
     if (error) {
