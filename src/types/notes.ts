@@ -80,10 +80,12 @@ export type SecretType =
   | 'oauth_api'         // OAuth 2.0 / Client ID & Secret
   | 'azure_graph'       // Microsoft Graph / Azure AD (Client ID, Secret, Tenant, Object ID)
   | 'db_connection'     // Banco de Dados (Host, Porta, Banco, Usuário, Senha)
-  | 'jwt_secret'        // JWT Secret
   | 'ssh_key'           // Chave SSH / Cert
+  | 'jwt_secret'        // JWT Secret
   | 'webhook_secret'    // Webhook Secret
   | 'env_var'           // Variável .ENV
+  | 'bank'              // Conta Bancária & PIX
+  | 'credit_card'       // Cartão de Crédito
   | 'custom';           // Personalizado / Geral
 
 export type SecretEnv = 'local' | 'dev' | 'staging' | 'prod' | 'global';
@@ -117,6 +119,22 @@ export interface SecretItem {
   dbPort?: string;
   dbName?: string;
   dbUser?: string;
+
+  // Specific fields for Bank Account
+  bankName?: string;
+  bankAgency?: string;
+  bankAccount?: string;
+  bankAccountType?: string;
+  pixKey?: string;
+
+  // Specific fields for Credit Card
+  cardholderName?: string;
+  cardNumber?: string;
+  cardExpiry?: string;
+  cardCvv?: string;
+  cardBrand?: string;
+  cardLimit?: string;
+  cardDueDay?: string;
 
   // Extra dynamic fields
   customFields?: SecretItemCustomField[];

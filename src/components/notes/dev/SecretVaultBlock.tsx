@@ -5,7 +5,8 @@ import {
   ShieldCheck, Lock, KeyRound, Eye, EyeOff, Copy, Check, 
   Plus, Trash2, GripHorizontal, Terminal,
   ExternalLink, Edit3, Save, User, Globe, Share2, ChevronDown,
-  Cloud, Code2, Database as DatabaseIcon, Server, RefreshCw
+  Cloud, Code2, Database as DatabaseIcon, Server, RefreshCw,
+  Landmark, CreditCard
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,6 +18,8 @@ import { generatePassword } from '@/lib/utils/passwordUtils';
 
 const SECRET_TYPES: { id: SecretType; label: string; icon: React.ElementType; color: string }[] = [
   { id: 'password', label: 'Senha (Usuário & Senha)', icon: Lock, color: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800' },
+  { id: 'bank', label: 'Conta Bancária & PIX', icon: Landmark, color: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' },
+  { id: 'credit_card', label: 'Cartão de Crédito', icon: CreditCard, color: 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' },
   { id: 'azure_graph', label: 'Microsoft Graph / Azure AD', icon: Cloud, color: 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800' },
   { id: 'oauth_api', label: 'OAuth 2.0 / API Rest', icon: Code2, color: 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' },
   { id: 'api_token', label: 'Token de API / API Key', icon: KeyRound, color: 'bg-violet-50 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-800' },
@@ -83,6 +86,22 @@ export function SecretVaultBlock({
   const [formDbName, setFormDbName] = useState('');
   const [formDbUser, setFormDbUser] = useState('');
 
+  // Bank fields
+  const [formBankName, setFormBankName] = useState('');
+  const [formBankAgency, setFormBankAgency] = useState('');
+  const [formBankAccount, setFormBankAccount] = useState('');
+  const [formBankAccountType, setFormBankAccountType] = useState('Corrente');
+  const [formPixKey, setFormPixKey] = useState('');
+
+  // Credit Card fields
+  const [formCardholderName, setFormCardholderName] = useState('');
+  const [formCardNumber, setFormCardNumber] = useState('');
+  const [formCardExpiry, setFormCardExpiry] = useState('');
+  const [formCardCvv, setFormCardCvv] = useState('');
+  const [formCardBrand, setFormCardBrand] = useState('Visa');
+  const [formCardLimit, setFormCardLimit] = useState('');
+  const [formCardDueDay, setFormCardDueDay] = useState('');
+
   const [formCustomFields, setFormCustomFields] = useState<SecretItemCustomField[]>([]);
 
   const secrets: SecretItem[] = useMemo(() => {
@@ -126,6 +145,21 @@ export function SecretVaultBlock({
     if (item.dbHost) lines.push(`🖥️ Host: ${item.dbHost}${item.dbPort ? `:${item.dbPort}` : ''}`);
     if (item.dbName) lines.push(`🗄️ Database: ${item.dbName}`);
     if (item.dbUser) lines.push(`👤 DB User: ${item.dbUser}`);
+
+    // Bank fields
+    if (item.bankName) lines.push(`🏦 Banco: ${item.bankName}`);
+    if (item.bankAgency) lines.push(`🏢 Agência: ${item.bankAgency}`);
+    if (item.bankAccount) lines.push(`💳 Conta: ${item.bankAccount}${item.bankAccountType ? ` (${item.bankAccountType})` : ''}`);
+    if (item.pixKey) lines.push(`💠 Chave PIX: ${item.pixKey}`);
+
+    // Credit Card fields
+    if (item.cardBrand) lines.push(`💳 Bandeira: ${item.cardBrand}`);
+    if (item.cardholderName) lines.push(`👤 Titular: ${item.cardholderName}`);
+    if (item.cardNumber) lines.push(`💳 Número do Cartão: ${item.cardNumber}`);
+    if (item.cardExpiry) lines.push(`⏳ Validade: ${item.cardExpiry}`);
+    if (item.cardCvv) lines.push(`🔒 CVV: ${item.cardCvv}`);
+    if (item.cardLimit) lines.push(`💰 Limite: ${item.cardLimit}`);
+    if (item.cardDueDay) lines.push(`📅 Vencimento (Dia): ${item.cardDueDay}`);
 
     // Custom fields
     if (item.customFields && item.customFields.length > 0) {
@@ -279,6 +313,18 @@ export function SecretVaultBlock({
     setFormDbPort('');
     setFormDbName('');
     setFormDbUser('');
+    setFormBankName('');
+    setFormBankAgency('');
+    setFormBankAccount('');
+    setFormBankAccountType('Corrente');
+    setFormPixKey('');
+    setFormCardholderName('');
+    setFormCardNumber('');
+    setFormCardExpiry('');
+    setFormCardCvv('');
+    setFormCardBrand('Visa');
+    setFormCardLimit('');
+    setFormCardDueDay('');
     setFormCustomFields([]);
     setShowDialogPassword(false);
     setIsDialogOpen(true);
@@ -303,6 +349,18 @@ export function SecretVaultBlock({
     setFormDbPort(item.dbPort || '');
     setFormDbName(item.dbName || '');
     setFormDbUser(item.dbUser || '');
+    setFormBankName(item.bankName || '');
+    setFormBankAgency(item.bankAgency || '');
+    setFormBankAccount(item.bankAccount || '');
+    setFormBankAccountType(item.bankAccountType || 'Corrente');
+    setFormPixKey(item.pixKey || '');
+    setFormCardholderName(item.cardholderName || '');
+    setFormCardNumber(item.cardNumber || '');
+    setFormCardExpiry(item.cardExpiry || '');
+    setFormCardCvv(item.cardCvv || '');
+    setFormCardBrand(item.cardBrand || 'Visa');
+    setFormCardLimit(item.cardLimit || '');
+    setFormCardDueDay(item.cardDueDay || '');
     setFormCustomFields(item.customFields || []);
     setShowDialogPassword(false);
     setIsDialogOpen(true);
@@ -391,6 +449,18 @@ export function SecretVaultBlock({
       dbPort: formDbPort.trim() || undefined,
       dbName: formDbName.trim() || undefined,
       dbUser: formDbUser.trim() || undefined,
+      bankName: formBankName.trim() || undefined,
+      bankAgency: formBankAgency.trim() || undefined,
+      bankAccount: formBankAccount.trim() || undefined,
+      bankAccountType: formBankAccountType.trim() || undefined,
+      pixKey: formPixKey.trim() || undefined,
+      cardholderName: formCardholderName.trim() || undefined,
+      cardNumber: formCardNumber.trim() || undefined,
+      cardExpiry: formCardExpiry.trim() || undefined,
+      cardCvv: formCardCvv.trim() || undefined,
+      cardBrand: formCardBrand.trim() || undefined,
+      cardLimit: formCardLimit.trim() || undefined,
+      cardDueDay: formCardDueDay.trim() || undefined,
       customFields: cleanCustom.length > 0 ? cleanCustom : undefined,
     };
 
@@ -678,6 +748,154 @@ export function SecretVaultBlock({
                         >
                           {copiedActionMap[`${item.id}_url`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
                         </button>
+                      </div>
+                    )}
+
+                    {/* Specific Fields: Bank Account */}
+                    {item.type === 'bank' && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {item.bankName && (
+                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
+                            <div className="truncate flex items-center gap-1">
+                              <Landmark size={12} className="text-emerald-500 shrink-0" />
+                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">BANCO:</span>
+                              <span className="font-mono truncate">{item.bankName}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => copyTextToClipboard(item.bankName || '', 'Banco', item.id, 'bank_name', e)}
+                              className="p-0.5 rounded text-slate-400 hover:text-emerald-600 shrink-0"
+                              title="Copiar Banco"
+                            >
+                              {copiedActionMap[`${item.id}_bank_name`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                            </button>
+                          </div>
+                        )}
+
+                        {item.bankAgency && (
+                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
+                            <div className="truncate flex items-center gap-1">
+                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">AGÊNCIA:</span>
+                              <span className="font-mono truncate">{item.bankAgency}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => copyTextToClipboard(item.bankAgency || '', 'Agência', item.id, 'bank_agency', e)}
+                              className="p-0.5 rounded text-slate-400 hover:text-emerald-600 shrink-0"
+                              title="Copiar Agência"
+                            >
+                              {copiedActionMap[`${item.id}_bank_agency`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                            </button>
+                          </div>
+                        )}
+
+                        {item.bankAccount && (
+                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
+                            <div className="truncate flex items-center gap-1">
+                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">CONTA ({item.bankAccountType || 'Corrente'}):</span>
+                              <span className="font-mono truncate">{item.bankAccount}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => copyTextToClipboard(item.bankAccount || '', 'Conta', item.id, 'bank_account', e)}
+                              className="p-0.5 rounded text-slate-400 hover:text-emerald-600 shrink-0"
+                              title="Copiar Conta"
+                            >
+                              {copiedActionMap[`${item.id}_bank_account`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                            </button>
+                          </div>
+                        )}
+
+                        {item.pixKey && (
+                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
+                            <div className="truncate flex items-center gap-1">
+                              <span className="font-bold text-emerald-600 dark:text-emerald-400 text-[10px]">PIX:</span>
+                              <span className="font-mono truncate">{item.pixKey}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => copyTextToClipboard(item.pixKey || '', 'Chave PIX', item.id, 'pix_key', e)}
+                              className="p-0.5 rounded text-slate-400 hover:text-emerald-600 shrink-0"
+                              title="Copiar Chave PIX"
+                            >
+                              {copiedActionMap[`${item.id}_pix_key`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Specific Fields: Credit Card */}
+                    {item.type === 'credit_card' && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {item.cardBrand && (
+                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
+                            <div className="truncate flex items-center gap-1">
+                              <CreditCard size={12} className="text-indigo-500 shrink-0" />
+                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">BANDEIRA:</span>
+                              <span className="font-mono truncate">{item.cardBrand}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => copyTextToClipboard(item.cardBrand || '', 'Bandeira', item.id, 'card_brand', e)}
+                              className="p-0.5 rounded text-slate-400 hover:text-indigo-600 shrink-0"
+                              title="Copiar Bandeira"
+                            >
+                              {copiedActionMap[`${item.id}_card_brand`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                            </button>
+                          </div>
+                        )}
+
+                        {item.cardNumber && (
+                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
+                            <div className="truncate flex items-center gap-1">
+                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">CARTÃO:</span>
+                              <span className="font-mono truncate">{item.cardNumber}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => copyTextToClipboard(item.cardNumber || '', 'Número do Cartão', item.id, 'card_number', e)}
+                              className="p-0.5 rounded text-slate-400 hover:text-indigo-600 shrink-0"
+                              title="Copiar Número do Cartão"
+                            >
+                              {copiedActionMap[`${item.id}_card_number`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                            </button>
+                          </div>
+                        )}
+
+                        {item.cardExpiry && (
+                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
+                            <div className="truncate flex items-center gap-1">
+                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">VALIDADE / CVV:</span>
+                              <span className="font-mono truncate">{item.cardExpiry} {item.cardCvv ? `(CVV: ${item.cardCvv})` : ''}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => copyTextToClipboard(`${item.cardExpiry || ''} ${item.cardCvv ? `CVV: ${item.cardCvv}` : ''}`, 'Validade e CVV', item.id, 'card_expiry', e)}
+                              className="p-0.5 rounded text-slate-400 hover:text-indigo-600 shrink-0"
+                              title="Copiar Validade & CVV"
+                            >
+                              {copiedActionMap[`${item.id}_card_expiry`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                            </button>
+                          </div>
+                        )}
+
+                        {item.cardDueDay && (
+                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
+                            <div className="truncate flex items-center gap-1">
+                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">VENCIMENTO:</span>
+                              <span className="font-mono truncate">Dia {item.cardDueDay}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => copyTextToClipboard(item.cardDueDay || '', 'Vencimento', item.id, 'card_due', e)}
+                              className="p-0.5 rounded text-slate-400 hover:text-indigo-600 shrink-0"
+                              title="Copiar Dia de Vencimento"
+                            >
+                              {copiedActionMap[`${item.id}_card_due`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -1327,8 +1545,210 @@ export function SecretVaultBlock({
               </div>
             )}
 
+            {/* CASO: CONTA BANCÁRIA & PIX */}
+            {formType === 'bank' && (
+              <div className="space-y-2.5 p-3 rounded-lg border bg-slate-50/50 dark:bg-zinc-950/50">
+                <div className="text-[11px] font-bold uppercase text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                  <Landmark size={13} /> Dados da Conta Bancária & PIX
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                      Banco / Instituição <span className="text-rose-500">*</span>
+                    </label>
+                    <Input
+                      placeholder="Ex: Nubank, Itaú, Bradesco"
+                      value={formBankName}
+                      onChange={(e) => setFormBankName(e.target.value)}
+                      className="text-xs h-8"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                      Tipo de Conta
+                    </label>
+                    <Input
+                      placeholder="Ex: Corrente, Poupança, PJ"
+                      value={formBankAccountType}
+                      onChange={(e) => setFormBankAccountType(e.target.value)}
+                      className="text-xs h-8"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                      Agência
+                    </label>
+                    <Input
+                      placeholder="Ex: 0001"
+                      value={formBankAgency}
+                      onChange={(e) => setFormBankAgency(e.target.value)}
+                      className="font-mono text-xs h-8"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                      Número da Conta
+                    </label>
+                    <Input
+                      placeholder="Ex: 12345-6"
+                      value={formBankAccount}
+                      onChange={(e) => setFormBankAccount(e.target.value)}
+                      className="font-mono text-xs h-8"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                    Chave PIX Principal
+                  </label>
+                  <Input
+                    placeholder="Ex: seu-email@gmail.com, CPF ou CNPJ"
+                    value={formPixKey}
+                    onChange={(e) => setFormPixKey(e.target.value)}
+                    className="font-mono text-xs h-8"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block">
+                      Senha do App / PIN Transacional <span className="text-rose-500">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowDialogPassword(!showDialogPassword)}
+                      className="text-[11px] text-slate-500 hover:text-slate-800 dark:text-zinc-400 flex items-center gap-1"
+                    >
+                      {showDialogPassword ? <EyeOff size={12} /> : <Eye size={12} />}
+                      <span>{showDialogPassword ? 'Ocultar' : 'Visualizar'}</span>
+                    </button>
+                  </div>
+                  <Input
+                    type={showDialogPassword ? 'text' : 'password'}
+                    placeholder="Senha de acesso ou PIN de 4/6 dígitos"
+                    value={formValue}
+                    onChange={(e) => setFormValue(e.target.value)}
+                    className="font-mono text-xs h-8"
+                    required
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* CASO: CARTÃO DE CRÉDITO */}
+            {formType === 'credit_card' && (
+              <div className="space-y-2.5 p-3 rounded-lg border bg-slate-50/50 dark:bg-zinc-950/50">
+                <div className="text-[11px] font-bold uppercase text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+                  <CreditCard size={13} /> Dados do Cartão de Crédito
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                      Bandeira / Emissor <span className="text-rose-500">*</span>
+                    </label>
+                    <Input
+                      placeholder="Ex: Visa Infinite, Mastercard Black"
+                      value={formCardBrand}
+                      onChange={(e) => setFormCardBrand(e.target.value)}
+                      className="text-xs h-8"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                      Nome no Cartão
+                    </label>
+                    <Input
+                      placeholder="Ex: JOAO A SILVA"
+                      value={formCardholderName}
+                      onChange={(e) => setFormCardholderName(e.target.value.toUpperCase())}
+                      className="text-xs h-8 uppercase"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                    Número do Cartão <span className="text-rose-500">*</span>
+                  </label>
+                  <Input
+                    placeholder="Ex: 4532 •••• •••• 8890"
+                    value={formCardNumber}
+                    onChange={(e) => setFormCardNumber(e.target.value)}
+                    className="font-mono text-xs h-8"
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                      Validade
+                    </label>
+                    <Input
+                      placeholder="MM/AA"
+                      value={formCardExpiry}
+                      onChange={(e) => setFormCardExpiry(e.target.value)}
+                      className="font-mono text-xs h-8"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                      CVV
+                    </label>
+                    <Input
+                      placeholder="123"
+                      value={formCardCvv}
+                      onChange={(e) => setFormCardCvv(e.target.value)}
+                      className="font-mono text-xs h-8"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                      Venc. Fatura
+                    </label>
+                    <Input
+                      placeholder="Dia 10"
+                      value={formCardDueDay}
+                      onChange={(e) => setFormCardDueDay(e.target.value)}
+                      className="text-xs h-8"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block">
+                      Senha do Cartão / PIN <span className="text-rose-500">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowDialogPassword(!showDialogPassword)}
+                      className="text-[11px] text-slate-500 hover:text-slate-800 dark:text-zinc-400 flex items-center gap-1"
+                    >
+                      {showDialogPassword ? <EyeOff size={12} /> : <Eye size={12} />}
+                      <span>{showDialogPassword ? 'Ocultar' : 'Visualizar'}</span>
+                    </button>
+                  </div>
+                  <Input
+                    type={showDialogPassword ? 'text' : 'password'}
+                    placeholder="Senha numérica do cartão"
+                    value={formValue}
+                    onChange={(e) => setFormValue(e.target.value)}
+                    className="font-mono text-xs h-8"
+                    required
+                  />
+                </div>
+              </div>
+            )}
+
             {/* CASO 6: TOKEN DE API, JWT, WEBHOOK, ENV VAR, CUSTOM */}
-            {formType !== 'password' && formType !== 'azure_graph' && formType !== 'oauth_api' && formType !== 'db_connection' && formType !== 'ssh_key' && (
+            {formType !== 'password' && formType !== 'azure_graph' && formType !== 'oauth_api' && formType !== 'db_connection' && formType !== 'ssh_key' && formType !== 'bank' && formType !== 'credit_card' && (
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 flex items-center gap-1.5">
