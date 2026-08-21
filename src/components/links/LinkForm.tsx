@@ -209,7 +209,7 @@ export function LinkForm({ open, onOpenChange, editingLink }: LinkFormProps) {
                   }}
                 >
                   <Key className="h-3.5 w-3.5 text-primary" />
-                  <span className="text-xs">Senhas</span>
+                  <span className="text-xs">Credenciais & Chaves</span>
                 </Button>
               )}
             </DialogTitle>

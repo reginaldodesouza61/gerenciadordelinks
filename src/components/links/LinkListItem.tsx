@@ -177,7 +177,7 @@ export function LinkListItem({ link, categoria, subcategoria, onEdit }: LinkList
                     <Pencil className="h-3.5 w-3.5" /> Editar
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={handleCredentialsClick} className={cn("gap-2", hasCredentials && "text-primary")}>
-                    <Key className="h-3.5 w-3.5" /> Senhas
+                    <Key className="h-3.5 w-3.5" /> Credenciais & Chaves
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={handleShare} className="gap-2">
                     <Share2 className="h-3.5 w-3.5" /> Compartilhar

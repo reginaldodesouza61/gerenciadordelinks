@@ -1148,18 +1148,6 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
       {/* Title Header */}
       <div className="px-6 py-4 border-b border-border bg-white dark:bg-zinc-900 z-20 shrink-0 flex flex-col gap-3">
         <div className="flex items-start gap-3 flex-1 min-w-0 w-full">
-          {isSidebarCollapsed && onToggleSidebar && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onToggleSidebar}
-              className="h-8 gap-1.5 px-2.5 text-xs font-semibold text-slate-700 dark:text-zinc-200 border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 shrink-0 rounded-lg shadow-xs mt-0.5"
-              title="Expandir menu lateral de seções e notas"
-            >
-              <PanelLeftOpen size={14} className="text-indigo-600 dark:text-indigo-400" />
-              <span className="hidden sm:inline">Seções</span>
-            </Button>
-          )}
           <div className="flex flex-col w-full min-w-0">
             <input
               className="text-2xl font-bold border-none outline-none w-full bg-transparent placeholder-slate-300 dark:placeholder-zinc-600 text-slate-800 dark:text-zinc-100 truncate"

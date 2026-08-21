@@ -37,16 +37,25 @@ export interface DeletedNoteItem {
 export type BlockType = 'text' | 'script' | 'vault' | 'link' | 'image';
 
 export type SecretType = 
-  | 'api_token' 
-  | 'password' 
-  | 'db_connection' 
-  | 'jwt_secret' 
-  | 'ssh_key' 
-  | 'webhook_secret' 
-  | 'env_var' 
-  | 'custom';
+  | 'password'          // Usuário e Senha tradicional
+  | 'api_token'         // Chave de API / Token Simples
+  | 'oauth_api'         // OAuth 2.0 / Client ID & Secret
+  | 'azure_graph'       // Microsoft Graph / Azure AD (Client ID, Secret, Tenant, Object ID)
+  | 'db_connection'     // Banco de Dados (Host, Porta, Banco, Usuário, Senha)
+  | 'jwt_secret'        // JWT Secret
+  | 'ssh_key'           // Chave SSH / Cert
+  | 'webhook_secret'    // Webhook Secret
+  | 'env_var'           // Variável .ENV
+  | 'custom';           // Personalizado / Geral
 
 export type SecretEnv = 'local' | 'dev' | 'staging' | 'prod' | 'global';
+
+export interface SecretItemCustomField {
+  id: string;
+  name: string;
+  value: string;
+  type?: 'text' | 'password';
+}
 
 export interface SecretItem {
   id: string;
@@ -57,6 +66,22 @@ export interface SecretItem {
   type: SecretType;
   env?: SecretEnv;
   notes?: string;
+  
+  // Specific fields for API / OAuth / Azure
+  clientId?: string;
+  clientSecret?: string;
+  tenantId?: string;
+  objectId?: string;
+  redirectUri?: string;
+
+  // Specific fields for DB
+  dbHost?: string;
+  dbPort?: string;
+  dbName?: string;
+  dbUser?: string;
+
+  // Extra dynamic fields
+  customFields?: SecretItemCustomField[];
 }
 
 export interface CanvasBlock {

@@ -621,17 +621,59 @@ export const useLinkStore = create<LinkState>((set, get) => ({
       if (error) throw error;
       
       const credsMap: Record<string, Credencial> = {};
-      (data as Credencial[]).forEach(cred => {
+      ((data || []) as unknown as Credencial[]).forEach(cred => {
         // Descriptografar senha se estiver criptografada
         if (cred.password && isEncrypted(cred.password)) {
           try {
             cred.password = decryptPassword(cred.password, userId);
           } catch (error) {
             console.error('Error decrypting password for credential:', cred.id);
-            // Manter a senha criptografada se não conseguir descriptografar
           }
         }
-        credsMap[cred.link_id] = cred;
+
+        // Se custom_fields for string JSON ou objeto salvo no notes/custom_fields
+        let parsedCustomFields = cred.custom_fields;
+        if (typeof parsedCustomFields === 'string') {
+          try {
+            parsedCustomFields = JSON.parse(parsedCustomFields);
+          } catch {
+            parsedCustomFields = [];
+          }
+        }
+
+        // Se houver campos em notes codificados como JSON de backup
+        if (cred.notes && cred.notes.startsWith('__CUSTOM_FIELDS_JSON__:')) {
+          try {
+            const raw = cred.notes.replace('__CUSTOM_FIELDS_JSON__:', '');
+            const parsed = JSON.parse(raw);
+            if (!parsedCustomFields || parsedCustomFields.length === 0) {
+              parsedCustomFields = parsed.custom_fields || [];
+            }
+            if (!cred.credential_type && parsed.credential_type) {
+              cred.credential_type = parsed.credential_type;
+            }
+            cred.notes = parsed.notes || '';
+          } catch {
+            // keep default
+          }
+        }
+
+        // Descriptografar campos do tipo password em custom_fields se necessário
+        if (Array.isArray(parsedCustomFields)) {
+          parsedCustomFields = parsedCustomFields.map(f => {
+            if (f.type === 'password' && f.value && isEncrypted(f.value)) {
+              try {
+                return { ...f, value: decryptPassword(f.value, userId) };
+              } catch {
+                return f;
+              }
+            }
+            return f;
+          });
+        }
+
+        cred.custom_fields = parsedCustomFields || [];
+        credsMap[cred.link_id] = cred as Credencial;
       });
       
       set({ credenciais: credsMap });
@@ -647,30 +689,61 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     set({ loading: true });
     
     try {
+      // Processar custom_fields criptografando campos confidenciais
+      const processedCustomFields = credencial.custom_fields || [];
+      const encryptedCustomFields = processedCustomFields.map(f => {
+        if (f.type === 'password' && f.value) {
+          return { ...f, value: encryptPassword(f.value, credencial.user_id) };
+        }
+        return f;
+      });
+
       // Criptografar a senha antes de salvar
-      const encryptedCredential = {
+      const encryptedCredential: Record<string, unknown> = {
         ...credencial,
         password: credencial.password ? encryptPassword(credencial.password, credencial.user_id) : null,
+        custom_fields: encryptedCustomFields,
         id: uuidv4(),
         created_at: new Date().toISOString()
       };
       
-      const { error } = await supabase
+      let { error } = await supabase
         .from('credenciais')
         .insert([encryptedCredential]);
         
+      // Se a coluna custom_fields ou credential_type não existir no schema Supabase, fazemos fallback transparente usando prefixo em notes
+      if (error && (error.message?.includes('custom_fields') || error.message?.includes('credential_type') || error.code === '42703' || error.message?.includes('column'))) {
+        console.warn('Fallback: storing custom fields & type in notes metadata');
+        const fallbackCredential = {
+          ...encryptedCredential,
+          custom_fields: undefined,
+          credential_type: undefined,
+          notes: `__CUSTOM_FIELDS_JSON__:${JSON.stringify({
+            notes: credencial.notes || '',
+            credential_type: credencial.credential_type || 'login',
+            custom_fields: encryptedCustomFields
+          })}`
+        };
+        delete fallbackCredential.custom_fields;
+        delete fallbackCredential.credential_type;
+        const res = await supabase.from('credenciais').insert([fallbackCredential]);
+        error = res.error;
+      }
+
       if (error) throw error;
       
-      // Manter a senha descriptografada no estado local
-      const localCredential = {
-        ...encryptedCredential,
-        password: credencial.password // Senha original para o estado local
+      // Manter a senha e custom_fields descriptografados no estado local
+      const localCredential: Credencial = {
+        ...credencial,
+        id: encryptedCredential.id,
+        created_at: encryptedCredential.created_at,
+        custom_fields: processedCustomFields
       };
       
       set(state => ({ 
         credenciais: { 
           ...state.credenciais, 
-          [credencial.link_id]: localCredential as Credencial 
+          [credencial.link_id]: localCredential 
         } 
       }));
       
@@ -692,23 +765,58 @@ export const useLinkStore = create<LinkState>((set, get) => ({
       if (!currentCredential) {
         throw new Error('Credencial não encontrada');
       }
+
+      const userId = currentCredential.user_id;
+
+      // Processar custom_fields criptografando campos confidenciais
+      const processedCustomFields = credencialData.custom_fields !== undefined 
+        ? credencialData.custom_fields 
+        : currentCredential.custom_fields;
+
+      const encryptedCustomFields = processedCustomFields?.map(f => {
+        if (f.type === 'password' && f.value) {
+          return { ...f, value: encryptPassword(f.value, userId) };
+        }
+        return f;
+      }) || [];
       
       // Criptografar a senha se foi fornecida
-      const encryptedData = {
+      const encryptedData: Record<string, unknown> = {
         ...credencialData,
-        password: credencialData.password ? encryptPassword(credencialData.password, currentCredential.user_id) : credencialData.password
+        password: credencialData.password ? encryptPassword(credencialData.password, userId) : credencialData.password,
+        custom_fields: encryptedCustomFields
       };
       
-      const { error } = await supabase
+      let { error } = await supabase
         .from('credenciais')
         .update(encryptedData)
         .eq('id', id);
         
+      // Fallback se a coluna custom_fields ou credential_type não existir
+      if (error && (error.message?.includes('custom_fields') || error.message?.includes('credential_type') || error.code === '42703' || error.message?.includes('column'))) {
+        console.warn('Fallback: updating custom fields in notes metadata');
+        const fallbackData = {
+          ...encryptedData,
+          custom_fields: undefined,
+          credential_type: undefined,
+          notes: `__CUSTOM_FIELDS_JSON__:${JSON.stringify({
+            notes: credencialData.notes !== undefined ? credencialData.notes : (currentCredential.notes || ''),
+            credential_type: credencialData.credential_type || currentCredential.credential_type || 'login',
+            custom_fields: encryptedCustomFields
+          })}`
+        };
+        delete fallbackData.custom_fields;
+        delete fallbackData.credential_type;
+        const res = await supabase.from('credenciais').update(fallbackData).eq('id', id);
+        error = res.error;
+      }
+
       if (error) throw error;
       
-      // Manter a senha descriptografada no estado local
+      // Manter os dados descriptografados no estado local
       const localData = {
-        ...credencialData // Dados originais para o estado local
+        ...credencialData,
+        custom_fields: processedCustomFields
       };
       
       set(state => {

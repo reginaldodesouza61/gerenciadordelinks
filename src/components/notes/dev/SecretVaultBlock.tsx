@@ -1,11 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { Rnd } from 'react-rnd';
-import { CanvasBlock, SecretItem, SecretType, SecretEnv } from '@/types/notes';
-import { useAuthStore } from '@/lib/store/authStore';
+import { CanvasBlock, SecretItem, SecretType, SecretEnv, SecretItemCustomField } from '@/types/notes';
 import { 
   ShieldCheck, Lock, KeyRound, Eye, EyeOff, Copy, Check, 
   Plus, Trash2, GripHorizontal, Terminal,
-  ExternalLink, Edit3, Save, User, Globe, Share2, FileText, ChevronDown
+  ExternalLink, Edit3, Save, User, Globe, Share2, ChevronDown,
+  Cloud, Code2, Database as DatabaseIcon, Server, RefreshCw
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,16 +13,19 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { toast } from 'sonner';
+import { generatePassword } from '@/lib/utils/passwordUtils';
 
-const SECRET_TYPES: { id: SecretType; label: string; color: string }[] = [
-  { id: 'password', label: 'Senha', color: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800' },
-  { id: 'api_token', label: 'Token de API', color: 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' },
-  { id: 'db_connection', label: 'Conexão DB / URL', color: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' },
-  { id: 'jwt_secret', label: 'JWT Secret', color: 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800' },
-  { id: 'ssh_key', label: 'Chave SSH / Cert', color: 'bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border-cyan-200 dark:border-cyan-800' },
-  { id: 'webhook_secret', label: 'Webhook Secret', color: 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800' },
-  { id: 'env_var', label: 'Variável .ENV', color: 'bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-300 dark:border-zinc-700' },
-  { id: 'custom', label: 'Credencial Geral', color: 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800' },
+const SECRET_TYPES: { id: SecretType; label: string; icon: React.ElementType; color: string }[] = [
+  { id: 'password', label: 'Senha (Usuário & Senha)', icon: Lock, color: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800' },
+  { id: 'azure_graph', label: 'Microsoft Graph / Azure AD', icon: Cloud, color: 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800' },
+  { id: 'oauth_api', label: 'OAuth 2.0 / API Rest', icon: Code2, color: 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800' },
+  { id: 'api_token', label: 'Token de API / API Key', icon: KeyRound, color: 'bg-violet-50 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border-violet-200 dark:border-violet-800' },
+  { id: 'db_connection', label: 'Banco de Dados (DB)', icon: DatabaseIcon, color: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' },
+  { id: 'ssh_key', label: 'Chave SSH / Servidor', icon: Server, color: 'bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border-cyan-200 dark:border-cyan-800' },
+  { id: 'jwt_secret', label: 'JWT Secret', icon: KeyRound, color: 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800' },
+  { id: 'webhook_secret', label: 'Webhook Secret', icon: Code2, color: 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800' },
+  { id: 'env_var', label: 'Variável .ENV', icon: Terminal, color: 'bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-300 dark:border-zinc-700' },
+  { id: 'custom', label: 'Personalizado', icon: ShieldCheck, color: 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800' },
 ];
 
 const ENVIRONMENTS: { id: SecretEnv; label: string; badge: string }[] = [
@@ -48,7 +51,6 @@ export function SecretVaultBlock({
   isSelected,
   setSelectedId,
 }: SecretVaultBlockProps) {
-  const { user } = useAuthStore();
   const [revealedIds, setRevealedIds] = useState<Record<string, boolean>>({});
   const [copiedActionMap, setCopiedActionMap] = useState<Record<string, string>>({});
   const [isCopiedAll, setIsCopiedAll] = useState(false);
@@ -58,14 +60,30 @@ export function SecretVaultBlock({
   // Add/Edit Dialog state
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<SecretItem | null>(null);
+
+  // Form State
+  const [formType, setFormType] = useState<SecretType>('password'); // Default to Senha
   const [formKey, setFormKey] = useState('');
   const [formUsername, setFormUsername] = useState('');
   const [formValue, setFormValue] = useState('');
   const [formUrl, setFormUrl] = useState('');
-  const [formType, setFormType] = useState<SecretType>('password'); // Default to Senha (Password)
   const [formEnv, setFormEnv] = useState<SecretEnv>('prod');
   const [formNotes, setFormNotes] = useState('');
   const [showDialogPassword, setShowDialogPassword] = useState(false);
+
+  // Specific dynamic fields
+  const [formClientId, setFormClientId] = useState('');
+  const [formClientSecret, setFormClientSecret] = useState('');
+  const [formTenantId, setFormTenantId] = useState('');
+  const [formObjectId, setFormObjectId] = useState('');
+  const [formRedirectUri, setFormRedirectUri] = useState('');
+
+  const [formDbHost, setFormDbHost] = useState('');
+  const [formDbPort, setFormDbPort] = useState('');
+  const [formDbName, setFormDbName] = useState('');
+  const [formDbUser, setFormDbUser] = useState('');
+
+  const [formCustomFields, setFormCustomFields] = useState<SecretItemCustomField[]>([]);
 
   const secrets: SecretItem[] = useMemo(() => {
     if (block.secrets && Array.isArray(block.secrets)) {
@@ -88,22 +106,36 @@ export function SecretVaultBlock({
     const envLabel = ENVIRONMENTS.find(e => e.id === item.env)?.label || item.env || 'Produção';
     
     const lines: string[] = [
-      `🔐 Serviço / Identificador: ${item.key}`,
+      `🔐 Serviço: ${item.key}`,
+      `📌 Tipo: ${typeLabel}`,
+      `🏷️ Ambiente: ${envLabel}`
     ];
 
-    if (item.url) {
-      lines.push(`🌐 Link / Acesso: ${item.url}`);
+    if (item.url) lines.push(`🌐 Link / URL: ${item.url}`);
+    if (item.username) lines.push(`👤 Usuário / Login: ${item.username}`);
+    if (item.value) lines.push(`🔑 Senha / Valor: ${item.value}`);
+
+    // Azure / OAuth fields
+    if (item.clientId) lines.push(`🆔 Client ID: ${item.clientId}`);
+    if (item.clientSecret) lines.push(`🔒 Client Secret: ${item.clientSecret}`);
+    if (item.tenantId) lines.push(`🏢 Tenant ID: ${item.tenantId}`);
+    if (item.objectId) lines.push(`📦 Object ID: ${item.objectId}`);
+    if (item.redirectUri) lines.push(`🔄 Redirect URI: ${item.redirectUri}`);
+
+    // Database fields
+    if (item.dbHost) lines.push(`🖥️ Host: ${item.dbHost}${item.dbPort ? `:${item.dbPort}` : ''}`);
+    if (item.dbName) lines.push(`🗄️ Database: ${item.dbName}`);
+    if (item.dbUser) lines.push(`👤 DB User: ${item.dbUser}`);
+
+    // Custom fields
+    if (item.customFields && item.customFields.length > 0) {
+      item.customFields.forEach(cf => {
+        if (cf.name && cf.value) {
+          lines.push(`⚙️ ${cf.name}: ${cf.value}`);
+        }
+      });
     }
 
-    if (item.username) {
-      lines.push(`👤 Usuário / Login: ${item.username}`);
-    }
-
-    lines.push(`🔑 Senha / Valor: ${item.value}`);
-    lines.push(`📌 Tipo: ${typeLabel}`);
-    if (item.env) {
-      lines.push(`🏷️ Ambiente: ${envLabel}`);
-    }
     if (item.notes) {
       lines.push(`📝 Observações: ${item.notes}`);
     }
@@ -123,41 +155,14 @@ export function SecretVaultBlock({
     }, 2000);
   };
 
-  // Copy secret value only
-  const handleCopySecretValue = async (item: SecretItem, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const copyTextToClipboard = async (text: string, label: string, itemId: string, actionKey: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
     try {
-      await navigator.clipboard.writeText(item.value);
-      triggerCopiedFeedback(item.id, 'value');
-      toast.success(`Senha de "${item.key}" copiada!`);
+      await navigator.clipboard.writeText(text);
+      triggerCopiedFeedback(itemId, actionKey);
+      toast.success(`${label} copiado!`);
     } catch {
-      toast.error('Erro ao copiar senha');
-    }
-  };
-
-  // Copy username only
-  const handleCopyUsername = async (item: SecretItem, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!item.username) return;
-    try {
-      await navigator.clipboard.writeText(item.username);
-      triggerCopiedFeedback(item.id, 'username');
-      toast.success(`Usuário "${item.username}" copiado!`);
-    } catch {
-      toast.error('Erro ao copiar usuário');
-    }
-  };
-
-  // Copy link only
-  const handleCopyLink = async (item: SecretItem, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!item.url) return;
-    try {
-      await navigator.clipboard.writeText(item.url);
-      triggerCopiedFeedback(item.id, 'url');
-      toast.success(`Link de "${item.key}" copiado!`);
-    } catch {
-      toast.error('Erro ao copiar link');
+      toast.error(`Erro ao copiar ${label.toLowerCase()}`);
     }
   };
 
@@ -209,20 +214,45 @@ export function SecretVaultBlock({
         .map(item => {
           const formattedKey = item.key.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
           const lines: string[] = [];
-          if (item.username) {
-            lines.push(`${formattedKey}_USER="${item.username}"`);
+          
+          if (item.type === 'azure_graph') {
+            if (item.clientId) lines.push(`${formattedKey}_CLIENT_ID="${item.clientId}"`);
+            if (item.clientSecret || item.value) lines.push(`${formattedKey}_CLIENT_SECRET="${item.clientSecret || item.value}"`);
+            if (item.tenantId) lines.push(`${formattedKey}_TENANT_ID="${item.tenantId}"`);
+            if (item.objectId) lines.push(`${formattedKey}_OBJECT_ID="${item.objectId}"`);
+          } else if (item.type === 'oauth_api') {
+            if (item.clientId) lines.push(`${formattedKey}_CLIENT_ID="${item.clientId}"`);
+            if (item.clientSecret || item.value) lines.push(`${formattedKey}_CLIENT_SECRET="${item.clientSecret || item.value}"`);
+            if (item.redirectUri) lines.push(`${formattedKey}_REDIRECT_URI="${item.redirectUri}"`);
+          } else if (item.type === 'db_connection') {
+            if (item.dbHost) lines.push(`${formattedKey}_HOST="${item.dbHost}"`);
+            if (item.dbPort) lines.push(`${formattedKey}_PORT="${item.dbPort}"`);
+            if (item.dbName) lines.push(`${formattedKey}_DATABASE="${item.dbName}"`);
+            if (item.dbUser || item.username) lines.push(`${formattedKey}_USER="${item.dbUser || item.username}"`);
+            if (item.value) lines.push(`${formattedKey}_PASSWORD="${item.value}"`);
+          } else {
+            if (item.username) lines.push(`${formattedKey}_USER="${item.username}"`);
+            if (item.value) lines.push(`${formattedKey}_PASS="${item.value}"`);
+            if (item.url) lines.push(`${formattedKey}_URL="${item.url}"`);
           }
-          lines.push(`${formattedKey}_PASS="${item.value}"`);
-          if (item.url) {
-            lines.push(`${formattedKey}_URL="${item.url}"`);
+
+          if (item.customFields) {
+            item.customFields.forEach(cf => {
+              if (cf.name && cf.value) {
+                const cfKey = cf.name.toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+                lines.push(`${formattedKey}_${cfKey}="${cf.value}"`);
+              }
+            });
           }
+
           return lines.join('\n');
         })
+        .filter(Boolean)
         .join('\n\n');
 
       await navigator.clipboard.writeText(envText);
       setIsCopiedEnv(true);
-      toast.success(`${secrets.length} credenciais copiadas no formato .env!`);
+      toast.success(`${secrets.length} credenciais exportadas como .env!`);
       setTimeout(() => setIsCopiedEnv(false), 2000);
     } catch {
       toast.error('Erro ao copiar formato .env');
@@ -240,6 +270,16 @@ export function SecretVaultBlock({
     setFormType('password'); // Default is Senha
     setFormEnv('prod');
     setFormNotes('');
+    setFormClientId('');
+    setFormClientSecret('');
+    setFormTenantId('');
+    setFormObjectId('');
+    setFormRedirectUri('');
+    setFormDbHost('');
+    setFormDbPort('');
+    setFormDbName('');
+    setFormDbUser('');
+    setFormCustomFields([]);
     setShowDialogPassword(false);
     setIsDialogOpen(true);
   };
@@ -249,11 +289,21 @@ export function SecretVaultBlock({
     setEditingItem(item);
     setFormKey(item.key);
     setFormUsername(item.username || '');
-    setFormValue(item.value);
+    setFormValue(item.value || '');
     setFormUrl(item.url || '');
     setFormType(item.type || 'password');
     setFormEnv(item.env || 'prod');
     setFormNotes(item.notes || '');
+    setFormClientId(item.clientId || '');
+    setFormClientSecret(item.clientSecret || '');
+    setFormTenantId(item.tenantId || '');
+    setFormObjectId(item.objectId || '');
+    setFormRedirectUri(item.redirectUri || '');
+    setFormDbHost(item.dbHost || '');
+    setFormDbPort(item.dbPort || '');
+    setFormDbName(item.dbName || '');
+    setFormDbUser(item.dbUser || '');
+    setFormCustomFields(item.customFields || []);
     setShowDialogPassword(false);
     setIsDialogOpen(true);
   };
@@ -266,11 +316,43 @@ export function SecretVaultBlock({
     return `sec_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   };
 
+  // Add Custom Field
+  const handleAddCustomField = () => {
+    setFormCustomFields(prev => [
+      ...prev,
+      {
+        id: `cf_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        name: '',
+        value: '',
+        type: 'text'
+      }
+    ]);
+  };
+
+  const handleUpdateCustomField = (id: string, updates: Partial<SecretItemCustomField>) => {
+    setFormCustomFields(prev => prev.map(cf => cf.id === id ? { ...cf, ...updates } : cf));
+  };
+
+  const handleRemoveCustomField = (id: string) => {
+    setFormCustomFields(prev => prev.filter(cf => cf.id !== id));
+  };
+
+  const handleGenerateRandomPass = () => {
+    const newPass = generatePassword(16, { uppercase: true, lowercase: true, numbers: true, symbols: true });
+    setFormValue(newPass);
+    if (formType === 'azure_graph' || formType === 'oauth_api') {
+      setFormClientSecret(newPass);
+    }
+    setShowDialogPassword(true);
+    toast.success('Senha forte gerada!');
+  };
+
   // Save secret item
   const handleSaveItem = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!formKey.trim() || !formValue.trim()) {
-      toast.error('Preencha o nome do serviço/chave e a senha/valor.');
+    
+    if (!formKey.trim()) {
+      toast.error('Preencha o nome do serviço ou chave.');
       return;
     }
 
@@ -280,34 +362,47 @@ export function SecretVaultBlock({
       cleanUrl = `https://${cleanUrl}`;
     }
 
+    // Determine primary secret value based on credential type
+    let primarySecretValue = formValue.trim();
+    if (formType === 'azure_graph') {
+      primarySecretValue = formClientSecret.trim() || formValue.trim() || ' ';
+    } else if (formType === 'oauth_api') {
+      primarySecretValue = formClientSecret.trim() || formValue.trim() || ' ';
+    }
+
+    const cleanCustom = formCustomFields.filter(cf => cf.name.trim() !== '');
+
     let updatedSecrets: SecretItem[];
+
+    const itemData: Omit<SecretItem, 'id'> = {
+      key: formKey.trim(),
+      username: (formType === 'db_connection' ? (formDbUser.trim() || formUsername.trim()) : formUsername.trim()) || undefined,
+      value: primarySecretValue,
+      url: cleanUrl || undefined,
+      type: formType,
+      env: formEnv,
+      notes: formNotes.trim() || undefined,
+      clientId: formClientId.trim() || undefined,
+      clientSecret: (formClientSecret.trim() || formValue.trim()) || undefined,
+      tenantId: formTenantId.trim() || undefined,
+      objectId: formObjectId.trim() || undefined,
+      redirectUri: formRedirectUri.trim() || undefined,
+      dbHost: formDbHost.trim() || undefined,
+      dbPort: formDbPort.trim() || undefined,
+      dbName: formDbName.trim() || undefined,
+      dbUser: formDbUser.trim() || undefined,
+      customFields: cleanCustom.length > 0 ? cleanCustom : undefined,
+    };
 
     if (editingItem) {
       updatedSecrets = secrets.map((s) =>
-        s.id === editingItem.id
-          ? {
-              ...s,
-              key: formKey.trim(),
-              username: formUsername.trim() || undefined,
-              value: formValue.trim(),
-              url: cleanUrl || undefined,
-              type: formType,
-              env: formEnv,
-              notes: formNotes.trim() || undefined,
-            }
-          : s
+        s.id === editingItem.id ? { ...s, ...itemData } : s
       );
       toast.success('Credencial atualizada com sucesso!');
     } else {
       const newItem: SecretItem = {
         id: generateId(),
-        key: formKey.trim(),
-        username: formUsername.trim() || undefined,
-        value: formValue.trim(),
-        url: cleanUrl || undefined,
-        type: formType,
-        env: formEnv,
-        notes: formNotes.trim() || undefined,
+        ...itemData
       };
       updatedSecrets = [...secrets, newItem];
       toast.success('Credencial adicionada ao cofre!');
@@ -316,10 +411,6 @@ export function SecretVaultBlock({
     updateBlock(block.id, { secrets: updatedSecrets });
     setIsDialogOpen(false);
     setEditingItem(null);
-    setFormKey('');
-    setFormUsername('');
-    setFormValue('');
-    setFormUrl('');
   };
 
   // Delete secret item
@@ -333,7 +424,7 @@ export function SecretVaultBlock({
   return (
     <>
       <Rnd
-        size={{ width: block.width || 520, height: block.height || 360 }}
+        size={{ width: block.width || 540, height: block.height || 380 }}
         position={{ x: block.x, y: block.y }}
         onDragStop={(_, d) => updateBlock(block.id, { x: d.x, y: d.y })}
         onResizeStop={(_, __, ref, ___, position) => {
@@ -418,7 +509,7 @@ export function SecretVaultBlock({
                       <Share2 size={13} className="text-amber-600 dark:text-amber-400 shrink-0" />
                       <div>
                         <div className="font-semibold text-slate-800 dark:text-zinc-100">Copiar Todas as Info</div>
-                        <div className="text-[10px] text-slate-500 dark:text-zinc-400 font-normal">Serviço, Link, Usuário e Senha</div>
+                        <div className="text-[10px] text-slate-500 dark:text-zinc-400 font-normal">Serviço, Link, Chaves e Senhas</div>
                       </div>
                     </button>
 
@@ -448,54 +539,53 @@ export function SecretVaultBlock({
                 <span>Adicionar</span>
               </Button>
 
-              {/* Delete Vault Block */}
+              {/* Remove Block Button */}
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   removeBlock(block.id);
                 }}
-                className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors ml-0.5"
-                title="Excluir este cofre de credenciais"
+                className="p-1 text-slate-400 hover:text-rose-500 rounded transition-colors"
+                title="Remover cofre"
               >
                 <Trash2 size={13} />
               </button>
             </div>
           </div>
 
-          {/* Secrets List Area */}
-          <div className="flex-1 p-3 overflow-y-auto space-y-2.5 bg-[#fcfcfd] dark:bg-zinc-950">
+          {/* Secrets List Container */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-2.5 select-text">
             {secrets.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center p-4">
-                <div className="w-10 h-10 rounded-full bg-amber-50 dark:bg-amber-950/60 text-amber-500 flex items-center justify-center mb-2">
-                  <KeyRound size={20} />
+              <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400 dark:text-zinc-500 space-y-2 select-none">
+                <div className="p-3 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-500 border border-amber-200 dark:border-amber-800/40">
+                  <KeyRound size={24} />
                 </div>
-                <p className="text-xs font-semibold text-slate-700 dark:text-zinc-200">Nenhuma credencial ou senha cadastrada</p>
-                <p className="text-[11px] text-slate-400 dark:text-zinc-500 mt-0.5 max-w-[280px]">
-                  Guarde links de acesso, contas de usuário, senhas e tokens com cópia rápida em 1 clique.
+                <div className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                  Cofre vazio
+                </div>
+                <p className="text-[11px] max-w-[260px] text-slate-500 dark:text-zinc-400">
+                  Guarde senhas, credenciais Graph API, chaves OAuth, tokens de API e conexões com total segurança.
                 </p>
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={openAddModal}
-                  className="mt-3 h-7 text-xs border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 gap-1 font-medium"
+                  className="mt-1 h-7 text-xs border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/40 gap-1 font-medium"
                 >
-                  <Plus size={13} /> Adicionar primeira credencial
+                  <Plus size={12} />
+                  <span>Cadastrar Primeira Credencial</span>
                 </Button>
               </div>
             ) : (
               secrets.map((item) => {
-                const isRevealed = !!revealedIds[item.id];
-                const isCopiedValue = copiedActionMap[`${item.id}_value`] === 'copied';
-                const isCopiedUser = copiedActionMap[`${item.id}_username`] === 'copied';
-                const isCopiedLink = copiedActionMap[`${item.id}_url`] === 'copied';
+                const isRevealed = revealedIds[item.id] || false;
                 const isCopiedAllItem = copiedActionMap[`${item.id}_all`] === 'copied';
-
-                const typeConfig = SECRET_TYPES.find(t => t.id === item.type) || SECRET_TYPES[0];
-                const envConfig = ENVIRONMENTS.find(e => e.id === item.env) || ENVIRONMENTS[0];
+                const typeConfig = SECRET_TYPES.find((t) => t.id === item.type) || SECRET_TYPES[0];
+                const envConfig = ENVIRONMENTS.find((e) => e.id === item.env) || ENVIRONMENTS[0];
 
                 return (
-                  <div 
+                  <div
                     key={item.id}
                     className="p-3 rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-slate-300 dark:hover:border-zinc-700 shadow-xs flex flex-col gap-2 transition-all group/item"
                   >
@@ -530,7 +620,7 @@ export function SecretVaultBlock({
                               ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 font-bold'
                               : 'bg-slate-50 dark:bg-zinc-800/80 border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-amber-50 dark:hover:bg-amber-950/40 hover:text-amber-800 dark:hover:text-amber-300 hover:border-amber-300'
                           }`}
-                          title="Copiar todas as informações desta credencial (Serviço, Link, Usuário e Senha)"
+                          title="Copiar todas as informações desta credencial"
                         >
                           {isCopiedAllItem ? <Check size={11} className="text-emerald-600" /> : <Share2 size={11} className="text-amber-600 dark:text-amber-400" />}
                           <span>{isCopiedAllItem ? 'Copiado!' : 'Copiar Tudo'}</span>
@@ -579,53 +669,162 @@ export function SecretVaultBlock({
 
                         <button
                           type="button"
-                          onClick={(e) => handleCopyLink(item, e)}
+                          onClick={(e) => copyTextToClipboard(item.url || '', 'Link', item.id, 'url', e)}
                           className="p-0.5 rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 hover:bg-slate-200/60 dark:hover:bg-zinc-700 shrink-0"
-                          title="Copiar URL do serviço"
+                          title="Copiar URL"
                         >
-                          {isCopiedLink ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                          {copiedActionMap[`${item.id}_url`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
                         </button>
                       </div>
                     )}
 
-                    {/* Username / Login (if provided) */}
-                    {item.username && (
+                    {/* Specific Fields: Azure Graph / OAuth */}
+                    {(item.type === 'azure_graph' || item.type === 'oauth_api') && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {item.clientId && (
+                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
+                            <div className="truncate flex items-center gap-1">
+                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">CLIENT ID:</span>
+                              <span className="font-mono truncate">{item.clientId}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => copyTextToClipboard(item.clientId || '', 'Client ID', item.id, 'client_id', e)}
+                              className="p-0.5 rounded text-slate-400 hover:text-indigo-600 shrink-0"
+                              title="Copiar Client ID"
+                            >
+                              {copiedActionMap[`${item.id}_client_id`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                            </button>
+                          </div>
+                        )}
+
+                        {item.tenantId && (
+                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
+                            <div className="truncate flex items-center gap-1">
+                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">TENANT ID:</span>
+                              <span className="font-mono truncate">{item.tenantId}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => copyTextToClipboard(item.tenantId || '', 'Tenant ID', item.id, 'tenant_id', e)}
+                              className="p-0.5 rounded text-slate-400 hover:text-indigo-600 shrink-0"
+                              title="Copiar Tenant ID"
+                            >
+                              {copiedActionMap[`${item.id}_tenant_id`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                            </button>
+                          </div>
+                        )}
+
+                        {item.objectId && (
+                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
+                            <div className="truncate flex items-center gap-1">
+                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">OBJECT ID:</span>
+                              <span className="font-mono truncate">{item.objectId}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => copyTextToClipboard(item.objectId || '', 'Object ID', item.id, 'object_id', e)}
+                              className="p-0.5 rounded text-slate-400 hover:text-indigo-600 shrink-0"
+                              title="Copiar Object ID"
+                            >
+                              {copiedActionMap[`${item.id}_object_id`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                            </button>
+                          </div>
+                        )}
+
+                        {item.redirectUri && (
+                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
+                            <div className="truncate flex items-center gap-1">
+                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">REDIRECT:</span>
+                              <span className="font-mono truncate">{item.redirectUri}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => copyTextToClipboard(item.redirectUri || '', 'Redirect URI', item.id, 'redirect_uri', e)}
+                              className="p-0.5 rounded text-slate-400 hover:text-indigo-600 shrink-0"
+                              title="Copiar Redirect URI"
+                            >
+                              {copiedActionMap[`${item.id}_redirect_uri`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Specific Fields: Database Connection */}
+                    {item.type === 'db_connection' && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {item.dbHost && (
+                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
+                            <div className="truncate flex items-center gap-1">
+                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">HOST:</span>
+                              <span className="font-mono truncate">{item.dbHost}{item.dbPort ? `:${item.dbPort}` : ''}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => copyTextToClipboard(item.dbHost || '', 'Host', item.id, 'db_host', e)}
+                              className="p-0.5 rounded text-slate-400 hover:text-emerald-600 shrink-0"
+                              title="Copiar Host"
+                            >
+                              {copiedActionMap[`${item.id}_db_host`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                            </button>
+                          </div>
+                        )}
+
+                        {item.dbName && (
+                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
+                            <div className="truncate flex items-center gap-1">
+                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">DATABASE:</span>
+                              <span className="font-mono truncate">{item.dbName}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => copyTextToClipboard(item.dbName || '', 'Banco de Dados', item.id, 'db_name', e)}
+                              className="p-0.5 rounded text-slate-400 hover:text-emerald-600 shrink-0"
+                              title="Copiar Nome do Banco"
+                            >
+                              {copiedActionMap[`${item.id}_db_name`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Username / Login (if provided for standard login / ssh / db) */}
+                    {(item.username || item.dbUser) && (
                       <div className="flex items-center justify-between gap-2 px-2.5 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
                         <div className="flex items-center gap-1.5 min-w-0 text-slate-700 dark:text-zinc-200 truncate">
                           <User size={12} className="text-indigo-500 shrink-0" />
                           <span className="text-slate-400 dark:text-zinc-500 font-medium shrink-0">Usuário:</span>
-                          <span className="font-mono font-medium truncate select-all">{item.username}</span>
+                          <span className="font-mono font-medium truncate select-all">{item.username || item.dbUser}</span>
                         </div>
 
                         <button
                           type="button"
-                          onClick={(e) => handleCopyUsername(item, e)}
-                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono flex items-center gap-1 shrink-0 transition-colors ${
-                            isCopiedUser
-                              ? 'bg-emerald-100 text-emerald-700 font-bold dark:bg-emerald-950 dark:text-emerald-300'
-                              : 'text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-slate-200/60 dark:hover:bg-zinc-700'
-                          }`}
-                          title="Copiar nome de usuário"
+                          onClick={(e) => copyTextToClipboard(item.username || item.dbUser || '', 'Usuário', item.id, 'username', e)}
+                          className="p-0.5 rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 hover:bg-slate-200/60 dark:hover:bg-zinc-700 shrink-0"
+                          title="Copiar usuário"
                         >
-                          {isCopiedUser ? <Check size={10} className="text-emerald-600" /> : <Copy size={10} />}
-                          <span>{isCopiedUser ? 'Copiado' : 'Copiar'}</span>
+                          {copiedActionMap[`${item.id}_username`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
                         </button>
                       </div>
                     )}
 
-                    {/* Password / Token Bar (Masked / Revealed + Copy Password) */}
+                    {/* Password / Secret / Key Bar */}
                     <div className="flex items-center gap-1 bg-slate-900 dark:bg-black rounded-md px-2.5 py-1.5 text-slate-200 font-mono text-xs shadow-inner">
                       <div className="flex items-center gap-1.5 shrink-0 text-slate-400 text-[10px] select-none font-sans font-semibold">
                         <KeyRound size={11} className="text-amber-400" />
-                        <span>Senha:</span>
+                        <span>
+                          {item.type === 'azure_graph' || item.type === 'oauth_api' ? 'Secret:' : item.type === 'api_token' ? 'Token:' : 'Senha:'}
+                        </span>
                       </div>
 
                       <div className="flex-1 overflow-hidden select-all font-mono px-1">
                         {isRevealed ? (
-                          <span className="text-emerald-400 break-all select-all font-medium">{item.value}</span>
+                          <span className="text-emerald-400 break-all select-all font-medium">{item.clientSecret || item.value}</span>
                         ) : (
                           <span className="text-slate-400 tracking-widest select-none">
-                            {'•'.repeat(Math.min(24, Math.max(10, item.value.length)))}
+                            {'•'.repeat(Math.min(24, Math.max(10, (item.clientSecret || item.value || '').length)))}
                           </span>
                         )}
                       </div>
@@ -643,18 +842,40 @@ export function SecretVaultBlock({
                       {/* Copy Secret Button */}
                       <button
                         type="button"
-                        onClick={(e) => handleCopySecretValue(item, e)}
+                        onClick={(e) => copyTextToClipboard(item.clientSecret || item.value || '', 'Senha/Segredo', item.id, 'value', e)}
                         className={`px-1.5 py-0.5 rounded text-[11px] font-mono flex items-center gap-1 shrink-0 transition-colors ${
-                          isCopiedValue 
+                          copiedActionMap[`${item.id}_value`] === 'copied'
                             ? 'bg-emerald-600 text-white font-bold' 
                             : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
                         }`}
-                        title="Copiar apenas a senha/token"
+                        title="Copiar valor secreto"
                       >
-                        {isCopiedValue ? <Check size={11} /> : <Copy size={11} />}
-                        <span>{isCopiedValue ? 'Copiado!' : 'Copiar'}</span>
+                        {copiedActionMap[`${item.id}_value`] === 'copied' ? <Check size={11} /> : <Copy size={11} />}
+                        <span>{copiedActionMap[`${item.id}_value`] === 'copied' ? 'Copiado!' : 'Copiar'}</span>
                       </button>
                     </div>
+
+                    {/* Custom dynamic fields */}
+                    {item.customFields && item.customFields.length > 0 && (
+                      <div className="space-y-1 pt-1 border-t border-slate-100 dark:border-zinc-800">
+                        {item.customFields.map((cf) => (
+                          <div key={cf.id} className="flex items-center justify-between gap-1.5 px-2 py-0.5 rounded bg-slate-50 dark:bg-zinc-800/40 text-[11px]">
+                            <div className="truncate flex items-center gap-1">
+                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px] uppercase">{cf.name}:</span>
+                              <span className="font-mono truncate">{cf.value}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => copyTextToClipboard(cf.value, cf.name, item.id, cf.id, e)}
+                              className="p-0.5 rounded text-slate-400 hover:text-indigo-600 shrink-0"
+                              title={`Copiar ${cf.name}`}
+                            >
+                              {copiedActionMap[`${item.id}_${cf.id}`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
                     {/* Notes if any */}
                     {item.notes && (
@@ -681,97 +902,28 @@ export function SecretVaultBlock({
         </div>
       </Rnd>
 
-      {/* Add / Edit Secret Dialog */}
+      {/* Add / Edit Secret Dialog - DYNAMIC FORM */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-md bg-white dark:bg-zinc-900 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-base text-slate-800 dark:text-zinc-100">
-              <div className="p-1.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+        <DialogContent className="max-w-md max-h-[90vh] flex flex-col p-0 gap-0 overflow-hidden bg-white dark:bg-zinc-900 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800">
+          <DialogHeader className="p-4 pb-3 border-b bg-slate-50/60 dark:bg-zinc-950/60">
+            <DialogTitle className="flex items-center gap-2 text-base text-slate-800 dark:text-zinc-100 font-bold">
+              <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
                 <KeyRound size={16} />
               </div>
               <span>{editingItem ? 'Editar Credencial' : 'Adicionar Credencial'}</span>
             </DialogTitle>
           </DialogHeader>
 
-          <form onSubmit={handleSaveItem} className="space-y-3 py-1">
-            {/* Service Name / Key */}
-            <div>
-              <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
-                Serviço / Nome da Chave <span className="text-rose-500">*</span>
-              </label>
-              <Input
-                placeholder="Ex: GitHub, Banco Postgres, AWS Console, E-mail Corporativo"
-                value={formKey}
-                onChange={(e) => setFormKey(e.target.value)}
-                className="text-xs"
-                autoFocus
-                required
-              />
-            </div>
-
-            {/* Service Link / URL (Item 2) */}
-            <div>
-              <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 flex items-center gap-1.5 mb-1">
-                <Globe size={13} className="text-sky-500" />
-                <span>Link / URL do Serviço (Opcional)</span>
-              </label>
-              <Input
-                type="text"
-                placeholder="Ex: https://app.servico.com/login"
-                value={formUrl}
-                onChange={(e) => setFormUrl(e.target.value)}
-                className="text-xs"
-              />
-            </div>
-
-            {/* Username / E-mail (Item 1) */}
-            <div>
-              <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 flex items-center gap-1.5 mb-1">
-                <User size={13} className="text-indigo-500" />
-                <span>Nome de Usuário / E-mail / Login</span>
-              </label>
-              <Input
-                placeholder="Ex: admin@empresa.com, dev_user, root"
-                value={formUsername}
-                onChange={(e) => setFormUsername(e.target.value)}
-                className="text-xs"
-              />
-            </div>
-
-            {/* Secret Value / Password */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 flex items-center gap-1.5">
-                  <Lock size={13} className="text-amber-500" />
-                  <span>Senha / Token / Valor Secreto <span className="text-rose-500">*</span></span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setShowDialogPassword(!showDialogPassword)}
-                  className="text-[11px] text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200 flex items-center gap-1"
-                >
-                  {showDialogPassword ? <EyeOff size={12} /> : <Eye size={12} />}
-                  <span>{showDialogPassword ? 'Ocultar' : 'Visualizar'}</span>
-                </button>
-              </div>
-              <Input
-                type={showDialogPassword ? 'text' : 'password'}
-                placeholder="Ex: SuaSenhaForte@2026 ou sk-proj-xxxxxxxx..."
-                value={formValue}
-                onChange={(e) => setFormValue(e.target.value)}
-                className="font-mono text-xs"
-                required
-              />
-            </div>
-
-            {/* Type & Environment Row (Default Type is Senha) */}
-            <div className="grid grid-cols-2 gap-3">
+          <form onSubmit={handleSaveItem} className="flex-1 overflow-y-auto p-4 space-y-3.5">
+            
+            {/* Tipo de Credencial & Ambiente */}
+            <div className="grid grid-cols-2 gap-2.5 p-2.5 rounded-lg bg-slate-50 dark:bg-zinc-950 border border-slate-100 dark:border-zinc-800">
               <div>
-                <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                <label className="text-xs font-bold text-slate-700 dark:text-zinc-200 block mb-1">
                   Tipo de Credencial
                 </label>
                 <Select value={formType} onValueChange={(val) => setFormType(val as SecretType)}>
-                  <SelectTrigger className="text-xs">
+                  <SelectTrigger className="text-xs h-8 bg-white dark:bg-zinc-900">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -785,11 +937,11 @@ export function SecretVaultBlock({
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                <label className="text-xs font-bold text-slate-700 dark:text-zinc-200 block mb-1">
                   Ambiente
                 </label>
                 <Select value={formEnv} onValueChange={(val) => setFormEnv(val as SecretEnv)}>
-                  <SelectTrigger className="text-xs">
+                  <SelectTrigger className="text-xs h-8 bg-white dark:bg-zinc-900">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -803,6 +955,449 @@ export function SecretVaultBlock({
               </div>
             </div>
 
+            {/* Serviço / Nome da Chave */}
+            <div>
+              <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                Serviço / Nome da Chave <span className="text-rose-500">*</span>
+              </label>
+              <Input
+                placeholder={
+                  formType === 'azure_graph' ? 'Ex: Microsoft Graph API / Azure App'
+                  : formType === 'oauth_api' ? 'Ex: Google OAuth / Stripe API'
+                  : formType === 'db_connection' ? 'Ex: Banco Postgres Produção / MySQL'
+                  : formType === 'api_token' ? 'Ex: OpenAI API Key / SendGrid'
+                  : formType === 'ssh_key' ? 'Ex: Servidor AWS EC2 / VPS'
+                  : formType === 'env_var' ? 'Ex: DATABASE_URL / NEXT_PUBLIC_API'
+                  : 'Ex: GitHub, Painel Admin, Netflix, E-mail'
+                }
+                value={formKey}
+                onChange={(e) => setFormKey(e.target.value)}
+                className="text-xs h-8"
+                autoFocus
+                required
+              />
+            </div>
+
+            {/* Link / URL do Serviço */}
+            {formType !== 'env_var' && (
+              <div>
+                <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 flex items-center gap-1.5 mb-1">
+                  <Globe size={13} className="text-sky-500" />
+                  <span>Link / URL de Acesso (Opcional)</span>
+                </label>
+                <Input
+                  type="text"
+                  placeholder="Ex: https://portal.azure.com ou https://app.servico.com/login"
+                  value={formUrl}
+                  onChange={(e) => setFormUrl(e.target.value)}
+                  className="text-xs h-8"
+                />
+              </div>
+            )}
+
+            {/* CASO 1: SENHA (Usuário e Senha tradicional) */}
+            {formType === 'password' && (
+              <>
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 flex items-center gap-1.5 mb-1">
+                    <User size={13} className="text-indigo-500" />
+                    <span>Nome de Usuário / E-mail / Login</span>
+                  </label>
+                  <Input
+                    placeholder="Ex: admin@empresa.com, dev_user, root"
+                    value={formUsername}
+                    onChange={(e) => setFormUsername(e.target.value)}
+                    className="text-xs h-8"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 flex items-center gap-1.5">
+                      <Lock size={13} className="text-amber-500" />
+                      <span>Senha <span className="text-rose-500">*</span></span>
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleGenerateRandomPass}
+                        className="text-[11px] text-amber-600 hover:text-amber-700 dark:text-amber-400 flex items-center gap-1"
+                        title="Gerar senha segura"
+                      >
+                        <RefreshCw size={11} /> Gerar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowDialogPassword(!showDialogPassword)}
+                        className="text-[11px] text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200 flex items-center gap-1"
+                      >
+                        {showDialogPassword ? <EyeOff size={12} /> : <Eye size={12} />}
+                        <span>{showDialogPassword ? 'Ocultar' : 'Visualizar'}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <Input
+                    type={showDialogPassword ? 'text' : 'password'}
+                    placeholder="Ex: SuaSenhaForte@2026"
+                    value={formValue}
+                    onChange={(e) => setFormValue(e.target.value)}
+                    className="font-mono text-xs h-8"
+                    required
+                  />
+                </div>
+              </>
+            )}
+
+            {/* CASO 2: MICROSOFT GRAPH / AZURE AD */}
+            {formType === 'azure_graph' && (
+              <div className="space-y-2.5 p-3 rounded-lg border bg-slate-50/50 dark:bg-zinc-950/50">
+                <div className="text-[11px] font-bold uppercase text-sky-600 dark:text-sky-400 flex items-center gap-1">
+                  <Cloud size={13} /> Parâmetros Microsoft Graph / Azure
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                    CLIENT ID (ID do Aplicativo) <span className="text-rose-500">*</span>
+                  </label>
+                  <Input
+                    placeholder="Ex: 00000000-0000-0000-0000-000000000000"
+                    value={formClientId}
+                    onChange={(e) => setFormClientId(e.target.value)}
+                    className="font-mono text-xs h-8"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block">
+                      CLIENT SECRET (Valor do Segredo) <span className="text-rose-500">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowDialogPassword(!showDialogPassword)}
+                      className="text-[11px] text-slate-500 hover:text-slate-800 dark:text-zinc-400 flex items-center gap-1"
+                    >
+                      {showDialogPassword ? <EyeOff size={12} /> : <Eye size={12} />}
+                      <span>{showDialogPassword ? 'Ocultar' : 'Visualizar'}</span>
+                    </button>
+                  </div>
+                  <Input
+                    type={showDialogPassword ? 'text' : 'password'}
+                    placeholder="Ex: ~xxxxxxxxxxxxxxxxxxxxxxxx"
+                    value={formClientSecret || formValue}
+                    onChange={(e) => {
+                      setFormClientSecret(e.target.value);
+                      setFormValue(e.target.value);
+                    }}
+                    className="font-mono text-xs h-8"
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                      TENANT ID (ID do Diretório)
+                    </label>
+                    <Input
+                      placeholder="Ex: 11111111-1111-1111-1111-111111111111"
+                      value={formTenantId}
+                      onChange={(e) => setFormTenantId(e.target.value)}
+                      className="font-mono text-xs h-8"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                      OBJECT ID (ID do Objeto)
+                    </label>
+                    <Input
+                      placeholder="Ex: 22222222-2222-2222-2222-222222222222"
+                      value={formObjectId}
+                      onChange={(e) => setFormObjectId(e.target.value)}
+                      className="font-mono text-xs h-8"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* CASO 3: OAUTH 2.0 / API REST */}
+            {formType === 'oauth_api' && (
+              <div className="space-y-2.5 p-3 rounded-lg border bg-slate-50/50 dark:bg-zinc-950/50">
+                <div className="text-[11px] font-bold uppercase text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+                  <Code2 size={13} /> Parâmetros OAuth 2.0 / API
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                    CLIENT ID <span className="text-rose-500">*</span>
+                  </label>
+                  <Input
+                    placeholder="Ex: 123456789.apps.googleusercontent.com"
+                    value={formClientId}
+                    onChange={(e) => setFormClientId(e.target.value)}
+                    className="font-mono text-xs h-8"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block">
+                      CLIENT SECRET <span className="text-rose-500">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowDialogPassword(!showDialogPassword)}
+                      className="text-[11px] text-slate-500 hover:text-slate-800 dark:text-zinc-400 flex items-center gap-1"
+                    >
+                      {showDialogPassword ? <EyeOff size={12} /> : <Eye size={12} />}
+                      <span>{showDialogPassword ? 'Ocultar' : 'Visualizar'}</span>
+                    </button>
+                  </div>
+                  <Input
+                    type={showDialogPassword ? 'text' : 'password'}
+                    placeholder="Ex: GOCSPX-xxxxxxxxxxxxxxxxxxxx"
+                    value={formClientSecret || formValue}
+                    onChange={(e) => {
+                      setFormClientSecret(e.target.value);
+                      setFormValue(e.target.value);
+                    }}
+                    className="font-mono text-xs h-8"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                    REDIRECT URI (URL de Callback)
+                  </label>
+                  <Input
+                    placeholder="Ex: https://meusite.com/api/auth/callback"
+                    value={formRedirectUri}
+                    onChange={(e) => setFormRedirectUri(e.target.value)}
+                    className="font-mono text-xs h-8"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* CASO 4: BANCO DE DADOS (DB CONNECTION) */}
+            {formType === 'db_connection' && (
+              <div className="space-y-2.5 p-3 rounded-lg border bg-slate-50/50 dark:bg-zinc-950/50">
+                <div className="text-[11px] font-bold uppercase text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                  <DatabaseIcon size={13} /> Conexão de Banco de Dados
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-2">
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                      Host / Servidor
+                    </label>
+                    <Input
+                      placeholder="Ex: db.empresa.com ou 127.0.0.1"
+                      value={formDbHost}
+                      onChange={(e) => setFormDbHost(e.target.value)}
+                      className="font-mono text-xs h-8"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                      Porta
+                    </label>
+                    <Input
+                      placeholder="5432 / 3306"
+                      value={formDbPort}
+                      onChange={(e) => setFormDbPort(e.target.value)}
+                      className="font-mono text-xs h-8"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                      Database Name
+                    </label>
+                    <Input
+                      placeholder="Ex: postgres / producao"
+                      value={formDbName}
+                      onChange={(e) => setFormDbName(e.target.value)}
+                      className="font-mono text-xs h-8"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                      DB User (Usuário)
+                    </label>
+                    <Input
+                      placeholder="Ex: postgres / admin"
+                      value={formDbUser}
+                      onChange={(e) => setFormDbUser(e.target.value)}
+                      className="font-mono text-xs h-8"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block">
+                      DB Password (Senha) <span className="text-rose-500">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowDialogPassword(!showDialogPassword)}
+                      className="text-[11px] text-slate-500 hover:text-slate-800 dark:text-zinc-400 flex items-center gap-1"
+                    >
+                      {showDialogPassword ? <EyeOff size={12} /> : <Eye size={12} />}
+                      <span>{showDialogPassword ? 'Ocultar' : 'Visualizar'}</span>
+                    </button>
+                  </div>
+                  <Input
+                    type={showDialogPassword ? 'text' : 'password'}
+                    placeholder="Senha de acesso ao banco"
+                    value={formValue}
+                    onChange={(e) => setFormValue(e.target.value)}
+                    className="font-mono text-xs h-8"
+                    required
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* CASO 5: CHAVE SSH / SERVIDOR */}
+            {formType === 'ssh_key' && (
+              <div className="space-y-2.5 p-3 rounded-lg border bg-slate-50/50 dark:bg-zinc-950/50">
+                <div className="text-[11px] font-bold uppercase text-cyan-600 dark:text-cyan-400 flex items-center gap-1">
+                  <Server size={13} /> Acesso SSH / Servidor
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                      Usuário SSH
+                    </label>
+                    <Input
+                      placeholder="Ex: root / ubuntu / ec2-user"
+                      value={formUsername}
+                      onChange={(e) => setFormUsername(e.target.value)}
+                      className="font-mono text-xs h-8"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                      Porta SSH
+                    </label>
+                    <Input
+                      placeholder="Ex: 22"
+                      value={formDbPort}
+                      onChange={(e) => setFormDbPort(e.target.value)}
+                      className="font-mono text-xs h-8"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block">
+                      Senha / Passphrase / Chave <span className="text-rose-500">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowDialogPassword(!showDialogPassword)}
+                      className="text-[11px] text-slate-500 hover:text-slate-800 dark:text-zinc-400 flex items-center gap-1"
+                    >
+                      {showDialogPassword ? <EyeOff size={12} /> : <Eye size={12} />}
+                      <span>{showDialogPassword ? 'Ocultar' : 'Visualizar'}</span>
+                    </button>
+                  </div>
+                  <Input
+                    type={showDialogPassword ? 'text' : 'password'}
+                    placeholder="Chave ou senha de autenticação"
+                    value={formValue}
+                    onChange={(e) => setFormValue(e.target.value)}
+                    className="font-mono text-xs h-8"
+                    required
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* CASO 6: TOKEN DE API, JWT, WEBHOOK, ENV VAR, CUSTOM */}
+            {formType !== 'password' && formType !== 'azure_graph' && formType !== 'oauth_api' && formType !== 'db_connection' && formType !== 'ssh_key' && (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 flex items-center gap-1.5">
+                    <KeyRound size={13} className="text-amber-500" />
+                    <span>
+                      {formType === 'api_token' ? 'Token de API / Chave Secreta' : formType === 'env_var' ? 'Valor da Variável' : 'Valor Secreto'} <span className="text-rose-500">*</span>
+                    </span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowDialogPassword(!showDialogPassword)}
+                    className="text-[11px] text-slate-500 hover:text-slate-800 dark:text-zinc-400 flex items-center gap-1"
+                  >
+                    {showDialogPassword ? <EyeOff size={12} /> : <Eye size={12} />}
+                    <span>{showDialogPassword ? 'Ocultar' : 'Visualizar'}</span>
+                  </button>
+                </div>
+                <Input
+                  type={showDialogPassword ? 'text' : 'password'}
+                  placeholder="Ex: sk-proj-xxxxxxxx ou Bearer eyJhbGci..."
+                  value={formValue}
+                  onChange={(e) => setFormValue(e.target.value)}
+                  className="font-mono text-xs h-8"
+                  required
+                />
+              </div>
+            )}
+
+            {/* Campos Customizados Dinâmicos Extras */}
+            <div className="pt-2 border-t border-slate-100 dark:border-zinc-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-700 dark:text-zinc-300">
+                  Campos Personalizados Extras
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAddCustomField}
+                  className="h-6 text-[11px] px-2 gap-1"
+                >
+                  <Plus size={11} /> Campo
+                </Button>
+              </div>
+
+              {formCustomFields.map((cf) => (
+                <div key={cf.id} className="flex items-center gap-1.5 p-1.5 rounded-lg border bg-slate-50/50 dark:bg-zinc-950/50">
+                  <Input
+                    placeholder="Nome (ex: REGION, PORT)"
+                    value={cf.name}
+                    onChange={(e) => handleUpdateCustomField(cf.id, { name: e.target.value })}
+                    className="h-7 text-xs uppercase font-bold w-1/3 bg-white dark:bg-zinc-900"
+                  />
+                  <Input
+                    placeholder="Valor do campo"
+                    value={cf.value}
+                    onChange={(e) => handleUpdateCustomField(cf.id, { value: e.target.value })}
+                    className="h-7 text-xs font-mono flex-1 bg-white dark:bg-zinc-900"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleRemoveCustomField(cf.id)}
+                    className="h-7 w-7 text-slate-400 hover:text-rose-500 shrink-0"
+                  >
+                    <Trash2 size={12} />
+                  </Button>
+                </div>
+              ))}
+            </div>
+
             {/* Notes / Description */}
             <div>
               <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
@@ -812,7 +1407,7 @@ export function SecretVaultBlock({
                 placeholder="Ex: Requer 2FA via Authy, rotacionar a cada 90 dias"
                 value={formNotes}
                 onChange={(e) => setFormNotes(e.target.value)}
-                className="text-xs"
+                className="text-xs h-8"
               />
             </div>
 
@@ -822,14 +1417,14 @@ export function SecretVaultBlock({
                 variant="outline" 
                 size="sm" 
                 onClick={() => setIsDialogOpen(false)}
-                className="text-xs"
+                className="text-xs h-8"
               >
                 Cancelar
               </Button>
               <Button 
                 type="submit" 
                 size="sm" 
-                className="bg-amber-600 hover:bg-amber-700 text-white gap-1 text-xs font-medium"
+                className="bg-amber-600 hover:bg-amber-700 text-white gap-1 text-xs font-medium h-8"
               >
                 <Save size={14} /> Salvar Credencial
               </Button>
