@@ -67,14 +67,14 @@ export const useLinkStore = create<LinkState>((set, get) => ({
   subcategorias: [],
   credenciais: {},
   loading: false,
-  viewMode: 'lista',
+  viewMode: (localStorage.getItem('meuhub_link_view_mode') as 'lista' | 'cartoes') || 'lista',
   searchQuery: '',
   searchResults: [],
-  selectedCategoryId: null,
-  selectedSubcategoryId: null,
+  selectedCategoryId: localStorage.getItem('meuhub_selected_cat_id') || null,
+  selectedSubcategoryId: localStorage.getItem('meuhub_selected_subcat_id') || null,
   favoriteIds: JSON.parse(localStorage.getItem('favoriteLinks') || '[]'),
   recentIds: JSON.parse(localStorage.getItem('recentLinks') || '[]'),
-  activeFilter: 'all',
+  activeFilter: (localStorage.getItem('meuhub_active_filter') as 'all' | 'favorites' | 'recent') || 'all',
   
   fetchLinks: async (userId: string) => {
     set({ loading: true });
@@ -457,6 +457,11 @@ export const useLinkStore = create<LinkState>((set, get) => ({
   },
   
   setViewMode: (mode) => {
+    try {
+      localStorage.setItem('meuhub_link_view_mode', mode);
+    } catch (e) {
+      console.debug('Failed to save link view mode', e);
+    }
     set({ viewMode: mode });
   },
   
@@ -465,6 +470,24 @@ export const useLinkStore = create<LinkState>((set, get) => ({
   },
   
   setSelectedCategoryId: (categoryId) => {
+    if (categoryId) {
+      try {
+        localStorage.setItem('meuhub_selected_cat_id', categoryId);
+      } catch (e) {
+        console.debug('Failed to save category id', e);
+      }
+    } else {
+      try {
+        localStorage.removeItem('meuhub_selected_cat_id');
+      } catch (e) {
+        console.debug('Failed to remove category id', e);
+      }
+    }
+    try {
+      localStorage.removeItem('meuhub_selected_subcat_id');
+    } catch (e) {
+      console.debug('Failed to remove subcategory id', e);
+    }
     set({ 
       selectedCategoryId: categoryId,
       // Clear subcategory selection when changing category
@@ -473,10 +496,28 @@ export const useLinkStore = create<LinkState>((set, get) => ({
   },
   
   setSelectedSubcategoryId: (subcategoryId) => {
+    if (subcategoryId) {
+      try {
+        localStorage.setItem('meuhub_selected_subcat_id', subcategoryId);
+      } catch (e) {
+        console.debug('Failed to save subcategory id', e);
+      }
+    } else {
+      try {
+        localStorage.removeItem('meuhub_selected_subcat_id');
+      } catch (e) {
+        console.debug('Failed to remove subcategory id', e);
+      }
+    }
     set({ selectedSubcategoryId: subcategoryId });
   },
   
   setActiveFilter: (filter) => {
+    try {
+      localStorage.setItem('meuhub_active_filter', filter);
+    } catch (e) {
+      console.debug('Failed to save active filter', e);
+    }
     set({ activeFilter: filter });
   },
   

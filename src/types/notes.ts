@@ -2,6 +2,7 @@ export interface NoteSection {
   id: string;
   nome: string;
   user_id: string;
+  ordem?: number;
   created_at: string;
 }
 
@@ -20,6 +21,17 @@ export interface NoteLinkRelation {
   note_id: string;
   link_id: string;
   user_id: string;
+}
+
+export interface DeletedNoteItem {
+  id: string;
+  type: 'page' | 'section';
+  title: string;
+  deletedAt: string;
+  pageData?: NotePage;
+  subpages?: NotePage[];
+  sectionData?: NoteSection;
+  sectionPages?: NotePage[];
 }
 
 export type BlockType = 'text' | 'script' | 'vault' | 'link' | 'image';

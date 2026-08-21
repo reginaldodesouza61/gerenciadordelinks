@@ -10,7 +10,7 @@ import {
   Strikethrough, List, ListOrdered, AlignLeft, AlignCenter, AlignRight, AlignJustify,
   Highlighter, Palette, TableProperties, Plus, ChevronRight, Combine,
   Code2, ShieldCheck, Link as LinkIcon, Type, Terminal, KeyRound, Sparkles, Wand2,
-  Camera, Image as ImageIcon, Upload, Download, Copy, ChevronDown
+  Camera, Image as ImageIcon, Upload, Download, Copy, ChevronDown, Undo2, Redo2
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -225,6 +225,28 @@ function GlobalToolbar({
       <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('bulletList') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleBulletList().run(); }} title="Lista com Marcadores"><List size={14} /></Button>
       <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('orderedList') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleOrderedList().run(); }} title="Lista Numerada"><ListOrdered size={14} /></Button>
       
+      <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
+
+      {/* Undo / Redo */}
+      <Button 
+        variant="ghost" 
+        size="icon" 
+        className="h-7 w-7 text-slate-600 dark:text-zinc-300 hover:text-slate-900" 
+        onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().undo().run(); }} 
+        title="Desfazer (Ctrl+Z)"
+      >
+        <Undo2 size={14} />
+      </Button>
+      <Button 
+        variant="ghost" 
+        size="icon" 
+        className="h-7 w-7 text-slate-600 dark:text-zinc-300 hover:text-slate-900" 
+        onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().redo().run(); }} 
+        title="Refazer (Ctrl+Y)"
+      >
+        <Redo2 size={14} />
+      </Button>
+
       <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
 
       {/* Table Insert */}
@@ -810,6 +832,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   };
 
   const removeBlock = (id: string) => {
+    const blockToRemove = blocks.find((b) => b.id === id);
     const updated = blocks.filter((b) => b.id !== id);
     setBlocks(updated);
     const json = JSON.stringify(updated);
@@ -818,6 +841,24 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
     if (selectedBlockId === id) {
       setSelectedBlockId(null);
       setActiveEditor(null);
+    }
+    if (blockToRemove && !isBlockEmpty(blockToRemove)) {
+      toast('Bloco removido', {
+        duration: 7000,
+        action: {
+          label: 'Desfazer',
+          onClick: () => {
+            setBlocks((prev) => {
+              const restored = [...prev, blockToRemove];
+              const restoredJson = JSON.stringify(restored);
+              lastSavedContentRef.current = restoredJson;
+              updatePage(pageId, { conteudo: restoredJson });
+              return restored;
+            });
+            toast.success('Bloco restaurado!');
+          },
+        },
+      });
     }
   };
 

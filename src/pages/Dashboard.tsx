@@ -14,7 +14,24 @@ export default function Dashboard() {
   const { fetchCategorias, fetchSubcategorias, fetchCredenciais } = useLinkStore();
   const { user } = useAuthStore();
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'links' | 'notes'>('links');
+  const [activeTab, setActiveTab] = useState<'links' | 'notes'>(() => {
+    try {
+      const saved = localStorage.getItem('meuhub_active_tab');
+      if (saved === 'notes' || saved === 'links') return saved;
+    } catch (err) {
+      console.warn('Failed to read active tab from localStorage', err);
+    }
+    return 'links';
+  });
+
+  const handleTabChange = (tab: 'links' | 'notes') => {
+    setActiveTab(tab);
+    try {
+      localStorage.setItem('meuhub_active_tab', tab);
+    } catch (err) {
+      console.warn('Failed to save active tab to localStorage', err);
+    }
+  };
   
   useEffect(() => {
     fetchCategorias();
@@ -41,7 +58,7 @@ export default function Dashboard() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-zinc-950 text-foreground transition-colors duration-200">
-      <Header activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Header activeTab={activeTab} setActiveTab={handleTabChange} />
       
       {/* Mobile sidebar toggle button (Only for Links view) */}
       {activeTab === 'links' && (
