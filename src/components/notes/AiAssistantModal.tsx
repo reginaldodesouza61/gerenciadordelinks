@@ -14,8 +14,10 @@ import {
 import { toast } from 'sonner';
 
 interface AiAssistantModalProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  open?: boolean;
+  isOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  onClose?: () => void;
   noteTitle?: string;
   selectedText?: string;
   fullBlockText?: string;
@@ -70,13 +72,22 @@ const AI_ACTIONS = [
 
 export function AiAssistantModal({
   open,
+  isOpen,
   onOpenChange,
+  onClose,
   noteTitle = '',
   selectedText = '',
   fullBlockText = '',
   onApplyContent,
   onOpenSettings,
 }: AiAssistantModalProps) {
+  const isModalOpen = open !== undefined ? open : (isOpen ?? false);
+
+  const handleClose = () => {
+    if (onOpenChange) onOpenChange(false);
+    if (onClose) onClose();
+  };
+
   const [hasKey, setHasKey] = useState(false);
   const [selectedAction, setSelectedAction] = useState<AiActionType>('improve_text');
   const [customPrompt, setCustomPrompt] = useState('');
@@ -87,13 +98,13 @@ export function AiAssistantModal({
   const contextText = selectedText || fullBlockText || '';
 
   useEffect(() => {
-    if (open) {
+    if (isModalOpen) {
       const key = getGeminiApiKey();
       setHasKey(Boolean(key));
       setGeneratedHtml('');
       setCustomPrompt('');
     }
-  }, [open]);
+  }, [isModalOpen]);
 
   // Handle generation
   const handleExecute = async (actionToRun?: AiActionType) => {
@@ -137,7 +148,7 @@ export function AiAssistantModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={isModalOpen} onOpenChange={(val) => { if (!val) handleClose(); }}>
       <DialogContent className="max-w-3xl bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 text-slate-800 dark:text-zinc-100 p-0 overflow-hidden shadow-2xl max-h-[90vh] flex flex-col">
         <DialogHeader className="px-6 pt-5 pb-4 border-b border-slate-100 dark:border-zinc-800 shrink-0">
           <div className="flex items-center justify-between">
@@ -162,7 +173,7 @@ export function AiAssistantModal({
               variant="ghost"
               size="sm"
               onClick={() => {
-                onOpenChange(false);
+                handleClose();
                 onOpenSettings();
               }}
               className="text-xs h-8 gap-1 text-slate-500 hover:text-slate-900 dark:hover:text-zinc-100"
@@ -189,7 +200,7 @@ export function AiAssistantModal({
                 <Button
                   size="sm"
                   onClick={() => {
-                    onOpenChange(false);
+                    handleClose();
                     onOpenSettings();
                   }}
                   className="h-8 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white mt-1 gap-1.5"
@@ -360,7 +371,7 @@ export function AiAssistantModal({
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => onOpenChange(false)}
+            onClick={handleClose}
             className="text-xs"
           >
             Fechar
@@ -374,7 +385,7 @@ export function AiAssistantModal({
                 size="sm"
                 onClick={() => {
                   onApplyContent(generatedHtml, 'append');
-                  onOpenChange(false);
+                  handleClose();
                   toast.success('Novo bloco inserido na nota!');
                 }}
                 className="h-9 text-xs font-semibold gap-1.5 border-slate-200 dark:border-zinc-700"
@@ -388,7 +399,7 @@ export function AiAssistantModal({
                 size="sm"
                 onClick={() => {
                   onApplyContent(generatedHtml, 'replace');
-                  onOpenChange(false);
+                  handleClose();
                   toast.success('Bloco atual atualizado!');
                 }}
                 className="h-9 text-xs font-bold gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs"
