@@ -126,6 +126,7 @@ export interface SecretItem {
   bankAccount?: string;
   bankAccountType?: string;
   pixKey?: string;
+  transactionPassword?: string;
 
   // Specific fields for Credit Card
   cardholderName?: string;

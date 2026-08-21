@@ -92,6 +92,7 @@ export function SecretVaultBlock({
   const [formBankAccount, setFormBankAccount] = useState('');
   const [formBankAccountType, setFormBankAccountType] = useState('Corrente');
   const [formPixKey, setFormPixKey] = useState('');
+  const [formTransactionPassword, setFormTransactionPassword] = useState('');
 
   // Credit Card fields
   const [formCardholderName, setFormCardholderName] = useState('');
@@ -151,6 +152,7 @@ export function SecretVaultBlock({
     if (item.bankAgency) lines.push(`🏢 Agência: ${item.bankAgency}`);
     if (item.bankAccount) lines.push(`💳 Conta: ${item.bankAccount}${item.bankAccountType ? ` (${item.bankAccountType})` : ''}`);
     if (item.pixKey) lines.push(`💠 Chave PIX: ${item.pixKey}`);
+    if (item.transactionPassword) lines.push(`🔒 Senha de Transação: ${item.transactionPassword}`);
 
     // Credit Card fields
     if (item.cardBrand) lines.push(`💳 Bandeira: ${item.cardBrand}`);
@@ -318,6 +320,7 @@ export function SecretVaultBlock({
     setFormBankAccount('');
     setFormBankAccountType('Corrente');
     setFormPixKey('');
+    setFormTransactionPassword('');
     setFormCardholderName('');
     setFormCardNumber('');
     setFormCardExpiry('');
@@ -354,6 +357,7 @@ export function SecretVaultBlock({
     setFormBankAccount(item.bankAccount || '');
     setFormBankAccountType(item.bankAccountType || 'Corrente');
     setFormPixKey(item.pixKey || '');
+    setFormTransactionPassword(item.transactionPassword || '');
     setFormCardholderName(item.cardholderName || '');
     setFormCardNumber(item.cardNumber || '');
     setFormCardExpiry(item.cardExpiry || '');
@@ -454,6 +458,7 @@ export function SecretVaultBlock({
       bankAccount: formBankAccount.trim() || undefined,
       bankAccountType: formBankAccountType.trim() || undefined,
       pixKey: formPixKey.trim() || undefined,
+      transactionPassword: formTransactionPassword.trim() || undefined,
       cardholderName: formCardholderName.trim() || undefined,
       cardNumber: formCardNumber.trim() || undefined,
       cardExpiry: formCardExpiry.trim() || undefined,
@@ -820,6 +825,39 @@ export function SecretVaultBlock({
                             >
                               {copiedActionMap[`${item.id}_pix_key`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
                             </button>
+                          </div>
+                        )}
+
+                        {item.transactionPassword && (
+                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px] col-span-full">
+                            <div className="truncate flex items-center gap-1.5">
+                              <Lock size={12} className="text-emerald-500 shrink-0" />
+                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">SENHA DE TRANSAÇÃO:</span>
+                              <span className="font-mono truncate">
+                                {revealedIds[`${item.id}_tx`] ? item.transactionPassword : '••••••••'}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setRevealedIds(prev => ({ ...prev, [`${item.id}_tx`]: !prev[`${item.id}_tx`] }));
+                                }}
+                                className="p-0.5 rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200"
+                                title={revealedIds[`${item.id}_tx`] ? "Ocultar" : "Revelar"}
+                              >
+                                {revealedIds[`${item.id}_tx`] ? <EyeOff size={11} /> : <Eye size={11} />}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => copyTextToClipboard(item.transactionPassword || '', 'Senha de Transação', item.id, 'tx_password', e)}
+                                className="p-0.5 rounded text-slate-400 hover:text-emerald-600"
+                                title="Copiar Senha de Transação"
+                              >
+                                {copiedActionMap[`${item.id}_tx_password`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1617,7 +1655,7 @@ export function SecretVaultBlock({
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block">
-                      Senha do App / PIN Transacional <span className="text-rose-500">*</span>
+                      Senha do App / Login <span className="text-rose-500">*</span>
                     </label>
                     <button
                       type="button"
@@ -1630,11 +1668,24 @@ export function SecretVaultBlock({
                   </div>
                   <Input
                     type={showDialogPassword ? 'text' : 'password'}
-                    placeholder="Senha de acesso ou PIN de 4/6 dígitos"
+                    placeholder="Senha de acesso ao aplicativo do banco"
                     value={formValue}
                     onChange={(e) => setFormValue(e.target.value)}
                     className="font-mono text-xs h-8"
                     required
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                    Senha de Transação / PIN (PIX/TED)
+                  </label>
+                  <Input
+                    type={showDialogPassword ? 'text' : 'password'}
+                    placeholder="PIN de 4/6 dígitos ou senha de confirmação de TED/PIX"
+                    value={formTransactionPassword}
+                    onChange={(e) => setFormTransactionPassword(e.target.value)}
+                    className="font-mono text-xs h-8"
                   />
                 </div>
               </div>
