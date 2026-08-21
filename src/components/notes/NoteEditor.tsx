@@ -9,7 +9,7 @@ import {
   MousePointer2, GripHorizontal, Trash2, Bold, Italic, Underline as UnderlineIcon,
   Strikethrough, List, ListOrdered, AlignLeft, AlignCenter, AlignRight, AlignJustify,
   Highlighter, Palette, TableProperties, Plus, ChevronRight, Combine,
-  Code2, ShieldCheck, Link as LinkIcon, Type, Terminal, KeyRound
+  Code2, ShieldCheck, Link as LinkIcon, Type, Terminal, KeyRound, Sparkles, Wand2
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -19,6 +19,8 @@ import { SecretVaultBlock } from './dev/SecretVaultBlock';
 import { LinkCardBlock } from './dev/LinkCardBlock';
 import { InsertLinkModal } from './dev/InsertLinkModal';
 import { RelatedLinksDrawer } from './dev/RelatedLinksDrawer';
+import { AiAssistantModal } from './AiAssistantModal';
+import { SettingsModal } from '@/components/settings/SettingsModal';
 
 import { EditorContent, useEditor, Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -66,7 +68,13 @@ function isBlockEmpty(block: CanvasBlock): boolean {
   return text.length === 0;
 }
 
-function GlobalToolbar({ editor }: { editor: Editor | null }) {
+function GlobalToolbar({ 
+  editor, 
+  onOpenAi 
+}: { 
+  editor: Editor | null; 
+  onOpenAi?: () => void;
+}) {
   if (!editor) {
     return (
       <div className="border-b border-slate-200 dark:border-zinc-800 w-full shrink-0"></div>
@@ -216,6 +224,23 @@ function GlobalToolbar({ editor }: { editor: Editor | null }) {
 
       {/* Table Insert */}
       <TablePicker onSelect={(rows, cols) => editor.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run()} />
+
+      {/* Gemini AI Assistant Button */}
+      {onOpenAi && (
+        <>
+          <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onOpenAi}
+            className="h-7 text-xs px-2.5 gap-1.5 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 font-semibold shadow-2xs transition-colors ml-auto sm:ml-0"
+            title="Assistente Gemini IA (Melhorar texto, requisitos, fluxos e casos de uso)"
+          >
+            <Sparkles size={13} className="text-indigo-600 dark:text-indigo-400 group-hover:text-white" />
+            <span>IA Gemini</span>
+          </Button>
+        </>
+      )}
     </div>
   );
 }
@@ -227,6 +252,7 @@ function TextBlock({
   setActiveEditor,
   isSelected,
   setSelectedId,
+  onOpenAiAssistant,
 }: {
   block: CanvasBlock;
   updateBlock: (id: string, updates: Partial<CanvasBlock>) => void;
@@ -234,6 +260,7 @@ function TextBlock({
   setActiveEditor: (editor: Editor | null) => void;
   isSelected: boolean;
   setSelectedId: (id: string | null) => void;
+  onOpenAiAssistant?: (blockId: string, editor: Editor | null) => void;
 }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
@@ -339,6 +366,23 @@ function TextBlock({
             <div className="drag-handle cursor-grab active:cursor-grabbing flex-1 h-full flex items-center justify-center text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300">
               <GripHorizontal size={14} />
             </div>
+
+            {/* AI Assistant Button directly on the box */}
+            {onOpenAiAssistant && (
+              <button
+                type="button"
+                className="text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 p-0.5 px-1 rounded hover:bg-indigo-50 dark:hover:bg-indigo-950/60 flex items-center gap-1 text-[10px] font-semibold transition-colors mr-1"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenAiAssistant(block.id, editor);
+                }}
+                title="Assistente Gemini IA: Melhorar texto, estruturar requisitos, fluxos e casos de uso"
+              >
+                <Sparkles size={11} className="text-indigo-600 dark:text-indigo-400" />
+                <span className="hidden xs:inline">IA</span>
+              </button>
+            )}
+
             <button
               type="button"
               className="text-slate-400 hover:text-red-500 p-0.5 rounded hover:bg-slate-200 dark:hover:bg-zinc-700"
@@ -564,6 +608,14 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [isInsertLinkOpen, setIsInsertLinkOpen] = useState(false);
   const [isRelatedLinksOpen, setIsRelatedLinksOpen] = useState(false);
+
+  // Gemini AI Assistant Modal State
+  const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [aiTargetBlockId, setAiTargetBlockId] = useState<string | null>(null);
+  const [aiSelectedText, setAiSelectedText] = useState('');
+  const [aiFullBlockText, setAiFullBlockText] = useState('');
+
   const canvasRef = useRef<HTMLDivElement>(null);
   const lastLoadedPageIdRef = useRef<string | null>(null);
   const lastSavedContentRef = useRef<string | null>(null);
@@ -571,6 +623,75 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   const relatedLinksCount = useMemo(() => {
     return relations.filter((r) => r.note_id === pageId).length;
   }, [relations, pageId]);
+
+  // Handle opening AI Assistant modal
+  const handleOpenAiAssistant = useCallback((blockId?: string, ed?: Editor | null) => {
+    let selectedTxt = '';
+    let fullTxt = '';
+    const targetId = blockId || selectedBlockId || null;
+
+    const editorToUse = ed || activeEditor;
+    if (editorToUse) {
+      const { from, to } = editorToUse.state.selection;
+      if (from !== to) {
+        selectedTxt = editorToUse.state.doc.textBetween(from, to, ' ');
+      }
+      fullTxt = editorToUse.getText();
+    } else if (targetId) {
+      const targetBlock = blocks.find((b) => b.id === targetId);
+      if (targetBlock && targetBlock.content) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = targetBlock.content;
+        fullTxt = tmp.textContent || tmp.innerText || '';
+      }
+    }
+
+    setAiTargetBlockId(targetId);
+    setAiSelectedText(selectedTxt);
+    setAiFullBlockText(fullTxt);
+    setIsAiModalOpen(true);
+  }, [selectedBlockId, activeEditor, blocks]);
+
+  // Handle applying generated AI content to note
+  const handleApplyAiContent = useCallback((generatedHtml: string, mode: 'replace' | 'append') => {
+    if (mode === 'replace' && aiTargetBlockId) {
+      // If we have an active editor for this block, use its commands or update block directly
+      const targetBlock = blocks.find(b => b.id === aiTargetBlockId);
+      if (targetBlock) {
+        updateBlock(aiTargetBlockId, { content: generatedHtml });
+      }
+    } else {
+      // Append mode: Create a new block positioned nicely below current block or at spawn position
+      const pos = getSpawnPosition();
+      let targetX = pos.x;
+      let targetY = pos.y;
+
+      if (aiTargetBlockId) {
+        const targetBlock = blocks.find(b => b.id === aiTargetBlockId);
+        if (targetBlock) {
+          targetX = targetBlock.x;
+          targetY = targetBlock.y + (typeof targetBlock.height === 'number' ? targetBlock.height : 160) + 20;
+        }
+      }
+
+      const newBlock: CanvasBlock = {
+        id: `text_ai_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        x: targetX,
+        y: targetY,
+        width: 520,
+        height: 'auto',
+        type: 'text',
+        content: generatedHtml,
+      };
+
+      const updated = [...blocks, newBlock];
+      setBlocks(updated);
+      const json = JSON.stringify(updated);
+      lastSavedContentRef.current = json;
+      updatePage(pageId, { conteudo: json });
+      setSelectedBlockId(newBlock.id);
+    }
+  }, [aiTargetBlockId, blocks, pageId, updatePage]);
 
   // Load and parse content on page switch
   useEffect(() => {
@@ -843,6 +964,18 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
 
         {/* Developer Action Bar / Quick Insert Buttons */}
         <div className="flex items-center gap-1.5 shrink-0 select-none">
+          {/* Gemini AI Assistant Button */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => handleOpenAiAssistant()}
+            className="h-8 px-2.5 text-xs bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/80 dark:to-purple-950/80 hover:from-indigo-100 hover:to-purple-100 dark:hover:from-indigo-900 dark:hover:to-purple-900 text-indigo-700 dark:text-indigo-200 border-indigo-200 dark:border-indigo-800 rounded-md gap-1.5 shadow-2xs font-semibold"
+            title="Assistente com Inteligência Artificial (Gemini): Melhorar texto, requisitos, fluxos e casos de uso"
+          >
+            <Sparkles size={14} className="text-indigo-600 dark:text-indigo-400" />
+            <span className="hidden sm:inline">IA Gemini</span>
+          </Button>
+
           {/* Insert Text Block */}
           <Button
             size="sm"
@@ -909,7 +1042,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
       </div>
 
       {/* Formatting Toolbar (Active when a text editor is focused) */}
-      <GlobalToolbar editor={activeEditor} />
+      <GlobalToolbar editor={activeEditor} onOpenAi={() => handleOpenAiAssistant()} />
 
       {/* Canvas Area */}
       <div className="flex-1 overflow-auto bg-[#ffffff] dark:bg-zinc-950 relative w-full h-full">
@@ -974,6 +1107,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
                 setActiveEditor={setActiveEditor}
                 isSelected={selectedBlockId === block.id}
                 setSelectedId={setSelectedBlockId}
+                onOpenAiAssistant={handleOpenAiAssistant}
               />
             );
           })}
@@ -1004,6 +1138,23 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
         onClose={() => setIsRelatedLinksOpen(false)}
         pageId={page.id}
         onInsertCardBlock={handleInsertLinkCard}
+      />
+
+      {/* Gemini AI Assistant Modal */}
+      <AiAssistantModal
+        isOpen={isAiModalOpen}
+        onClose={() => setIsAiModalOpen(false)}
+        noteTitle={page.titulo}
+        selectedText={aiSelectedText}
+        fullBlockText={aiFullBlockText}
+        onApplyContent={handleApplyAiContent}
+        onOpenSettings={() => setIsSettingsModalOpen(true)}
+      />
+
+      {/* Settings Modal (Configurar token Gemini, informações do desenvolvedor e sistema) */}
+      <SettingsModal
+        open={isSettingsModalOpen}
+        onOpenChange={setIsSettingsModalOpen}
       />
     </div>
   );

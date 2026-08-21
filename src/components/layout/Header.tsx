@@ -3,10 +3,12 @@ import { useAuthStore } from '@/lib/store/authStore';
 import { useLinkStore } from '@/lib/store/linkStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Search, List, Grid, Menu, X, User, Sun, Moon, LogOut, Link as LinkIcon, FileText } from 'lucide-react';
+import { Search, List, Grid, Menu, X, User, Sun, Moon, LogOut, Link as LinkIcon, FileText, Settings, Sparkles } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { APP_VERSION } from '@/lib/version';
 import { cn } from '@/lib/utils';
+import { SettingsModal } from '@/components/settings/SettingsModal';
+import { getGeminiApiKey } from '@/lib/geminiService';
 
 interface HeaderProps {
   activeTab?: 'links' | 'notes';
@@ -24,12 +26,22 @@ export function Header({ activeTab = 'links', setActiveTab }: HeaderProps) {
   } = useLinkStore();
   
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [hasGeminiKey, setHasGeminiKey] = useState(false);
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
-  // Avoid hydration mismatch
+  // Avoid hydration mismatch & listen for key updates
   useEffect(() => {
     setMounted(true);
+    setHasGeminiKey(Boolean(getGeminiApiKey()));
+
+    const handleKeyUpdated = () => {
+      setHasGeminiKey(Boolean(getGeminiApiKey()));
+    };
+
+    window.addEventListener('meuhub_gemini_key_updated', handleKeyUpdated);
+    return () => window.removeEventListener('meuhub_gemini_key_updated', handleKeyUpdated);
   }, []);
 
   const toggleViewMode = () => {
@@ -121,6 +133,20 @@ export function Header({ activeTab = 'links', setActiveTab }: HeaderProps) {
             )}
             
             <div className="flex items-center space-x-1 pl-2 border-l border-border/50">
+              {/* Settings / Configurações & Gemini AI Button */}
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={() => setIsSettingsOpen(true)}
+                title="Configurações (Desenvolvedor, Gemini IA e Sistema)"
+                className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground transition-colors relative"
+              >
+                <Settings size={17} />
+                {hasGeminiKey && (
+                  <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-background" />
+                )}
+              </Button>
+
               {/* Dark Mode Toggle Button */}
               <Button 
                 variant="ghost" 
@@ -168,6 +194,17 @@ export function Header({ activeTab = 'links', setActiveTab }: HeaderProps) {
             
           {/* Mobile menu button */}
           <div className="md:hidden flex items-center space-x-2 ml-auto">
+            {/* Mobile quick settings */}
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={() => setIsSettingsOpen(true)}
+              className="h-9 w-9 rounded-full text-muted-foreground"
+              title="Configurações"
+            >
+              <Settings size={17} />
+            </Button>
+
             {/* Mobile quick theme toggle */}
             <Button 
               variant="ghost" 
@@ -244,6 +281,15 @@ export function Header({ activeTab = 'links', setActiveTab }: HeaderProps) {
                 <Button 
                   variant="outline" 
                   className="w-full h-10 text-xs gap-2 rounded-xl"
+                  onClick={() => { setIsSettingsOpen(true); setIsMenuOpen(false); }}
+                >
+                  <Settings size={14} />
+                  Configurações
+                </Button>
+
+                <Button 
+                  variant="outline" 
+                  className="w-full h-10 text-xs gap-2 rounded-xl"
                   onClick={toggleTheme}
                 >
                   {mounted && theme === 'dark' ? <Sun size={14} className="text-amber-400" /> : <Moon size={14} />}
@@ -270,6 +316,11 @@ export function Header({ activeTab = 'links', setActiveTab }: HeaderProps) {
           </div>
         )}
       </div>
+
+      <SettingsModal 
+        open={isSettingsOpen} 
+        onOpenChange={setIsSettingsOpen} 
+      />
     </header>
   );
 }
