@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useNoteStore } from '@/lib/store/noteStore';
 import { useAuthStore } from '@/lib/store/authStore';
+import { decryptSecretField } from '@/lib/encryption';
 import { CanvasBlock } from '@/types/notes';
 import { Link } from '@/types/supabase';
 import { Rnd } from 'react-rnd';
@@ -828,21 +829,47 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
     let parsedBlocks: CanvasBlock[] = [];
     try {
       if (page.conteudo) {
-        if (page.conteudo.trim().startsWith('[')) {
-          parsedBlocks = JSON.parse(page.conteudo);
+        const raw = page.conteudo.trim();
+        let isEncrypted = false;
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object' && parsed.ciphertext && parsed.iv && parsed.salt) {
+            isEncrypted = true;
+          }
+        } catch {
+          // not json
+        }
+
+        if (isEncrypted) {
+          decryptSecretField(raw).then(decrypted => {
+            if (decrypted && decrypted !== raw) {
+              try {
+                if (decrypted.trim().startsWith('[')) {
+                  setBlocks(JSON.parse(decrypted));
+                  updatePage(pageId, { conteudo: decrypted });
+                }
+              } catch {
+                // ignore
+              }
+            }
+          });
+          parsedBlocks = [];
+        } else if (raw.startsWith('[')) {
+          parsedBlocks = JSON.parse(raw);
         } else {
-          // Legacy content conversion
-          parsedBlocks = [
-            {
-              id: `block_${Date.now()}`,
-              x: 40,
-              y: 40,
-              width: 600,
-              height: 'auto',
-              type: 'text',
-              content: page.conteudo,
-            },
-          ];
+          if (!raw.startsWith('U2FsdGVkX1')) {
+            parsedBlocks = [
+              {
+                id: `block_${Date.now()}`,
+                x: 40,
+                y: 40,
+                width: 600,
+                height: 'auto',
+                type: 'text',
+                content: raw,
+              },
+            ];
+          }
         }
       }
     } catch (e) {

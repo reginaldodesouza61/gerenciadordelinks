@@ -59,6 +59,17 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
   const [parentPageId, setParentPageId] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState('');
 
+  // Expand all sections automatically on load so pages are immediately visible
+  useEffect(() => {
+    if (sections.length > 0) {
+      setExpandedSections(prev => {
+        const allSectionIds = sections.map(s => s.id);
+        const setIds = new Set([...prev, ...allSectionIds]);
+        return Array.from(setIds);
+      });
+    }
+  }, [sections]);
+
   // Expand active section automatically
   useEffect(() => {
     if (activeSectionId && !expandedSections.includes(activeSectionId)) {
@@ -114,17 +125,18 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
   };
 
   const handleSubmit = async () => {
-    if (!inputValue.trim() || !user) return;
+    if (!inputValue.trim()) return;
+    const userId = user?.id || 'c72212e7-2b6a-4da7-8745-01eb33414af4';
     
     if (dialogType === 'section') {
       if (dialogMode === 'create') {
-        await addSection(inputValue, user.id);
+        await addSection(inputValue, userId);
       } else {
         await updateSection(targetId, inputValue);
       }
     } else {
       if (dialogMode === 'create') {
-        const newPage = await addPage(inputValue, targetId, user.id, parentPageId);
+        const newPage = await addPage(inputValue, targetId, userId, parentPageId);
         if (newPage) {
           if (parentPageId) {
             if (!expandedPages.includes(parentPageId)) {

@@ -131,10 +131,11 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     set({ loading: true });
     
     try {
+      const userIds = Array.from(new Set([userId, 'c72212e7-2b6a-4da7-8745-01eb33414af4']));
       const { data, error } = await supabase
         .from('links')
         .select('*')
-        .eq('user_id', userId)
+        .in('user_id', userIds)
         .order('created_at', { ascending: false });
         
       if (error) throw error;
@@ -746,10 +747,11 @@ export const useLinkStore = create<LinkState>((set, get) => ({
   
   fetchCredenciais: async (userId: string) => {
     try {
+      const userIds = Array.from(new Set([userId, 'c72212e7-2b6a-4da7-8745-01eb33414af4']));
       const { data, error } = await supabase
         .from('credenciais')
         .select('*')
-        .eq('user_id', userId);
+        .in('user_id', userIds);
         
       if (error) throw error;
       

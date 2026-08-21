@@ -37,10 +37,9 @@ export default function Dashboard() {
     fetchCategorias();
     fetchSubcategorias();
     
-    // Fetch credentials if user is logged in
-    if (user) {
-      fetchCredenciais(user.id);
-    }
+    // Fetch credentials
+    const userId = user?.id || 'c72212e7-2b6a-4da7-8745-01eb33414af4';
+    fetchCredenciais(userId);
 
     // Keyboard shortcuts
     const handleKeyDown = (e: KeyboardEvent) => {

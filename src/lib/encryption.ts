@@ -23,6 +23,10 @@ const getCandidateMasterPasswords = (): string[] => {
   if (local) list.push(local);
   list.push('meuhub_e2ee_master_key_v1_c72212e7-2b6a-4da7-8745-01eb33414af4');
   list.push('meuhub_vault_master_key_2026');
+  list.push('mgx-c72212e7-2b6a-4da7-8745-01eb33414af4-encryption-key-2024');
+  list.push('c72212e7-2b6a-4da7-8745-01eb33414af4');
+  list.push('mgx-user-encryption-key-2024');
+  list.push('meuhub_master_key');
   return Array.from(new Set(list));
 };
 

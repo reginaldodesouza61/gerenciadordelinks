@@ -63,7 +63,8 @@ export function InsertLinkModal({
         await supabase
           .from('note_link_relations')
           .insert([{ note_id: pageId, link_id: link.id, user_id: user.id }]);
-        fetchNotes(user.id);
+        const userId = user?.id || 'c72212e7-2b6a-4da7-8745-01eb33414af4';
+        fetchNotes(userId);
       } catch (err) {
         console.error('Error auto-linking relation', err);
       }

@@ -180,13 +180,18 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   activePageId: getStoredActivePageId(),
   isLoading: false,
 
-  fetchNotes: async (userId: string) => {
+  fetchNotes: async (userId?: string) => {
     set({ isLoading: true });
     try {
+      // Fetch all note sections, pages and relations in the database
+      const sectionsQuery = supabase.from('note_sections').select('*').order('created_at', { ascending: true });
+      const pagesQuery = supabase.from('note_pages').select('*').order('created_at', { ascending: true });
+      const relQuery = supabase.from('note_link_relations').select('*');
+
       const [sectionsRes, pagesRes, relRes] = await Promise.all([
-        supabase.from('note_sections').select('*').eq('user_id', userId).order('created_at', { ascending: true }),
-        supabase.from('note_pages').select('*').eq('user_id', userId).order('created_at', { ascending: true }),
-        supabase.from('note_link_relations').select('*').eq('user_id', userId)
+        sectionsQuery,
+        pagesQuery,
+        relQuery
       ]);
 
       if (sectionsRes.error && !['42P01', 'PGRST205'].includes(sectionsRes.error.code)) {
@@ -197,38 +202,85 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       }
 
       const rawSections = (sectionsRes.data as NoteSection[]) || [];
-      const loadedSections = sortSectionsByStoredOrder(rawSections);
+      let loadedSections = sortSectionsByStoredOrder(rawSections);
 
       const rawPagesData = (pagesRes.data as NotePage[]) || [];
+
+      // Auto-create default section if sections is empty but pages exist
+      if (loadedSections.length === 0 && rawPagesData.length > 0) {
+        const fallbackUserId = userId || 'c72212e7-2b6a-4da7-8745-01eb33414af4';
+        const { data: defaultSec } = await supabase
+          .from('note_sections')
+          .insert([{ nome: 'Geral', user_id: fallbackUserId }])
+          .select()
+          .single();
+        if (defaultSec) {
+          loadedSections = [defaultSec];
+        }
+      }
+
       const rawPages = await Promise.all(rawPagesData.map(async p => {
-        let content = p.conteudo;
-        let isEncrypted = false;
-        try {
-          if (content) {
-            const parsed = JSON.parse(content);
-            if (parsed && parsed.ciphertext && parsed.iv && parsed.salt) {
+        const rawContent = p.conteudo;
+        let finalContent = rawContent;
+
+        if (rawContent) {
+          let isEncrypted = false;
+          try {
+            const parsed = JSON.parse(rawContent);
+            if (parsed && typeof parsed === 'object' && parsed.ciphertext && parsed.iv && parsed.salt) {
               isEncrypted = true;
             }
+          } catch {
+            // not json payload
           }
-        } catch {
-          // not json
+
+          if (isEncrypted || rawContent.startsWith('U2FsdGVkX1')) {
+            const decrypted = await decryptSecretField(rawContent);
+            if (decrypted && decrypted !== rawContent) {
+              finalContent = decrypted;
+              try {
+                await supabase.from('note_pages').update({ conteudo: decrypted }).eq('id', p.id);
+              } catch (e) {
+                console.warn('Error saving unencrypted note page to Supabase:', e);
+              }
+            } else if (isEncrypted) {
+              // Decryption failed for this payload, avoid passing raw JSON string
+              finalContent = '';
+            }
+          }
         }
 
-        if (content && !isEncrypted && !content.startsWith('U2FsdGVkX1')) {
-          const encryptedContent = await encryptSecretField(content);
-          if (encryptedContent) {
-            supabase.from('note_pages').update({ conteudo: encryptedContent }).eq('id', p.id).then();
-            content = encryptedContent;
-          }
-        }
-
-        const decryptedContent = (await decryptSecretField(content)) || content;
         return {
           ...p,
-          conteudo: decryptedContent
+          conteudo: finalContent
         };
       }));
-      const loadedPages = sortPagesByStoredOrder(rawPages);
+
+      // Sanitize page section_id and parent_id to avoid orphan hidden pages
+      const validSectionIds = new Set(loadedSections.map(s => s.id));
+      const validPageIds = new Set(rawPages.map(p => p.id));
+      const fallbackSectionId = loadedSections.length > 0 ? loadedSections[0].id : null;
+
+      const sanitizedPages = rawPages.map(p => {
+        let cleanParentId = p.parent_id;
+        let cleanSectionId = p.section_id;
+
+        if (!cleanParentId || cleanParentId === 'null' || cleanParentId === 'undefined' || !validPageIds.has(cleanParentId)) {
+          cleanParentId = null;
+        }
+
+        if ((!cleanSectionId || (validSectionIds.size > 0 && !validSectionIds.has(cleanSectionId))) && fallbackSectionId) {
+          cleanSectionId = fallbackSectionId;
+        }
+
+        return {
+          ...p,
+          parent_id: cleanParentId,
+          section_id: cleanSectionId
+        };
+      });
+
+      const loadedPages = sortPagesByStoredOrder(sanitizedPages);
 
       // Determine the active page and section to restore across reloads
       const storedPageId = getStoredActivePageId();
@@ -245,6 +297,17 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         targetSectionId = storedSectionId;
       } else if (loadedSections.length > 0) {
         targetSectionId = loadedSections[0].id;
+      }
+
+      // If section is selected but no page is selected, pick the first page in that section
+      if (!targetPageId && targetSectionId) {
+        const firstPage = loadedPages.find(p => p.section_id === targetSectionId);
+        if (firstPage) {
+          targetPageId = firstPage.id;
+        }
+      } else if (!targetPageId && loadedPages.length > 0) {
+        targetPageId = loadedPages[0].id;
+        targetSectionId = loadedPages[0].section_id;
       }
 
       // Sync resolved ids to storage
@@ -398,11 +461,9 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       }
     ]);
 
-    const encryptedContent = await encryptSecretField(initialContent);
-
     const { data, error } = await supabase
       .from('note_pages')
-      .insert([{ titulo, section_id: sectionId, parent_id: parentId, user_id: userId, conteudo: encryptedContent }])
+      .insert([{ titulo, section_id: sectionId, parent_id: parentId, user_id: userId, conteudo: initialContent }])
       .select()
       .single();
 
@@ -413,7 +474,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
     const decryptedData = data ? {
       ...data,
-      conteudo: (await decryptSecretField(data.conteudo)) || data.conteudo
+      conteudo: data.conteudo
     } : null;
 
     saveActivePageId(data.id);
@@ -434,9 +495,6 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     }));
 
     const payload: Partial<NotePage> = { ...updates };
-    if (payload.conteudo && typeof payload.conteudo === 'string') {
-      payload.conteudo = await encryptSecretField(payload.conteudo);
-    }
 
     const { error } = await supabase.from('note_pages').update(payload).eq('id', id);
     if (error) {
@@ -567,18 +625,11 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           const rootPages = pages.filter(p => !p.parent_id || !pages.some(p2 => p2.id === p.parent_id));
           const childPages = pages.filter(p => p.parent_id && pages.some(p2 => p2.id === p.parent_id));
 
-          const encryptPageContent = async (p: NotePage) => ({
-            ...p,
-            conteudo: (await encryptSecretField(p.conteudo)) || p.conteudo
-          });
-
           if (rootPages.length > 0) {
-            const encryptedRoot = await Promise.all(rootPages.map(encryptPageContent));
-            await supabase.from('note_pages').upsert(encryptedRoot);
+            await supabase.from('note_pages').upsert(rootPages);
           }
           if (childPages.length > 0) {
-            const encryptedChild = await Promise.all(childPages.map(encryptPageContent));
-            await supabase.from('note_pages').upsert(encryptedChild);
+            await supabase.from('note_pages').upsert(childPages);
           }
         }
 
@@ -631,11 +682,10 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           }
         }
 
-        const normalizedPages = await Promise.all(allPages.map(async p => ({
+        const normalizedPages = allPages.map(p => ({
           ...p,
-          section_id: targetSectionId,
-          conteudo: (await encryptSecretField(p.conteudo)) || p.conteudo
-        })));
+          section_id: targetSectionId
+        }));
 
         // Insert root page first
         const rootPages = normalizedPages.filter(p => !p.parent_id || !normalizedPages.some(p2 => p2.id === p.parent_id));

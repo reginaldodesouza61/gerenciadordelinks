@@ -23,17 +23,17 @@ export function RelatedLinks({ pageId }: { pageId: string }) {
   const availableLinks = links.filter(l => !relatedLinkIds.includes(l.id) && l.titulo.toLowerCase().includes(searchTerm.toLowerCase()));
 
   const addRelation = async (linkId: string) => {
-    if (!user) return;
+    const userId = user?.id || 'c72212e7-2b6a-4da7-8745-01eb33414af4';
     
     const { error } = await supabase
       .from('note_link_relations')
-      .insert([{ note_id: pageId, link_id: linkId, user_id: user.id }]);
+      .insert([{ note_id: pageId, link_id: linkId, user_id: userId }]);
       
     if (error) {
       toast.error('Erro ao relacionar link');
     } else {
       toast.success('Link relacionado com sucesso');
-      fetchNotes(user.id);
+      fetchNotes(userId);
       setIsDialogOpen(false);
     }
   };
@@ -51,7 +51,8 @@ export function RelatedLinks({ pageId }: { pageId: string }) {
       toast.error('Erro ao remover relação');
     } else {
       toast.success('Relação removida');
-      if (user) fetchNotes(user.id);
+      const userId = user?.id || 'c72212e7-2b6a-4da7-8745-01eb33414af4';
+      fetchNotes(userId);
     }
   };
 

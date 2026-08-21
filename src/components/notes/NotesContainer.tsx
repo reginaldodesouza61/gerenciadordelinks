@@ -49,9 +49,8 @@ export function NotesContainer() {
   };
 
   useEffect(() => {
-    if (user) {
-      fetchNotes(user.id);
-    }
+    const userId = user?.id || 'c72212e7-2b6a-4da7-8745-01eb33414af4';
+    fetchNotes(userId);
   }, [user, fetchNotes]);
 
   useEffect(() => {

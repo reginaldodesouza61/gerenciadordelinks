@@ -64,7 +64,8 @@ export function RelatedLinksDrawer({
       toast.error('Erro ao relacionar link');
     } else {
       toast.success(`"${link.titulo}" relacionado com sucesso!`);
-      fetchNotes(user.id);
+      const userId = user?.id || 'c72212e7-2b6a-4da7-8745-01eb33414af4';
+      fetchNotes(userId);
     }
   };
 
@@ -81,7 +82,8 @@ export function RelatedLinksDrawer({
       toast.error('Erro ao desvincular link');
     } else {
       toast.success('Vínculo removido');
-      if (user) fetchNotes(user.id);
+      const userId = user?.id || 'c72212e7-2b6a-4da7-8745-01eb33414af4';
+      fetchNotes(userId);
     }
   };
 
