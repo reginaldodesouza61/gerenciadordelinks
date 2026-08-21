@@ -22,7 +22,7 @@ export interface NoteLinkRelation {
   user_id: string;
 }
 
-export type BlockType = 'text' | 'script' | 'vault' | 'link';
+export type BlockType = 'text' | 'script' | 'vault' | 'link' | 'image';
 
 export type SecretType = 
   | 'api_token' 
@@ -80,4 +80,10 @@ export interface CanvasBlock {
   linkSubcategory?: string;
   linkDescription?: string;
   linkImageUrl?: string | null;
+
+  // For 'image' block (Screen capture / Upload / Paste)
+  imageUrl?: string;
+  imageTitle?: string;
+  imageCaption?: string;
+  capturedAt?: string;
 }

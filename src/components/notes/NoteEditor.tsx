@@ -9,7 +9,8 @@ import {
   MousePointer2, GripHorizontal, Trash2, Bold, Italic, Underline as UnderlineIcon,
   Strikethrough, List, ListOrdered, AlignLeft, AlignCenter, AlignRight, AlignJustify,
   Highlighter, Palette, TableProperties, Plus, ChevronRight, Combine,
-  Code2, ShieldCheck, Link as LinkIcon, Type, Terminal, KeyRound, Sparkles, Wand2
+  Code2, ShieldCheck, Link as LinkIcon, Type, Terminal, KeyRound, Sparkles, Wand2,
+  Camera, Image as ImageIcon, Upload, Download, Copy, ChevronDown
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -17,10 +18,13 @@ import { TablePicker } from './TablePicker';
 import { ScriptBlock } from './dev/ScriptBlock';
 import { SecretVaultBlock } from './dev/SecretVaultBlock';
 import { LinkCardBlock } from './dev/LinkCardBlock';
+import { ImageBlock } from './dev/ImageBlock';
 import { InsertLinkModal } from './dev/InsertLinkModal';
 import { RelatedLinksDrawer } from './dev/RelatedLinksDrawer';
 import { AiAssistantModal } from './AiAssistantModal';
 import { SettingsModal } from '@/components/settings/SettingsModal';
+import { captureScreen, fileToDataUrl } from '@/lib/screenCapture';
+import { toast } from 'sonner';
 
 import { EditorContent, useEditor, Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -321,6 +325,16 @@ function TextBlock({
     }
   }, [isSelected, editor]);
 
+  // Keep TipTap editor content synchronized when block.content changes externally (e.g. AI replacement)
+  useEffect(() => {
+    if (editor && block.content !== undefined) {
+      const currentHtml = editor.getHTML();
+      if (currentHtml !== block.content) {
+        editor.commands.setContent(block.content, false);
+      }
+    }
+  }, [block.content, editor]);
+
   return (
     <>
       <Rnd
@@ -617,6 +631,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   const [aiFullBlockText, setAiFullBlockText] = useState('');
 
   const canvasRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const lastLoadedPageIdRef = useRef<string | null>(null);
   const lastSavedContentRef = useRef<string | null>(null);
 
@@ -628,9 +643,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   const handleOpenAiAssistant = useCallback((blockId?: string, ed?: Editor | null) => {
     let selectedTxt = '';
     let fullTxt = '';
-    const targetId = blockId || selectedBlockId || null;
+    const targetId = blockId || selectedBlockId || (blocks.length > 0 ? blocks[blocks.length - 1].id : null);
 
-    const editorToUse = ed || activeEditor;
+    const editorToUse = ed || (targetId === selectedBlockId ? activeEditor : null);
     if (editorToUse) {
       const { from, to } = editorToUse.state.selection;
       if (from !== to) {
@@ -654,44 +669,71 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
 
   // Handle applying generated AI content to note
   const handleApplyAiContent = useCallback((generatedHtml: string, mode: 'replace' | 'append') => {
-    if (mode === 'replace' && aiTargetBlockId) {
-      // If we have an active editor for this block, use its commands or update block directly
-      const targetBlock = blocks.find(b => b.id === aiTargetBlockId);
+    const targetId = aiTargetBlockId || selectedBlockId || (blocks.length > 0 ? blocks[blocks.length - 1].id : null);
+
+    if (mode === 'replace' && targetId) {
+      const targetBlock = blocks.find((b) => b.id === targetId);
       if (targetBlock) {
-        updateBlock(aiTargetBlockId, { content: generatedHtml });
-      }
-    } else {
-      // Append mode: Create a new block positioned nicely below current block or at spawn position
-      const pos = getSpawnPosition();
-      let targetX = pos.x;
-      let targetY = pos.y;
+        const nextBlocks = blocks.map((b) => {
+          if (b.id === targetId) {
+            const currentW = typeof b.width === 'number' ? b.width : parseInt(String(b.width)) || 440;
+            return {
+              ...b,
+              type: 'text' as const,
+              content: generatedHtml,
+              width: Math.max(currentW, 520),
+            };
+          }
+          return b;
+        });
 
-      if (aiTargetBlockId) {
-        const targetBlock = blocks.find(b => b.id === aiTargetBlockId);
-        if (targetBlock) {
-          targetX = targetBlock.x;
-          targetY = targetBlock.y + (typeof targetBlock.height === 'number' ? targetBlock.height : 160) + 20;
+        setBlocks(nextBlocks);
+        const json = JSON.stringify(nextBlocks);
+        lastSavedContentRef.current = json;
+        updatePage(pageId, { conteudo: json });
+        setSelectedBlockId(targetId);
+
+        if (activeEditor) {
+          try {
+            activeEditor.commands.setContent(generatedHtml, false);
+          } catch (err) {
+            console.error('Error updating activeEditor content:', err);
+          }
         }
+        return;
       }
-
-      const newBlock: CanvasBlock = {
-        id: `text_ai_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        x: targetX,
-        y: targetY,
-        width: 520,
-        height: 'auto',
-        type: 'text',
-        content: generatedHtml,
-      };
-
-      const updated = [...blocks, newBlock];
-      setBlocks(updated);
-      const json = JSON.stringify(updated);
-      lastSavedContentRef.current = json;
-      updatePage(pageId, { conteudo: json });
-      setSelectedBlockId(newBlock.id);
     }
-  }, [aiTargetBlockId, blocks, pageId, updatePage]);
+
+    // Append mode (or fallback if no existing block was found to replace)
+    const pos = getSpawnPosition();
+    let targetX = pos.x;
+    let targetY = pos.y;
+
+    if (targetId) {
+      const targetBlock = blocks.find((b) => b.id === targetId);
+      if (targetBlock) {
+        targetX = targetBlock.x;
+        targetY = targetBlock.y + (typeof targetBlock.height === 'number' ? targetBlock.height : 160) + 20;
+      }
+    }
+
+    const newBlock: CanvasBlock = {
+      id: `text_ai_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      x: targetX,
+      y: targetY,
+      width: 540,
+      height: 'auto',
+      type: 'text',
+      content: generatedHtml,
+    };
+
+    const updated = [...blocks, newBlock];
+    setBlocks(updated);
+    const json = JSON.stringify(updated);
+    lastSavedContentRef.current = json;
+    updatePage(pageId, { conteudo: json });
+    setSelectedBlockId(newBlock.id);
+  }, [aiTargetBlockId, selectedBlockId, blocks, activeEditor, pageId, updatePage]);
 
   // Load and parse content on page switch
   useEffect(() => {
@@ -873,6 +915,130 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
     updatePage(pageId, { conteudo: JSON.stringify(nextBlocks) });
   };
 
+  // Insert Image / Screenshot Block helper
+  const insertImageBlock = useCallback((
+    dataUrl: string,
+    origW = 600,
+    origH = 400,
+    title = 'Captura de Tela',
+    customPos?: { x: number; y: number }
+  ) => {
+    const cleaned = purgeAndSave(blocks, null);
+    const pos = customPos || getSpawnPosition();
+
+    // Calculate aspect ratio for initial dimensions
+    const aspect = origH / (origW || 1);
+    const initialWidth = Math.min(560, Math.max(340, origW));
+    const initialHeight = Math.round(initialWidth * aspect) + 56; // account for header/footer
+
+    const newBlock: CanvasBlock = {
+      id: `img_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      x: pos.x,
+      y: pos.y,
+      width: initialWidth,
+      height: Math.min(initialHeight, 520),
+      type: 'image',
+      imageUrl: dataUrl,
+      imageTitle: `${title} - ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
+      capturedAt: `${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
+    };
+
+    const nextBlocks = [...cleaned, newBlock];
+    setBlocks(nextBlocks);
+    setSelectedBlockId(newBlock.id);
+    const json = JSON.stringify(nextBlocks);
+    lastSavedContentRef.current = json;
+    updatePage(pageId, { conteudo: json });
+  }, [blocks, pageId, purgeAndSave, updatePage]);
+
+  // Handle direct screen capture
+  const handleCaptureScreen = async () => {
+    try {
+      toast.info('Selecione a tela, janela ou aba para capturar...');
+      const { dataUrl, width, height } = await captureScreen();
+      insertImageBlock(dataUrl, width, height, 'Captura de Tela');
+      toast.success('Captura de tela adicionada à anotação!');
+    } catch (err) {
+      const error = err as Error | { name?: string; message?: string };
+      if (error?.name === 'NotAllowedError' || error?.message?.includes('Permission denied')) {
+        // User cancelled screen capture picker
+        return;
+      }
+      toast.error(error?.message || 'Falha ao capturar tela');
+    }
+  };
+
+  // Handle local image file upload
+  const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const { dataUrl, width, height } = await fileToDataUrl(file);
+      const cleanName = file.name.replace(/\.[^/.]+$/, '');
+      insertImageBlock(dataUrl, width, height, cleanName);
+      toast.success('Imagem carregada na anotação!');
+    } catch (err) {
+      toast.error('Erro ao ler arquivo de imagem');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  // Handle drag & drop image files onto canvas
+  const handleCanvasDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    const files = e.dataTransfer.files;
+    if (!files || files.length === 0) return;
+
+    const rect = canvasRef.current?.getBoundingClientRect();
+    const x = rect ? e.clientX - rect.left + (canvasRef.current?.scrollLeft || 0) : 50;
+    const y = rect ? e.clientY - rect.top + (canvasRef.current?.scrollTop || 0) : 60;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (file.type.startsWith('image/')) {
+        try {
+          const { dataUrl, width, height } = await fileToDataUrl(file);
+          const cleanName = file.name.replace(/\.[^/.]+$/, '');
+          insertImageBlock(dataUrl, width, height, cleanName, { x: x + i * 30, y: y + i * 30 });
+          toast.success(`Imagem "${file.name}" adicionada!`);
+        } catch (err) {
+          console.error('Error dropping image:', err);
+        }
+      }
+    }
+  };
+
+  // Global paste handler to detect pasted images (Ctrl+V / PrintScreen paste)
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      // Check if clipboard has image items
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const file = items[i].getAsFile();
+          if (file) {
+            e.preventDefault();
+            try {
+              const { dataUrl, width, height } = await fileToDataUrl(file);
+              insertImageBlock(dataUrl, width, height, 'Print Colado');
+              toast.success('Print de tela colado na anotação!');
+            } catch (err) {
+              console.error('Error pasting image:', err);
+              toast.error('Não foi possível colar a imagem');
+            }
+            return;
+          }
+        }
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [insertImageBlock]);
+
   const handleCanvasClick = (e: React.MouseEvent) => {
     if (e.target === canvasRef.current) {
       // Clean up any existing empty blocks
@@ -976,6 +1142,42 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
             <span className="hidden sm:inline">IA Gemini</span>
           </Button>
 
+          {/* Screen Capture / Add Image Button */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 px-2.5 text-xs bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100/80 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 border-sky-300 dark:border-sky-800 rounded-md gap-1.5 shadow-2xs font-medium"
+                title="Capturar print de tela ou carregar imagem"
+              >
+                <Camera size={14} className="text-sky-600 dark:text-sky-400" />
+                <span className="hidden sm:inline">Capturar Tela</span>
+                <ChevronDown size={11} className="opacity-60 -ml-0.5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-52 p-1.5" align="end">
+              <div className="space-y-1">
+                <button
+                  type="button"
+                  onClick={handleCaptureScreen}
+                  className="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-sky-50 dark:hover:bg-sky-950/60 text-slate-700 dark:text-zinc-200 flex items-center gap-2 font-medium transition-colors"
+                >
+                  <Camera size={14} className="text-sky-600 dark:text-sky-400" />
+                  <span>Capturar Tela (Print)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-200 flex items-center gap-2 font-medium transition-colors"
+                >
+                  <ImageIcon size={14} className="text-slate-500 dark:text-zinc-400" />
+                  <span>Carregar Imagem do PC</span>
+                </button>
+              </div>
+            </PopoverContent>
+          </Popover>
+
           {/* Insert Text Block */}
           <Button
             size="sm"
@@ -1056,6 +1258,8 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
             minHeight: '100%',
           }}
           onClick={handleCanvasClick}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleCanvasDrop}
         >
           {blocks.map((block) => {
             if (block.type === 'script') {
@@ -1087,6 +1291,19 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
             if (block.type === 'link') {
               return (
                 <LinkCardBlock
+                  key={block.id}
+                  block={block}
+                  updateBlock={updateBlock}
+                  removeBlock={removeBlock}
+                  isSelected={selectedBlockId === block.id}
+                  setSelectedId={setSelectedBlockId}
+                />
+              );
+            }
+
+            if (block.type === 'image') {
+              return (
+                <ImageBlock
                   key={block.id}
                   block={block}
                   updateBlock={updateBlock}
@@ -1149,6 +1366,15 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
         fullBlockText={aiFullBlockText}
         onApplyContent={handleApplyAiContent}
         onOpenSettings={() => setIsSettingsModalOpen(true)}
+      />
+
+      {/* Hidden file input for uploading images from computer */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFileInputChange}
       />
 
       {/* Settings Modal (Configurar token Gemini, informações do desenvolvedor e sistema) */}
