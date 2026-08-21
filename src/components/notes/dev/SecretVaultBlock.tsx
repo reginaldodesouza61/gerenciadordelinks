@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { toast } from 'sonner';
 import { generatePassword } from '@/lib/utils/passwordUtils';
+import { encryptSecretItem, decryptSecretItem } from '@/lib/encryption';
 
 const SECRET_TYPES: { id: SecretType; label: string; icon: React.ElementType; color: string }[] = [
   { id: 'password', label: 'Senha (Usuário & Senha)', icon: Lock, color: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800' },
@@ -107,7 +108,7 @@ export function SecretVaultBlock({
 
   const secrets: SecretItem[] = useMemo(() => {
     if (block.secrets && Array.isArray(block.secrets)) {
-      return block.secrets;
+      return block.secrets.map(s => decryptSecretItem(s));
     }
     return [];
   }, [block.secrets]);
@@ -471,15 +472,15 @@ export function SecretVaultBlock({
 
     if (editingItem) {
       updatedSecrets = secrets.map((s) =>
-        s.id === editingItem.id ? { ...s, ...itemData } : s
+        s.id === editingItem.id ? encryptSecretItem({ ...s, ...itemData }) : encryptSecretItem(s)
       );
       toast.success('Credencial atualizada com sucesso!');
     } else {
-      const newItem: SecretItem = {
+      const newItem: SecretItem = encryptSecretItem({
         id: generateId(),
         ...itemData
-      };
-      updatedSecrets = [...secrets, newItem];
+      });
+      updatedSecrets = [...secrets.map(s => encryptSecretItem(s)), newItem];
       toast.success('Credencial adicionada ao cofre!');
     }
 

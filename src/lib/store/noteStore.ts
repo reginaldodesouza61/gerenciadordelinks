@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { supabase } from '../supabase';
 import { NoteSection, NotePage, NoteLinkRelation, DeletedNoteItem } from '@/types/notes';
 import { toast } from 'sonner';
+import { encryptSecretField, decryptSecretField } from '@/lib/encryption';
 
 const TRASH_STORAGE_KEY = 'meuhub_deleted_notes_vault';
 const ACTIVE_PAGE_STORAGE_KEY = 'meuhub_active_page_id';
@@ -198,7 +199,10 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       const rawSections = (sectionsRes.data as NoteSection[]) || [];
       const loadedSections = sortSectionsByStoredOrder(rawSections);
 
-      const rawPages = (pagesRes.data as NotePage[]) || [];
+      const rawPages = ((pagesRes.data as NotePage[]) || []).map(p => ({
+        ...p,
+        conteudo: decryptSecretField(p.conteudo) || p.conteudo
+      }));
       const loadedPages = sortPagesByStoredOrder(rawPages);
 
       // Determine the active page and section to restore across reloads
@@ -369,9 +373,11 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       }
     ]);
 
+    const encryptedContent = encryptSecretField(initialContent);
+
     const { data, error } = await supabase
       .from('note_pages')
-      .insert([{ titulo, section_id: sectionId, parent_id: parentId, user_id: userId, conteudo: initialContent }])
+      .insert([{ titulo, section_id: sectionId, parent_id: parentId, user_id: userId, conteudo: encryptedContent }])
       .select()
       .single();
 
@@ -379,16 +385,22 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       toast.error('Erro ao criar página');
       return null;
     }
+
+    const decryptedData = data ? {
+      ...data,
+      conteudo: decryptSecretField(data.conteudo) || data.conteudo
+    } : null;
+
     saveActivePageId(data.id);
     saveActiveSectionId(sectionId);
 
     const currentPages = get().pages;
-    const updatedPages = [...currentPages, data];
+    const updatedPages = decryptedData ? [...currentPages, decryptedData] : currentPages;
     savePageOrder(updatedPages.map(p => p.id));
 
     set({ pages: updatedPages, activePageId: data.id, activeSectionId: sectionId });
     toast.success('Página criada!');
-    return data;
+    return decryptedData;
   },
 
   updatePage: async (id, updates) => {
@@ -396,7 +408,12 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       pages: state.pages.map(p => p.id === id ? { ...p, ...updates } : p)
     }));
 
-    const { error } = await supabase.from('note_pages').update(updates).eq('id', id);
+    const payload: Partial<NotePage> = { ...updates };
+    if (payload.conteudo && typeof payload.conteudo === 'string') {
+      payload.conteudo = encryptSecretField(payload.conteudo);
+    }
+
+    const { error } = await supabase.from('note_pages').update(payload).eq('id', id);
     if (error) {
       console.error('Supabase update page error:', error);
       if (['42P01', 'PGRST205'].includes(error.code)) {
@@ -525,11 +542,16 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           const rootPages = pages.filter(p => !p.parent_id || !pages.some(p2 => p2.id === p.parent_id));
           const childPages = pages.filter(p => p.parent_id && pages.some(p2 => p2.id === p.parent_id));
 
+          const encryptPageContent = (p: NotePage) => ({
+            ...p,
+            conteudo: encryptSecretField(p.conteudo) || p.conteudo
+          });
+
           if (rootPages.length > 0) {
-            await supabase.from('note_pages').upsert(rootPages);
+            await supabase.from('note_pages').upsert(rootPages.map(encryptPageContent));
           }
           if (childPages.length > 0) {
-            await supabase.from('note_pages').upsert(childPages);
+            await supabase.from('note_pages').upsert(childPages.map(encryptPageContent));
           }
         }
 
@@ -584,7 +606,8 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
         const normalizedPages = allPages.map(p => ({
           ...p,
-          section_id: targetSectionId
+          section_id: targetSectionId,
+          conteudo: encryptSecretField(p.conteudo) || p.conteudo
         }));
 
         // Insert root page first
