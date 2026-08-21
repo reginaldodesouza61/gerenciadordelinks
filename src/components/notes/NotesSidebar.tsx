@@ -474,41 +474,7 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
             </Button>
           )}
         </div>
-
-        {/* Global Search Button in Sidebar */}
-        <button
-          type="button"
-          onClick={() => setIsSearchOpen(true)}
-          className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs bg-slate-100 dark:bg-zinc-800/80 hover:bg-indigo-50/70 dark:hover:bg-zinc-700/80 text-slate-600 dark:text-zinc-400 hover:text-indigo-700 dark:hover:text-indigo-300 rounded-lg border border-slate-200/80 dark:border-zinc-700/80 transition-all shadow-2xs group"
-          title="Pesquisar em todas as anotações, seções, códigos, tabelas, diagramas e credenciais"
-        >
-          <div className="flex items-center gap-2 truncate">
-            <Search size={13} className="text-slate-400 dark:text-zinc-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 shrink-0" />
-            <span className="truncate font-medium text-[12px]">Pesquisar anotações...</span>
-          </div>
-          <kbd className="px-1.5 py-0.5 text-[9px] bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded font-mono font-semibold text-slate-400 dark:text-zinc-500 shrink-0">
-            Ctrl+K
-          </kbd>
-        </button>
       </div>
-
-      {/* Quick Undo banner if items were recently deleted */}
-      {deletedItems.length > 0 && (
-        <div className="px-3 py-2 bg-amber-50/80 dark:bg-amber-950/40 border-b border-amber-200/50 dark:border-amber-900/50 flex items-center justify-between gap-2 text-xs text-amber-900 dark:text-amber-200">
-          <div className="flex items-center gap-1.5 truncate">
-            <RotateCcw size={12} className="shrink-0 text-amber-600 dark:text-amber-400" />
-            <span className="truncate">"{deletedItems[0].title}" excluído</span>
-          </div>
-          <Button
-            variant="link"
-            size="sm"
-            className="h-auto p-0 text-xs text-amber-700 dark:text-amber-300 font-bold underline hover:text-amber-900"
-            onClick={() => restoreLastDeleted()}
-          >
-            Desfazer
-          </Button>
-        </div>
-      )}
 
       <div className="flex-1 px-3 py-4 overflow-y-auto overflow-x-hidden">
         {sections.length === 0 ? (

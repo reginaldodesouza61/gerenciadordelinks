@@ -1041,13 +1041,13 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   const handleAddWhiteboardBlock = (e?: React.MouseEvent) => {
     e?.stopPropagation();
     const cleaned = purgeAndSave(blocks, null);
-    const pos = getSpawnPosition(760, 420);
+    const pos = getSpawnPosition(960, 600);
     const newBlock: CanvasBlock = {
       id: `draw_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       x: pos.x,
       y: pos.y,
-      width: 760,
-      height: 420,
+      width: 960,
+      height: 600,
       type: 'whiteboard',
       drawingTitle: 'Quadro de Processos & Diagrama',
       elements: [],

@@ -1305,14 +1305,17 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
         </div>
 
         {/* SVG Drawing Canvas Surface */}
-        <div className={`relative flex-1 w-full h-full overflow-hidden ${
+        <div className={`relative flex-1 w-full h-full overflow-auto ${
           canvasBg === 'grid' 
             ? 'bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] dark:bg-[radial-gradient(#334155_1px,transparent_1px)] [background-size:16px_16px]' 
             : 'bg-white dark:bg-zinc-900'
         }`}>
           <svg
             ref={svgRef}
-            className="w-full h-full cursor-crosshair touch-none select-none"
+            viewBox="0 0 4000 3000"
+            width="4000"
+            height="3000"
+            className="cursor-crosshair select-none"
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
@@ -1384,7 +1387,7 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
   return (
     <>
       <Rnd
-        size={{ width: block.width || 760, height: block.height || 420 }}
+        size={{ width: block.width || 960, height: block.height || 600 }}
         position={{ x: block.x, y: block.y }}
         style={{
           zIndex: isSelected ? 40 : 15,
@@ -1405,8 +1408,8 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
         }}
         bounds="parent"
         dragHandleClassName="whiteboard-drag-handle"
-        minWidth={450}
-        minHeight={280}
+        minWidth={600}
+        minHeight={450}
         onMouseDown={() => {
           setSelectedId?.(block.id);
         }}
