@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Rnd } from 'react-rnd';
 import { CanvasBlock, SecretItem, SecretType, SecretEnv, SecretItemCustomField } from '@/types/notes';
 import { 
@@ -106,12 +106,23 @@ export function SecretVaultBlock({
 
   const [formCustomFields, setFormCustomFields] = useState<SecretItemCustomField[]>([]);
 
-  const secrets: SecretItem[] = useMemo(() => {
-    if (block.secrets && Array.isArray(block.secrets)) {
-      return block.secrets.map(s => decryptSecretItem(s));
+  const [decryptedSecrets, setDecryptedSecrets] = useState<SecretItem[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadSecrets() {
+      if (block.secrets && Array.isArray(block.secrets)) {
+        const decrypted = await Promise.all(block.secrets.map(s => decryptSecretItem(s)));
+        if (isMounted) setDecryptedSecrets(decrypted);
+      } else {
+        if (isMounted) setDecryptedSecrets([]);
+      }
     }
-    return [];
+    loadSecrets();
+    return () => { isMounted = false; };
   }, [block.secrets]);
+
+  const secrets = decryptedSecrets;
 
   const vaultTitle = block.vaultTitle || 'Cofre de Credenciais & Senhas';
 
@@ -411,7 +422,7 @@ export function SecretVaultBlock({
   };
 
   // Save secret item
-  const handleSaveItem = (e?: React.FormEvent) => {
+  const handleSaveItem = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     
     if (!formKey.trim()) {
@@ -471,16 +482,18 @@ export function SecretVaultBlock({
     };
 
     if (editingItem) {
-      updatedSecrets = secrets.map((s) =>
-        s.id === editingItem.id ? encryptSecretItem({ ...s, ...itemData }) : encryptSecretItem(s)
-      );
+      const encryptedMapped = await Promise.all(secrets.map(async (s) =>
+        s.id === editingItem.id ? await encryptSecretItem({ ...s, ...itemData }) : await encryptSecretItem(s)
+      ));
+      updatedSecrets = encryptedMapped;
       toast.success('Credencial atualizada com sucesso!');
     } else {
-      const newItem: SecretItem = encryptSecretItem({
+      const newItem = await encryptSecretItem({
         id: generateId(),
         ...itemData
       });
-      updatedSecrets = [...secrets.map(s => encryptSecretItem(s)), newItem];
+      const processedExisting = await Promise.all(secrets.map(s => encryptSecretItem(s)));
+      updatedSecrets = [...processedExisting, newItem];
       toast.success('Credencial adicionada ao cofre!');
     }
 

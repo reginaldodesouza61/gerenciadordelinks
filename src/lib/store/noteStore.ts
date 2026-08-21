@@ -199,10 +199,11 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       const rawSections = (sectionsRes.data as NoteSection[]) || [];
       const loadedSections = sortSectionsByStoredOrder(rawSections);
 
-      const rawPages = ((pagesRes.data as NotePage[]) || []).map(p => ({
+      const rawPagesData = (pagesRes.data as NotePage[]) || [];
+      const rawPages = await Promise.all(rawPagesData.map(async p => ({
         ...p,
-        conteudo: decryptSecretField(p.conteudo) || p.conteudo
-      }));
+        conteudo: (await decryptSecretField(p.conteudo)) || p.conteudo
+      })));
       const loadedPages = sortPagesByStoredOrder(rawPages);
 
       // Determine the active page and section to restore across reloads
@@ -373,7 +374,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       }
     ]);
 
-    const encryptedContent = encryptSecretField(initialContent);
+    const encryptedContent = await encryptSecretField(initialContent);
 
     const { data, error } = await supabase
       .from('note_pages')
@@ -388,7 +389,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
     const decryptedData = data ? {
       ...data,
-      conteudo: decryptSecretField(data.conteudo) || data.conteudo
+      conteudo: (await decryptSecretField(data.conteudo)) || data.conteudo
     } : null;
 
     saveActivePageId(data.id);
@@ -410,7 +411,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
     const payload: Partial<NotePage> = { ...updates };
     if (payload.conteudo && typeof payload.conteudo === 'string') {
-      payload.conteudo = encryptSecretField(payload.conteudo);
+      payload.conteudo = await encryptSecretField(payload.conteudo);
     }
 
     const { error } = await supabase.from('note_pages').update(payload).eq('id', id);
@@ -542,16 +543,18 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           const rootPages = pages.filter(p => !p.parent_id || !pages.some(p2 => p2.id === p.parent_id));
           const childPages = pages.filter(p => p.parent_id && pages.some(p2 => p2.id === p.parent_id));
 
-          const encryptPageContent = (p: NotePage) => ({
+          const encryptPageContent = async (p: NotePage) => ({
             ...p,
-            conteudo: encryptSecretField(p.conteudo) || p.conteudo
+            conteudo: (await encryptSecretField(p.conteudo)) || p.conteudo
           });
 
           if (rootPages.length > 0) {
-            await supabase.from('note_pages').upsert(rootPages.map(encryptPageContent));
+            const encryptedRoot = await Promise.all(rootPages.map(encryptPageContent));
+            await supabase.from('note_pages').upsert(encryptedRoot);
           }
           if (childPages.length > 0) {
-            await supabase.from('note_pages').upsert(childPages.map(encryptPageContent));
+            const encryptedChild = await Promise.all(childPages.map(encryptPageContent));
+            await supabase.from('note_pages').upsert(encryptedChild);
           }
         }
 
@@ -604,11 +607,11 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           }
         }
 
-        const normalizedPages = allPages.map(p => ({
+        const normalizedPages = await Promise.all(allPages.map(async p => ({
           ...p,
           section_id: targetSectionId,
-          conteudo: encryptSecretField(p.conteudo) || p.conteudo
-        }));
+          conteudo: (await encryptSecretField(p.conteudo)) || p.conteudo
+        })));
 
         // Insert root page first
         const rootPages = normalizedPages.filter(p => !p.parent_id || !normalizedPages.some(p2 => p2.id === p.parent_id));
