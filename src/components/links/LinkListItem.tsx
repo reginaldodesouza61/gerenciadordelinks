@@ -13,6 +13,16 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 
 interface LinkListItemProps {
@@ -26,6 +36,8 @@ export function LinkListItem({ link, categoria, subcategoria, onEdit }: LinkList
   const { deleteLink, getCredencialByLinkId, toggleFavorite, favoriteIds, trackRecentLink } = useLinkStore();
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [credentialsDialogOpen, setCredentialsDialogOpen] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   const isFavorite = favoriteIds.includes(link.id);
   const hasCredentials = Boolean(getCredencialByLinkId(link.id));
@@ -35,14 +47,15 @@ export function LinkListItem({ link, categoria, subcategoria, onEdit }: LinkList
     setCredentialsDialogOpen(true);
   };
   
-  const handleDelete = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (confirm('Tem certeza que deseja excluir este link?')) {
-      try {
-        await deleteLink(link.id);
-      } catch (error) {
-        console.error('Error deleting link:', error);
-      }
+  const handleConfirmDelete = async () => {
+    setIsDeleting(true);
+    try {
+      await deleteLink(link.id);
+    } catch (error) {
+      console.error('Error deleting link:', error);
+    } finally {
+      setIsDeleting(false);
+      setConfirmDeleteOpen(false);
     }
   };
   
@@ -159,7 +172,7 @@ export function LinkListItem({ link, categoria, subcategoria, onEdit }: LinkList
                 size="icon" 
                 variant="ghost"
                 className="h-9 w-9 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
-                onClick={handleDelete}
+                onClick={(e) => { e.stopPropagation(); setConfirmDeleteOpen(true); }}
               >
                 <Trash className="h-4 w-4" />
               </Button>
@@ -182,7 +195,7 @@ export function LinkListItem({ link, categoria, subcategoria, onEdit }: LinkList
                   <DropdownMenuItem onClick={handleShare} className="gap-2">
                     <Share2 className="h-3.5 w-3.5" /> Compartilhar
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleDelete} className="gap-2 text-destructive">
+                  <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setConfirmDeleteOpen(true); }} className="gap-2 text-destructive">
                     <Trash className="h-3.5 w-3.5" /> Excluir
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -207,6 +220,27 @@ export function LinkListItem({ link, categoria, subcategoria, onEdit }: LinkList
         linkTitle={link.titulo}
         linkUrl={link.url}
       />
+
+      <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+        <AlertDialogContent className="rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir Link?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir o link &quot;{link.titulo}&quot;? Esta ação não poderá ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-xl font-medium">Cancelar</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground rounded-xl font-bold"
+            >
+              {isDeleting ? 'Excluindo...' : 'Excluir'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

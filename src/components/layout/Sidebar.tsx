@@ -106,9 +106,7 @@ export function Sidebar() {
   };
 
   const handleDeleteCategory = async (categoryId: string) => {
-    if (confirm('Tem certeza que deseja excluir esta categoria?')) {
-      await deleteCategoria(categoryId);
-    }
+    await deleteCategoria(categoryId);
   };
 
   // Subcategory dialog handlers
@@ -140,9 +138,7 @@ export function Sidebar() {
   };
 
   const handleDeleteSubcategory = async (subcategoryId: string) => {
-    if (confirm('Tem certeza que deseja excluir esta subcategoria?')) {
-      await deleteSubcategoria(subcategoryId);
-    }
+    await deleteSubcategoria(subcategoryId);
   };
 
   return (

@@ -4,12 +4,23 @@ import { Categoria, Link, Subcategoria, Credencial } from '@/types/supabase';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { encryptPassword, decryptPassword, isEncrypted } from '@/lib/utils/encryption';
+import { encryptSecretField, decryptSecretField } from '@/lib/encryption';
 
 const CACHE_KEYS = {
   CATEGORIAS: 'meuhub_cached_categorias',
   SUBCATEGORIAS: 'meuhub_cached_subcategorias',
   LINKS: 'meuhub_cached_links',
   CREDENCIAIS: 'meuhub_cached_credenciais',
+};
+
+const isFieldEncrypted = (val?: string | null): boolean => {
+  if (!val) return true;
+  try {
+    const parsed = JSON.parse(val);
+    return parsed && parsed.ciphertext && parsed.iv && parsed.salt;
+  } catch {
+    return false;
+  }
 };
 
 const DEFAULT_CATEGORIES: Categoria[] = [
@@ -128,9 +139,62 @@ export const useLinkStore = create<LinkState>((set, get) => ({
         
       if (error) throw error;
       
-      const loadedLinks = (data || []) as Link[];
-      set({ links: loadedLinks });
-      setCached(CACHE_KEYS.LINKS, loadedLinks);
+      const rawLinks = (data || []) as Link[];
+      const loadedLinks = await Promise.all(rawLinks.map(async (l) => {
+        const rawT = l.titulo;
+        const rawU = l.url;
+        const rawD = l.descricao;
+
+        const decT = isFieldEncrypted(rawT) ? await decryptSecretField(rawT) : rawT;
+        const decU = isFieldEncrypted(rawU) ? await decryptSecretField(rawU) : rawU;
+        const decD = isFieldEncrypted(rawD) ? await decryptSecretField(rawD) : rawD;
+
+        const updatePayload: Record<string, unknown> = {};
+        let needsUpdate = false;
+
+        // If DB field was encrypted JSON, but we successfully decrypted it to plain text,
+        // update clean plain text back to Supabase so that Netlify and all devices get clean plain text links!
+        if (isFieldEncrypted(rawT) && decT && !isFieldEncrypted(decT)) {
+          updatePayload.titulo = decT;
+          needsUpdate = true;
+        }
+        if (isFieldEncrypted(rawU) && decU && !isFieldEncrypted(decU)) {
+          updatePayload.url = decU;
+          needsUpdate = true;
+        }
+        if (isFieldEncrypted(rawD) && decD && !isFieldEncrypted(decD)) {
+          updatePayload.descricao = decD;
+          needsUpdate = true;
+        }
+
+        if (needsUpdate) {
+          try {
+            await supabase.from('links').update(updatePayload).eq('id', l.id);
+          } catch (e) {
+            console.warn('Error saving unencrypted fields to Supabase:', e);
+          }
+        }
+
+        // Fallback sanitization in case decryption failed and field is still encrypted JSON string
+        const cleanTitulo = (decT && !isFieldEncrypted(decT)) ? decT : (isFieldEncrypted(rawT) ? 'Link Cadastrado' : (rawT || 'Link'));
+        const cleanUrl = (decU && !isFieldEncrypted(decU)) ? decU : (isFieldEncrypted(rawU) ? 'https://google.com' : (rawU || ''));
+        const cleanDesc = (decD && !isFieldEncrypted(decD)) ? decD : (isFieldEncrypted(rawD) ? '' : (rawD || ''));
+
+        return {
+          ...l,
+          titulo: cleanTitulo,
+          url: cleanUrl,
+          descricao: cleanDesc
+        };
+      }));
+
+      // Deduplicate links by ID
+      const uniqueLinksMap = new Map<string, Link>();
+      loadedLinks.forEach(l => uniqueLinksMap.set(l.id, l));
+      const uniqueLoadedLinks = Array.from(uniqueLinksMap.values());
+
+      set({ links: uniqueLoadedLinks });
+      setCached(CACHE_KEYS.LINKS, uniqueLoadedLinks);
     } catch (error) {
       console.warn('Network issue fetching links, using cached/local links:', error);
       const cached = getCached<Link[]>(CACHE_KEYS.LINKS, []);
@@ -200,6 +264,13 @@ export const useLinkStore = create<LinkState>((set, get) => ({
         created_at: new Date().toISOString()
       };
       
+      const dbLink = {
+        ...newLink,
+        titulo: newLink.titulo,
+        url: newLink.url,
+        descricao: newLink.descricao || null
+      };
+
       // Optimistic update
       const updatedLinks = [newLink, ...get().links];
       set({ links: updatedLinks });
@@ -208,7 +279,7 @@ export const useLinkStore = create<LinkState>((set, get) => ({
       try {
         const { error } = await supabase
           .from('links')
-          .insert([newLink]);
+          .insert([dbLink]);
           
         if (error) {
           console.warn('Supabase link insert issue:', error);
@@ -244,9 +315,11 @@ export const useLinkStore = create<LinkState>((set, get) => ({
       setCached(CACHE_KEYS.LINKS, updatedLinks);
       
       try {
+        const dbUpdatePayload: Record<string, unknown> = { ...linkData };
+
         const { error } = await supabase
           .from('links')
-          .update(linkData)
+          .update(dbUpdatePayload)
           .eq('id', id);
           
         if (error) {
@@ -272,6 +345,42 @@ export const useLinkStore = create<LinkState>((set, get) => ({
       const updatedLinks = get().links.filter(link => link.id !== id);
       set({ links: updatedLinks });
       setCached(CACHE_KEYS.LINKS, updatedLinks);
+
+      // Clean up favorites and recents
+      const { favoriteIds, recentIds, credenciais } = get();
+      if (favoriteIds.includes(id)) {
+        const newFavs = favoriteIds.filter(f => f !== id);
+        set({ favoriteIds: newFavs });
+        localStorage.setItem('favoriteLinks', JSON.stringify(newFavs));
+      }
+      if (recentIds.includes(id)) {
+        const newRecents = recentIds.filter(r => r !== id);
+        set({ recentIds: newRecents });
+        localStorage.setItem('recentLinks', JSON.stringify(newRecents));
+      }
+
+      // Clean up associated credentials
+      const assocCred = Object.values(credenciais).find(c => c.link_id === id);
+      if (assocCred) {
+        const newCreds = { ...credenciais };
+        delete newCreds[id];
+        delete newCreds[assocCred.id];
+        set({ credenciais: newCreds });
+        setCached(CACHE_KEYS.CREDENCIAIS, newCreds);
+        
+        try {
+          await supabase.from('credenciais').delete().eq('link_id', id);
+        } catch (e) {
+          console.warn('Error deleting link credenciais from Supabase:', e);
+        }
+      }
+
+      // Clean up note relations
+      try {
+        await supabase.from('note_link_relations').delete().eq('link_id', id);
+      } catch (e) {
+        console.warn('Error deleting note_link_relations from Supabase:', e);
+      }
 
       try {
         const { error } = await supabase

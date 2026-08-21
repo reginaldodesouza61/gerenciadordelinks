@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useLinkStore } from '@/lib/store/linkStore';
-import { Card, CardContent, CardFooter } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Pencil, Trash, Share2, Globe, Star, ExternalLink, MoreVertical, Key } from 'lucide-react';
 import { toast } from 'sonner';
@@ -13,6 +13,16 @@ import {
   DropdownMenuItem, 
   DropdownMenuTrigger 
 } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface LinkCardProps {
   link: Link;
@@ -25,18 +35,18 @@ export function LinkCard({ link, categoria, subcategoria, onEdit }: LinkCardProp
   const { deleteLink, toggleFavorite, favoriteIds, trackRecentLink, getCredencialByLinkId } = useLinkStore();
   const [isDeleting, setIsDeleting] = useState(false);
   const [credentialsDialogOpen, setCredentialsDialogOpen] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   
   const isFavorite = favoriteIds.includes(link.id);
   const hasCredentials = Boolean(getCredencialByLinkId(link.id));
 
-  const handleDelete = async () => {
-    if (confirm('Tem certeza que deseja excluir este link?')) {
-      setIsDeleting(true);
-      try {
-        await deleteLink(link.id);
-      } finally {
-        setIsDeleting(false);
-      }
+  const handleConfirmDelete = async () => {
+    setIsDeleting(true);
+    try {
+      await deleteLink(link.id);
+    } finally {
+      setIsDeleting(false);
+      setConfirmDeleteOpen(false);
     }
   };
 
@@ -149,7 +159,7 @@ export function LinkCard({ link, categoria, subcategoria, onEdit }: LinkCardProp
                   <DropdownMenuItem onClick={handleShare} className="gap-2">
                     <Share2 className="h-3.5 w-3.5" /> Compartilhar
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDelete(); }} className="gap-2 text-destructive focus:text-destructive">
+                  <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setConfirmDeleteOpen(true); }} className="gap-2 text-destructive focus:text-destructive">
                     <Trash className="h-3.5 w-3.5" /> Excluir
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -200,6 +210,27 @@ export function LinkCard({ link, categoria, subcategoria, onEdit }: LinkCardProp
         linkTitle={link.titulo}
         linkUrl={link.url}
       />
+
+      <AlertDialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+        <AlertDialogContent className="rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir Link?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir o link &quot;{link.titulo}&quot;? Esta ação não poderá ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-xl font-medium">Cancelar</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleConfirmDelete}
+              disabled={isDeleting}
+              className="bg-destructive hover:bg-destructive/90 text-destructive-foreground rounded-xl font-bold"
+            >
+              {isDeleting ? 'Excluindo...' : 'Excluir'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

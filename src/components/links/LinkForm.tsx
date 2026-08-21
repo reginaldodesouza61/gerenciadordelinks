@@ -36,6 +36,7 @@ export function LinkForm({ open, onOpenChange, editingLink }: LinkFormProps) {
   const [credentialsDialogOpen, setCredentialsDialogOpen] = useState(false);
   const [savedLinkId, setSavedLinkId] = useState<string | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   const [availableSubcategorias, setAvailableSubcategorias] = useState(subcategorias);
   
@@ -143,42 +144,62 @@ export function LinkForm({ open, onOpenChange, editingLink }: LinkFormProps) {
   
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     
-    if (!user || !url.trim() || !titulo.trim() || !categoriaId) {
+    let formattedUrl = url.trim();
+    if (formattedUrl && !formattedUrl.startsWith('http://') && !formattedUrl.startsWith('https://')) {
+      formattedUrl = `https://${formattedUrl}`;
+      setUrl(formattedUrl);
+    }
+
+    if (!formattedUrl) {
+      toast.error('Por favor, informe a URL do link.');
+      return;
+    }
+
+    if (!titulo.trim()) {
+      toast.error('Por favor, informe o título do link.');
+      return;
+    }
+
+    if (!categoriaId) {
+      toast.error('Por favor, selecione uma categoria.');
       return;
     }
     
+    const userId = user?.id || 'c72212e7-2b6a-4da7-8745-01eb33414af4';
+
+    setIsSubmitting(true);
     try {
       if (editingLink) {
         await updateLink(editingLink.id, {
-          titulo,
-          url,
+          titulo: titulo.trim(),
+          url: formattedUrl,
           categoria_id: categoriaId,
           subcategoria_id: subcategoriaId,
-          descricao: descricao || null
+          descricao: descricao.trim() || null
         });
         setSavedLinkId(editingLink.id);
+        onOpenChange(false);
+        resetForm();
       } else {
         const newLinkId = await addLink({
-          titulo,
-          url,
+          titulo: titulo.trim(),
+          url: formattedUrl,
           categoria_id: categoriaId,
           subcategoria_id: subcategoriaId,
-          descricao: descricao || null,
-          user_id: user.id
+          descricao: descricao.trim() || null,
+          user_id: userId
         });
         setSavedLinkId(newLinkId);
-      }
-      
-      const shouldAddCredentials = window.confirm('Deseja associar credenciais (usuário/senha) a este link?');
-      if (shouldAddCredentials) {
-        setCredentialsDialogOpen(true);
-      } else {
         onOpenChange(false);
         resetForm();
       }
     } catch (error) {
       console.error('Error saving link:', error);
+      toast.error('Ocorreu um erro ao salvar o link. Tente novamente.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
   
@@ -224,10 +245,10 @@ export function LinkForm({ open, onOpenChange, editingLink }: LinkFormProps) {
                 <div className="flex gap-2">
                   <Input 
                     id="url"
-                    type="url"
+                    type="text"
                     value={url} 
                     onChange={(e) => setUrl(e.target.value)} 
-                    placeholder="https://exemplo.com"
+                    placeholder="https://exemplo.com ou exemplo.com"
                     className="h-11 rounded-xl bg-muted/30 border-none focus-visible:ring-primary"
                     required
                   />
@@ -320,8 +341,15 @@ export function LinkForm({ open, onOpenChange, editingLink }: LinkFormProps) {
               >
                 Cancelar
               </Button>
-              <Button type="submit" className="rounded-xl font-bold px-8 shadow-lg shadow-primary/20">
-                {editingLink ? 'Salvar Alterações' : 'Criar Link'}
+              <Button type="submit" disabled={isSubmitting} className="rounded-xl font-bold px-8 shadow-lg shadow-primary/20">
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    Salvando...
+                  </>
+                ) : (
+                  editingLink ? 'Salvar Alterações' : 'Criar Link'
+                )}
               </Button>
             </DialogFooter>
           </form>

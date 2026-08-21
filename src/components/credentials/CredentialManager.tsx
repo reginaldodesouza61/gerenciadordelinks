@@ -331,13 +331,11 @@ export function CredentialManager({
 
   const handleDeleteCredential = async () => {
     if (!credentialId) return;
-    if (confirm('Tem certeza de que deseja excluir todas as credenciais salvas para este link?')) {
-      try {
-        await deleteCredencial(credentialId);
-        onOpenChange(false);
-      } catch (err) {
-        console.error('Error deleting credential:', err);
-      }
+    try {
+      await deleteCredencial(credentialId);
+      onOpenChange(false);
+    } catch (err) {
+      console.error('Error deleting credential:', err);
     }
   };
   

@@ -11,12 +11,19 @@ export interface EncryptedPayload {
 const getMasterPassword = (): string => {
   let pw = localStorage.getItem('e2ee_vault_master_secret');
   if (!pw) {
-    const arr = new Uint8Array(32);
-    window.crypto.getRandomValues(arr);
-    pw = Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
+    pw = 'meuhub_e2ee_master_key_v1_c72212e7-2b6a-4da7-8745-01eb33414af4';
     localStorage.setItem('e2ee_vault_master_secret', pw);
   }
   return pw;
+};
+
+const getCandidateMasterPasswords = (): string[] => {
+  const list: string[] = [];
+  const local = localStorage.getItem('e2ee_vault_master_secret');
+  if (local) list.push(local);
+  list.push('meuhub_e2ee_master_key_v1_c72212e7-2b6a-4da7-8745-01eb33414af4');
+  list.push('meuhub_vault_master_key_2026');
+  return Array.from(new Set(list));
 };
 
 // Helper: ArrayBuffer to Base64
@@ -119,34 +126,43 @@ export async function encryptSecretField(plainText?: string): Promise<string | u
 export async function decryptSecretField(cipherTextOrPayload?: string): Promise<string | undefined> {
   if (!cipherTextOrPayload) return cipherTextOrPayload;
 
-  // If legacy CryptoJS (U2FsdGVkX1...), return as is or handle
+  // If legacy CryptoJS (U2FsdGVkX1...), return as is
   if (cipherTextOrPayload.startsWith('U2FsdGVkX1')) {
     return cipherTextOrPayload;
   }
 
   try {
     const parsed = JSON.parse(cipherTextOrPayload);
-    if (!parsed || !parsed.ciphertext || !parsed.iv || !parsed.salt) {
+    if (!parsed || typeof parsed !== 'object' || !parsed.ciphertext || !parsed.iv || !parsed.salt) {
       return cipherTextOrPayload; // Plain text or not our payload format
     }
 
-    const masterPassword = getMasterPassword();
     const salt = new Uint8Array(base64ToBuffer(parsed.salt));
     const iv = new Uint8Array(base64ToBuffer(parsed.iv));
     const ciphertextBuffer = base64ToBuffer(parsed.ciphertext);
 
-    const key = await deriveKey(masterPassword, salt);
+    const candidates = getCandidateMasterPasswords();
 
-    const decryptedBuffer = await window.crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv, tagLength: 128 },
-      key,
-      ciphertextBuffer
-    );
+    for (const masterPassword of candidates) {
+      try {
+        const key = await deriveKey(masterPassword, salt);
+        const decryptedBuffer = await window.crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv, tagLength: 128 },
+          key,
+          ciphertextBuffer
+        );
+        const dec = new TextDecoder();
+        const result = dec.decode(decryptedBuffer);
+        if (result) return result;
+      } catch {
+        // try next candidate password
+      }
+    }
 
-    const dec = new TextDecoder();
-    return dec.decode(decryptedBuffer);
-  } catch (err) {
-    // If decryption failed or not encrypted JSON, return original
+    // Decryption failed with all candidates; return undefined so caller knows decryption failed
+    return undefined;
+  } catch {
+    // Not valid JSON payload, return original string (plain text)
     return cipherTextOrPayload;
   }
 }
