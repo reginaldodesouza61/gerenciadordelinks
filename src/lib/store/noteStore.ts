@@ -200,10 +200,34 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       const loadedSections = sortSectionsByStoredOrder(rawSections);
 
       const rawPagesData = (pagesRes.data as NotePage[]) || [];
-      const rawPages = await Promise.all(rawPagesData.map(async p => ({
-        ...p,
-        conteudo: (await decryptSecretField(p.conteudo)) || p.conteudo
-      })));
+      const rawPages = await Promise.all(rawPagesData.map(async p => {
+        let content = p.conteudo;
+        let isEncrypted = false;
+        try {
+          if (content) {
+            const parsed = JSON.parse(content);
+            if (parsed && parsed.ciphertext && parsed.iv && parsed.salt) {
+              isEncrypted = true;
+            }
+          }
+        } catch {
+          // not json
+        }
+
+        if (content && !isEncrypted && !content.startsWith('U2FsdGVkX1')) {
+          const encryptedContent = await encryptSecretField(content);
+          if (encryptedContent) {
+            supabase.from('note_pages').update({ conteudo: encryptedContent }).eq('id', p.id).then();
+            content = encryptedContent;
+          }
+        }
+
+        const decryptedContent = (await decryptSecretField(content)) || content;
+        return {
+          ...p,
+          conteudo: decryptedContent
+        };
+      }));
       const loadedPages = sortPagesByStoredOrder(rawPages);
 
       // Determine the active page and section to restore across reloads
