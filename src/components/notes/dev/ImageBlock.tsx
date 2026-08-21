@@ -89,6 +89,9 @@ export function ImageBlock({
           x: block.x,
           y: block.y,
         }}
+        style={{
+          zIndex: isSelected ? 35 : 12,
+        }}
         onDragStart={(_e) => {
           setSelectedId(block.id);
         }}

@@ -3,7 +3,8 @@ import { useNoteStore } from '@/lib/store/noteStore';
 import { Button } from '@/components/ui/button';
 import { 
   Plus, Edit2, Trash, ChevronDown, ChevronRight, FileText, Folder, 
-  ChevronLeft, Trash2, RotateCcw, GripVertical, ChevronUp, PanelLeftClose
+  ChevronLeft, Trash2, RotateCcw, GripVertical, ChevronUp, PanelLeftClose,
+  Search
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -12,6 +13,7 @@ import { useAuthStore } from '@/lib/store/authStore';
 import { cn } from '@/lib/utils';
 import { NotePage } from '@/types/notes';
 import { TrashModal } from './TrashModal';
+import { GlobalNotesSearchModal } from './GlobalNotesSearchModal';
 
 interface NotesSidebarProps {
   onCollapse?: () => void;
@@ -33,6 +35,7 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
 
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [expandedPages, setExpandedPages] = useState<string[]>([]);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   
   // Drag and drop state for sections
   const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
@@ -442,24 +445,51 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
 
   return (
     <div className="h-full w-full flex flex-col glass-card border-y-0 border-l-0 border-r border-border bg-white/50 dark:bg-zinc-900/50">
-      <div className="p-4 flex-shrink-0 border-b border-border flex items-center gap-2">
-        <Button 
-          className="flex-1 shadow-sm rounded-xl font-bold gap-2 bg-indigo-600 hover:bg-indigo-700 text-white transition-all border-none"
-          onClick={() => openDialog('section', 'create')}
-        >
-          <Plus className="h-4 w-4" /> Nova Seção
-        </Button>
-        {onCollapse && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-10 w-10 text-slate-400 dark:text-zinc-500 hover:text-slate-700 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-xl shrink-0"
-            onClick={onCollapse}
-            title="Recolher menu lateral de seções"
+      <div className="p-3 pb-2 flex-shrink-0 border-b border-border flex flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <Button 
+            className="flex-1 shadow-sm rounded-xl font-bold gap-2 bg-indigo-600 hover:bg-indigo-700 text-white transition-all border-none h-9 text-xs"
+            onClick={() => openDialog('section', 'create')}
           >
-            <PanelLeftClose size={18} />
+            <Plus className="h-4 w-4" /> Nova Seção
           </Button>
-        )}
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setIsTrashOpen(true)}
+            className="h-9 w-9 rounded-xl border-border bg-white dark:bg-zinc-800 text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 shrink-0 shadow-2xs"
+            title="Lixeira de páginas e seções excluídas"
+          >
+            <Trash2 size={15} />
+          </Button>
+          {onCollapse && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 text-slate-400 dark:text-zinc-500 hover:text-slate-700 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-xl shrink-0"
+              onClick={onCollapse}
+              title="Recolher menu lateral de seções"
+            >
+              <PanelLeftClose size={17} />
+            </Button>
+          )}
+        </div>
+
+        {/* Global Search Button in Sidebar */}
+        <button
+          type="button"
+          onClick={() => setIsSearchOpen(true)}
+          className="w-full flex items-center justify-between px-2.5 py-1.5 text-xs bg-slate-100 dark:bg-zinc-800/80 hover:bg-indigo-50/70 dark:hover:bg-zinc-700/80 text-slate-600 dark:text-zinc-400 hover:text-indigo-700 dark:hover:text-indigo-300 rounded-lg border border-slate-200/80 dark:border-zinc-700/80 transition-all shadow-2xs group"
+          title="Pesquisar em todas as anotações, seções, códigos, tabelas, diagramas e credenciais"
+        >
+          <div className="flex items-center gap-2 truncate">
+            <Search size={13} className="text-slate-400 dark:text-zinc-500 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 shrink-0" />
+            <span className="truncate font-medium text-[12px]">Pesquisar anotações...</span>
+          </div>
+          <kbd className="px-1.5 py-0.5 text-[9px] bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded font-mono font-semibold text-slate-400 dark:text-zinc-500 shrink-0">
+            Ctrl+K
+          </kbd>
+        </button>
       </div>
 
       {/* Quick Undo banner if items were recently deleted */}
@@ -699,6 +729,9 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
 
       {/* Trash / Deleted Notes Modal */}
       <TrashModal open={isTrashOpen} onOpenChange={setIsTrashOpen} />
+
+      {/* Global Notes Search Modal */}
+      <GlobalNotesSearchModal open={isSearchOpen} onOpenChange={setIsSearchOpen} />
     </div>
   );
 }

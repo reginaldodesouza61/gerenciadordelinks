@@ -51,9 +51,13 @@ export function Sidebar() {
   const [currentSubcategoryId, setCurrentSubcategoryId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchCategorias();
-    fetchSubcategorias();
-  }, [fetchCategorias, fetchSubcategorias]);
+    if (categorias.length === 0) {
+      fetchCategorias();
+    }
+    if (subcategorias.length === 0) {
+      fetchSubcategorias();
+    }
+  }, [fetchCategorias, fetchSubcategorias, categorias.length, subcategorias.length]);
 
   const toggleCategory = (categoryId: string) => {
     setExpandedCategories(prev =>

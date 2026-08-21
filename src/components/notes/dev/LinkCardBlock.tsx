@@ -77,6 +77,9 @@ export function LinkCardBlock({
     <Rnd
       size={{ width: block.width || 380, height: block.height || 190 }}
       position={{ x: block.x, y: block.y }}
+      style={{
+        zIndex: isSelected ? 35 : 12,
+      }}
       onDragStop={(_, d) => updateBlock(block.id, { x: d.x, y: d.y })}
       onResizeStop={(_, __, ref, ___, position) => {
         updateBlock(block.id, {

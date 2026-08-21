@@ -34,7 +34,45 @@ export interface DeletedNoteItem {
   sectionPages?: NotePage[];
 }
 
-export type BlockType = 'text' | 'script' | 'vault' | 'link' | 'image';
+export type BlockType = 'text' | 'script' | 'vault' | 'link' | 'image' | 'whiteboard';
+
+export type DrawingElementType = 
+  | 'rectangle'
+  | 'diamond'
+  | 'ellipse'
+  | 'circle'
+  | 'arrow'
+  | 'line'
+  | 'pen'
+  | 'text'
+  | 'card'
+  | 'cylinder';
+
+export interface DrawingPoint {
+  x: number;
+  y: number;
+}
+
+export interface DrawingElement {
+  id: string;
+  type: DrawingElementType;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  points?: DrawingPoint[]; // For pen/freehand
+  text?: string;
+  strokeColor?: string;
+  fillColor?: string;
+  strokeWidth?: number;
+  strokeStyle?: 'solid' | 'dashed' | 'dotted';
+  fontSize?: number;
+  textColor?: string;
+  textAlign?: 'left' | 'center' | 'right';
+  rounded?: boolean;
+  arrowStart?: boolean;
+  arrowEnd?: boolean;
+}
 
 export type SecretType = 
   | 'password'          // Usuário e Senha tradicional
@@ -125,4 +163,9 @@ export interface CanvasBlock {
   imageTitle?: string;
   imageCaption?: string;
   capturedAt?: string;
+
+  // For 'whiteboard' block (Excalidraw-like drawing canvas & process diagrams)
+  drawingTitle?: string;
+  elements?: DrawingElement[];
+  canvasBg?: 'grid' | 'dots' | 'blank';
 }

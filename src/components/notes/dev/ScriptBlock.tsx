@@ -281,6 +281,9 @@ export function ScriptBlock({
     <Rnd
       size={{ width: block.width || 560, height: block.height || 420 }}
       position={{ x: block.x, y: block.y }}
+      style={{
+        zIndex: isSelected ? 35 : 12,
+      }}
       onDragStop={(_, d) => updateBlock(block.id, { x: d.x, y: d.y })}
       onResizeStop={(_, __, ref, ___, position) => {
         updateBlock(block.id, {

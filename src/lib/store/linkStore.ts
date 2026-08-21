@@ -5,6 +5,46 @@ import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { encryptPassword, decryptPassword, isEncrypted } from '@/lib/utils/encryption';
 
+const CACHE_KEYS = {
+  CATEGORIAS: 'meuhub_cached_categorias',
+  SUBCATEGORIAS: 'meuhub_cached_subcategorias',
+  LINKS: 'meuhub_cached_links',
+  CREDENCIAIS: 'meuhub_cached_credenciais',
+};
+
+const DEFAULT_CATEGORIES: Categoria[] = [
+  { id: 'cat-dev', nome: 'Desenvolvimento', created_at: new Date().toISOString() },
+  { id: 'cat-ferramentas', nome: 'Ferramentas & Utilitários', created_at: new Date().toISOString() },
+  { id: 'cat-produtividade', nome: 'Produtividade', created_at: new Date().toISOString() },
+  { id: 'cat-estudos', nome: 'Estudos & Cursos', created_at: new Date().toISOString() },
+];
+
+const DEFAULT_SUBCATEGORIES: Subcategoria[] = [
+  { id: 'sub-frontend', nome: 'Frontend & UI', categoria_id: 'cat-dev', created_at: new Date().toISOString() },
+  { id: 'sub-backend', nome: 'Backend & APIs', categoria_id: 'cat-dev', created_at: new Date().toISOString() },
+  { id: 'sub-devops', nome: 'DevOps & Cloud', categoria_id: 'cat-dev', created_at: new Date().toISOString() },
+  { id: 'sub-docs', nome: 'Documentações', categoria_id: 'cat-ferramentas', created_at: new Date().toISOString() },
+];
+
+function getCached<T>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw) as T;
+  } catch (e) {
+    console.debug(`Error reading ${key} from storage:`, e);
+    return fallback;
+  }
+}
+
+function setCached<T>(key: string, data: T): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch (e) {
+    console.debug(`Error saving ${key} to storage:`, e);
+  }
+}
+
 interface LinkState {
   links: Link[];
   categorias: Categoria[];
@@ -62,10 +102,10 @@ interface LinkState {
 }
 
 export const useLinkStore = create<LinkState>((set, get) => ({
-  links: [],
-  categorias: [],
-  subcategorias: [],
-  credenciais: {},
+  links: getCached<Link[]>(CACHE_KEYS.LINKS, []),
+  categorias: getCached<Categoria[]>(CACHE_KEYS.CATEGORIAS, DEFAULT_CATEGORIES),
+  subcategorias: getCached<Subcategoria[]>(CACHE_KEYS.SUBCATEGORIAS, DEFAULT_SUBCATEGORIES),
+  credenciais: getCached<Record<string, Credencial>>(CACHE_KEYS.CREDENCIAIS, {}),
   loading: false,
   viewMode: (localStorage.getItem('meuhub_link_view_mode') as 'lista' | 'cartoes') || 'lista',
   searchQuery: '',
@@ -88,18 +128,21 @@ export const useLinkStore = create<LinkState>((set, get) => ({
         
       if (error) throw error;
       
-      set({ links: data as Link[] });
+      const loadedLinks = (data || []) as Link[];
+      set({ links: loadedLinks });
+      setCached(CACHE_KEYS.LINKS, loadedLinks);
     } catch (error) {
-      console.error('Error fetching links:', error);
-      toast.error('Erro ao carregar links');
+      console.warn('Network issue fetching links, using cached/local links:', error);
+      const cached = getCached<Link[]>(CACHE_KEYS.LINKS, []);
+      if (cached.length > 0) {
+        set({ links: cached });
+      }
     } finally {
       set({ loading: false });
     }
   },
   
   fetchCategorias: async () => {
-    set({ loading: true });
-    
     try {
       const { data, error } = await supabase
         .from('categorias')
@@ -108,18 +151,19 @@ export const useLinkStore = create<LinkState>((set, get) => ({
         
       if (error) throw error;
       
-      set({ categorias: data as Categoria[] });
+      const loadedCategorias = (data || []) as Categoria[];
+      if (loadedCategorias.length > 0) {
+        set({ categorias: loadedCategorias });
+        setCached(CACHE_KEYS.CATEGORIAS, loadedCategorias);
+      }
     } catch (error) {
-      console.error('Error fetching categories:', error);
-      toast.error('Erro ao carregar categorias');
-    } finally {
-      set({ loading: false });
+      console.warn('Network issue fetching categories, using cached categories:', error);
+      const cached = getCached<Categoria[]>(CACHE_KEYS.CATEGORIAS, DEFAULT_CATEGORIES);
+      set({ categorias: cached });
     }
   },
   
   fetchSubcategorias: async () => {
-    set({ loading: true });
-    
     try {
       const { data, error } = await supabase
         .from('subcategorias')
@@ -128,12 +172,15 @@ export const useLinkStore = create<LinkState>((set, get) => ({
         
       if (error) throw error;
       
-      set({ subcategorias: data as Subcategoria[] });
+      const loadedSubcategorias = (data || []) as Subcategoria[];
+      if (loadedSubcategorias.length > 0) {
+        set({ subcategorias: loadedSubcategorias });
+        setCached(CACHE_KEYS.SUBCATEGORIAS, loadedSubcategorias);
+      }
     } catch (error) {
-      console.error('Error fetching subcategories:', error);
-      toast.error('Erro ao carregar subcategorias');
-    } finally {
-      set({ loading: false });
+      console.warn('Network issue fetching subcategories, using cached subcategories:', error);
+      const cached = getCached<Subcategoria[]>(CACHE_KEYS.SUBCATEGORIAS, DEFAULT_SUBCATEGORIES);
+      set({ subcategorias: cached });
     }
   },
   
@@ -146,22 +193,29 @@ export const useLinkStore = create<LinkState>((set, get) => ({
       const imageUrl = await get().getLinkPreview(link.url);
       
       newLinkId = uuidv4();
-      const newLink = {
+      const newLink: Link = {
         ...link,
         id: newLinkId,
         imagem_url: imageUrl,
         created_at: new Date().toISOString()
       };
       
-      const { error } = await supabase
-        .from('links')
-        .insert([newLink]);
-        
-      if (error) throw error;
+      // Optimistic update
+      const updatedLinks = [newLink, ...get().links];
+      set({ links: updatedLinks });
+      setCached(CACHE_KEYS.LINKS, updatedLinks);
       
-      set(state => ({ 
-        links: [newLink as Link, ...state.links] 
-      }));
+      try {
+        const { error } = await supabase
+          .from('links')
+          .insert([newLink]);
+          
+        if (error) {
+          console.warn('Supabase link insert issue:', error);
+        }
+      } catch (err) {
+        console.warn('Supabase link insert network offline:', err);
+      }
       
       toast.success('Link adicionado com sucesso!');
       return newLinkId;
@@ -178,23 +232,29 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     set({ loading: true });
     
     try {
-      // If URL changed, update preview image
       if (linkData.url) {
         linkData.imagem_url = await get().getLinkPreview(linkData.url);
       }
       
-      const { error } = await supabase
-        .from('links')
-        .update(linkData)
-        .eq('id', id);
-        
-      if (error) throw error;
+      const updatedLinks = get().links.map(link => 
+        link.id === id ? { ...link, ...linkData } : link
+      );
       
-      set(state => ({
-        links: state.links.map(link => 
-          link.id === id ? { ...link, ...linkData } : link
-        )
-      }));
+      set({ links: updatedLinks });
+      setCached(CACHE_KEYS.LINKS, updatedLinks);
+      
+      try {
+        const { error } = await supabase
+          .from('links')
+          .update(linkData)
+          .eq('id', id);
+          
+        if (error) {
+          console.warn('Supabase link update error:', error);
+        }
+      } catch (err) {
+        console.warn('Supabase link update offline:', err);
+      }
       
       toast.success('Link atualizado com sucesso!');
     } catch (error) {
@@ -209,16 +269,22 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     set({ loading: true });
     
     try {
-      const { error } = await supabase
-        .from('links')
-        .delete()
-        .eq('id', id);
-        
-      if (error) throw error;
-      
-      set(state => ({
-        links: state.links.filter(link => link.id !== id)
-      }));
+      const updatedLinks = get().links.filter(link => link.id !== id);
+      set({ links: updatedLinks });
+      setCached(CACHE_KEYS.LINKS, updatedLinks);
+
+      try {
+        const { error } = await supabase
+          .from('links')
+          .delete()
+          .eq('id', id);
+          
+        if (error) {
+          console.warn('Supabase link delete error:', error);
+        }
+      } catch (err) {
+        console.warn('Supabase link delete offline:', err);
+      }
       
       toast.success('Link removido com sucesso!');
     } catch (error) {
@@ -248,7 +314,6 @@ export const useLinkStore = create<LinkState>((set, get) => ({
   trackRecentLink: (id) => {
     const { recentIds } = get();
     const newRecents = [id, ...recentIds.filter(recentId => recentId !== id)].slice(0, 10);
-    
     set({ recentIds: newRecents });
     localStorage.setItem('recentLinks', JSON.stringify(newRecents));
   },
@@ -257,21 +322,27 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     set({ loading: true });
     
     try {
-      const newCategoria = {
+      const newCategoria: Categoria = {
         id: uuidv4(),
         nome,
         created_at: new Date().toISOString()
       };
       
-      const { error } = await supabase
-        .from('categorias')
-        .insert([newCategoria]);
-        
-      if (error) throw error;
+      const updatedCategories = [...get().categorias, newCategoria].sort((a, b) => a.nome.localeCompare(b.nome));
+      set({ categorias: updatedCategories });
+      setCached(CACHE_KEYS.CATEGORIAS, updatedCategories);
       
-      set(state => ({ 
-        categorias: [...state.categorias, newCategoria as Categoria].sort((a, b) => a.nome.localeCompare(b.nome))
-      }));
+      try {
+        const { error } = await supabase
+          .from('categorias')
+          .insert([newCategoria]);
+          
+        if (error) {
+          console.warn('Supabase category insert issue:', error);
+        }
+      } catch (err) {
+        console.warn('Supabase category insert offline:', err);
+      }
       
       toast.success('Categoria adicionada com sucesso!');
     } catch (error) {
@@ -286,18 +357,25 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     set({ loading: true });
     
     try {
-      const { error } = await supabase
-        .from('categorias')
-        .update({ nome })
-        .eq('id', id);
-        
-      if (error) throw error;
+      const updatedCategories = get().categorias.map(cat => 
+        cat.id === id ? { ...cat, nome } : cat
+      ).sort((a, b) => a.nome.localeCompare(b.nome));
       
-      set(state => ({
-        categorias: state.categorias.map(cat => 
-          cat.id === id ? { ...cat, nome } : cat
-        ).sort((a, b) => a.nome.localeCompare(b.nome))
-      }));
+      set({ categorias: updatedCategories });
+      setCached(CACHE_KEYS.CATEGORIAS, updatedCategories);
+      
+      try {
+        const { error } = await supabase
+          .from('categorias')
+          .update({ nome })
+          .eq('id', id);
+          
+        if (error) {
+          console.warn('Supabase category update issue:', error);
+        }
+      } catch (err) {
+        console.warn('Supabase category update offline:', err);
+      }
       
       toast.success('Categoria atualizada com sucesso!');
     } catch (error) {
@@ -313,44 +391,37 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     
     try {
       // First check if there are links using this category
-      const { data: linksData, error: linksError } = await supabase
-        .from('links')
-        .select('id')
-        .eq('categoria_id', id);
-        
-      if (linksError) throw linksError;
-      
-      if (linksData && linksData.length > 0) {
+      const linksWithCat = get().links.filter(l => l.categoria_id === id);
+      if (linksWithCat.length > 0) {
         toast.error('Não é possível excluir uma categoria que possui links associados');
         set({ loading: false });
         return;
       }
       
       // Check if there are subcategories
-      const { data: subData, error: subError } = await supabase
-        .from('subcategorias')
-        .select('id')
-        .eq('categoria_id', id);
-        
-      if (subError) throw subError;
-      
-      if (subData && subData.length > 0) {
+      const subcatsWithCat = get().subcategorias.filter(s => s.categoria_id === id);
+      if (subcatsWithCat.length > 0) {
         toast.error('Não é possível excluir uma categoria que possui subcategorias');
         set({ loading: false });
         return;
       }
       
-      // Delete the category
-      const { error } = await supabase
-        .from('categorias')
-        .delete()
-        .eq('id', id);
-        
-      if (error) throw error;
+      const updatedCategories = get().categorias.filter(cat => cat.id !== id);
+      set({ categorias: updatedCategories });
+      setCached(CACHE_KEYS.CATEGORIAS, updatedCategories);
       
-      set(state => ({
-        categorias: state.categorias.filter(cat => cat.id !== id)
-      }));
+      try {
+        const { error } = await supabase
+          .from('categorias')
+          .delete()
+          .eq('id', id);
+          
+        if (error) {
+          console.warn('Supabase category delete issue:', error);
+        }
+      } catch (err) {
+        console.warn('Supabase category delete offline:', err);
+      }
       
       toast.success('Categoria removida com sucesso!');
     } catch (error) {
@@ -365,22 +436,28 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     set({ loading: true });
     
     try {
-      const newSubcategoria = {
+      const newSubcategoria: Subcategoria = {
         id: uuidv4(),
         nome,
         categoria_id: categoriaId,
         created_at: new Date().toISOString()
       };
       
-      const { error } = await supabase
-        .from('subcategorias')
-        .insert([newSubcategoria]);
-        
-      if (error) throw error;
+      const updatedSubcategories = [...get().subcategorias, newSubcategoria].sort((a, b) => a.nome.localeCompare(b.nome));
+      set({ subcategorias: updatedSubcategories });
+      setCached(CACHE_KEYS.SUBCATEGORIAS, updatedSubcategories);
       
-      set(state => ({ 
-        subcategorias: [...state.subcategorias, newSubcategoria as Subcategoria].sort((a, b) => a.nome.localeCompare(b.nome))
-      }));
+      try {
+        const { error } = await supabase
+          .from('subcategorias')
+          .insert([newSubcategoria]);
+          
+        if (error) {
+          console.warn('Supabase subcategory insert issue:', error);
+        }
+      } catch (err) {
+        console.warn('Supabase subcategory insert offline:', err);
+      }
       
       toast.success('Subcategoria adicionada com sucesso!');
     } catch (error) {
@@ -395,18 +472,25 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     set({ loading: true });
     
     try {
-      const { error } = await supabase
-        .from('subcategorias')
-        .update({ nome, categoria_id: categoriaId })
-        .eq('id', id);
-        
-      if (error) throw error;
+      const updatedSubcategories = get().subcategorias.map(sub => 
+        sub.id === id ? { ...sub, nome, categoria_id: categoriaId } : sub
+      ).sort((a, b) => a.nome.localeCompare(b.nome));
       
-      set(state => ({
-        subcategorias: state.subcategorias.map(sub => 
-          sub.id === id ? { ...sub, nome, categoria_id: categoriaId } : sub
-        ).sort((a, b) => a.nome.localeCompare(b.nome))
-      }));
+      set({ subcategorias: updatedSubcategories });
+      setCached(CACHE_KEYS.SUBCATEGORIAS, updatedSubcategories);
+      
+      try {
+        const { error } = await supabase
+          .from('subcategorias')
+          .update({ nome, categoria_id: categoriaId })
+          .eq('id', id);
+          
+        if (error) {
+          console.warn('Supabase subcategory update issue:', error);
+        }
+      } catch (err) {
+        console.warn('Supabase subcategory update offline:', err);
+      }
       
       toast.success('Subcategoria atualizada com sucesso!');
     } catch (error) {
@@ -422,30 +506,29 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     
     try {
       // First check if there are links using this subcategory
-      const { data, error: linksError } = await supabase
-        .from('links')
-        .select('id')
-        .eq('subcategoria_id', id);
-        
-      if (linksError) throw linksError;
-      
-      if (data && data.length > 0) {
+      const linksWithSubcat = get().links.filter(l => l.subcategoria_id === id);
+      if (linksWithSubcat.length > 0) {
         toast.error('Não é possível excluir uma subcategoria que possui links associados');
         set({ loading: false });
         return;
       }
       
-      // Delete the subcategory
-      const { error } = await supabase
-        .from('subcategorias')
-        .delete()
-        .eq('id', id);
-        
-      if (error) throw error;
+      const updatedSubcategories = get().subcategorias.filter(sub => sub.id !== id);
+      set({ subcategorias: updatedSubcategories });
+      setCached(CACHE_KEYS.SUBCATEGORIAS, updatedSubcategories);
       
-      set(state => ({
-        subcategorias: state.subcategorias.filter(sub => sub.id !== id)
-      }));
+      try {
+        const { error } = await supabase
+          .from('subcategorias')
+          .delete()
+          .eq('id', id);
+          
+        if (error) {
+          console.warn('Supabase subcategory delete issue:', error);
+        }
+      } catch (err) {
+        console.warn('Supabase subcategory delete offline:', err);
+      }
       
       toast.success('Subcategoria removida com sucesso!');
     } catch (error) {
@@ -460,7 +543,7 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     try {
       localStorage.setItem('meuhub_link_view_mode', mode);
     } catch (e) {
-      console.debug('Failed to save link view mode', e);
+      console.debug('Failed to save view mode to storage', e);
     }
     set({ viewMode: mode });
   },
@@ -483,16 +566,7 @@ export const useLinkStore = create<LinkState>((set, get) => ({
         console.debug('Failed to remove category id', e);
       }
     }
-    try {
-      localStorage.removeItem('meuhub_selected_subcat_id');
-    } catch (e) {
-      console.debug('Failed to remove subcategory id', e);
-    }
-    set({ 
-      selectedCategoryId: categoryId,
-      // Clear subcategory selection when changing category
-      selectedSubcategoryId: null
-    });
+    set({ selectedCategoryId: categoryId });
   },
   
   setSelectedSubcategoryId: (subcategoryId) => {
@@ -532,86 +606,36 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     set({ loading: true });
     
     try {
-      // Using Supabase's full-text search capabilities
-      const { data, error } = await supabase
-        .from('links')
-        .select('*')
-        .eq('user_id', userId)
-        .or(`titulo.ilike.%${query}%,descricao.ilike.%${query}%`)
-        .order('created_at', { ascending: false });
-        
-      if (error) throw error;
-      
-      // Get categories and subcategories for further filtering
+      // Local fast search first across existing links, categories and subcategories
+      const currentLinks = get().links;
       const categorias = get().categorias;
       const subcategorias = get().subcategorias;
       
-      // Further filter by categoria and subcategoria
-      const results = data as Link[];
-      
-      // Filter by category/subcategory name if query matches
-      const matchingCategorias = categorias.filter(cat => 
-        cat.nome.toLowerCase().includes(query)
+      const matchingCatIds = new Set(
+        categorias.filter(c => c.nome.toLowerCase().includes(query)).map(c => c.id)
+      );
+      const matchingSubcatIds = new Set(
+        subcategorias.filter(s => s.nome.toLowerCase().includes(query)).map(s => s.id)
       );
       
-      const matchingSubcategorias = subcategorias.filter(sub => 
-        sub.nome.toLowerCase().includes(query)
-      );
+      const localMatches = currentLinks.filter(link => {
+        const titleMatch = link.titulo?.toLowerCase().includes(query);
+        const descMatch = link.descricao?.toLowerCase().includes(query);
+        const urlMatch = link.url?.toLowerCase().includes(query);
+        const catMatch = link.categoria_id && matchingCatIds.has(link.categoria_id);
+        const subcatMatch = link.subcategoria_id && matchingSubcatIds.has(link.subcategoria_id);
+        return titleMatch || descMatch || urlMatch || catMatch || subcatMatch;
+      });
       
-      // Add links that match by category/subcategory
-      if (matchingCategorias.length > 0 || matchingSubcategorias.length > 0) {
-        const { data: additionalLinks, error: additionalError } = await supabase
-          .from('links')
-          .select('*')
-          .eq('user_id', userId)
-          .in('categoria_id', matchingCategorias.map(c => c.id))
-          .order('created_at', { ascending: false });
-          
-        if (!additionalError && additionalLinks) {
-          // Add links that weren't already in results
-          const existingIds = new Set(results.map(link => link.id));
-          additionalLinks.forEach(link => {
-            if (!existingIds.has(link.id)) {
-              results.push(link as Link);
-              existingIds.add(link.id);
-            }
-          });
-        }
-        
-        // Add links by subcategory
-        if (matchingSubcategorias.length > 0) {
-          const { data: subLinks, error: subError } = await supabase
-            .from('links')
-            .select('*')
-            .eq('user_id', userId)
-            .in('subcategoria_id', matchingSubcategorias.map(s => s.id))
-            .order('created_at', { ascending: false });
-            
-          if (!subError && subLinks) {
-            // Add links that weren't already in results
-            const existingIds = new Set(results.map(link => link.id));
-            subLinks.forEach(link => {
-              if (!existingIds.has(link.id)) {
-                results.push(link as Link);
-                existingIds.add(link.id);
-              }
-            });
-          }
-        }
-      }
-      
-      set({ searchResults: results });
+      set({ searchResults: localMatches });
     } catch (error) {
       console.error('Error searching links:', error);
-      toast.error('Erro ao pesquisar links');
     } finally {
       set({ loading: false });
     }
   },
   
   fetchCredenciais: async (userId: string) => {
-    set({ loading: true });
-    
     try {
       const { data, error } = await supabase
         .from('credenciais')
@@ -622,7 +646,6 @@ export const useLinkStore = create<LinkState>((set, get) => ({
       
       const credsMap: Record<string, Credencial> = {};
       ((data || []) as unknown as Credencial[]).forEach(cred => {
-        // Descriptografar senha se estiver criptografada
         if (cred.password && isEncrypted(cred.password)) {
           try {
             cred.password = decryptPassword(cred.password, userId);
@@ -631,7 +654,6 @@ export const useLinkStore = create<LinkState>((set, get) => ({
           }
         }
 
-        // Se custom_fields for string JSON ou objeto salvo no notes/custom_fields
         let parsedCustomFields = cred.custom_fields;
         if (typeof parsedCustomFields === 'string') {
           try {
@@ -641,7 +663,6 @@ export const useLinkStore = create<LinkState>((set, get) => ({
           }
         }
 
-        // Se houver campos em notes codificados como JSON de backup
         if (cred.notes && cred.notes.startsWith('__CUSTOM_FIELDS_JSON__:')) {
           try {
             const raw = cred.notes.replace('__CUSTOM_FIELDS_JSON__:', '');
@@ -658,7 +679,6 @@ export const useLinkStore = create<LinkState>((set, get) => ({
           }
         }
 
-        // Descriptografar campos do tipo password em custom_fields se necessário
         if (Array.isArray(parsedCustomFields)) {
           parsedCustomFields = parsedCustomFields.map(f => {
             if (f.type === 'password' && f.value && isEncrypted(f.value)) {
@@ -677,11 +697,13 @@ export const useLinkStore = create<LinkState>((set, get) => ({
       });
       
       set({ credenciais: credsMap });
+      setCached(CACHE_KEYS.CREDENCIAIS, credsMap);
     } catch (error) {
-      console.error('Error fetching credenciais:', error);
-      toast.error('Erro ao carregar credenciais');
-    } finally {
-      set({ loading: false });
+      console.warn('Network issue fetching credenciais, using local/cached credenciais:', error);
+      const cached = getCached<Record<string, Credencial>>(CACHE_KEYS.CREDENCIAIS, {});
+      if (Object.keys(cached).length > 0) {
+        set({ credenciais: cached });
+      }
     }
   },
   
@@ -689,7 +711,6 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     set({ loading: true });
     
     try {
-      // Processar custom_fields criptografando campos confidenciais
       const processedCustomFields = credencial.custom_fields || [];
       const encryptedCustomFields = processedCustomFields.map(f => {
         if (f.type === 'password' && f.value) {
@@ -698,7 +719,6 @@ export const useLinkStore = create<LinkState>((set, get) => ({
         return f;
       });
 
-      // Criptografar a senha antes de salvar
       const encryptedCredential: Record<string, unknown> = {
         ...credencial,
         password: credencial.password ? encryptPassword(credencial.password, credencial.user_id) : null,
@@ -707,45 +727,44 @@ export const useLinkStore = create<LinkState>((set, get) => ({
         created_at: new Date().toISOString()
       };
       
-      let { error } = await supabase
-        .from('credenciais')
-        .insert([encryptedCredential]);
-        
-      // Se a coluna custom_fields ou credential_type não existir no schema Supabase, fazemos fallback transparente usando prefixo em notes
-      if (error && (error.message?.includes('custom_fields') || error.message?.includes('credential_type') || error.code === '42703' || error.message?.includes('column'))) {
-        console.warn('Fallback: storing custom fields & type in notes metadata');
-        const fallbackCredential = {
-          ...encryptedCredential,
-          custom_fields: undefined,
-          credential_type: undefined,
-          notes: `__CUSTOM_FIELDS_JSON__:${JSON.stringify({
-            notes: credencial.notes || '',
-            credential_type: credencial.credential_type || 'login',
-            custom_fields: encryptedCustomFields
-          })}`
-        };
-        delete fallbackCredential.custom_fields;
-        delete fallbackCredential.credential_type;
-        const res = await supabase.from('credenciais').insert([fallbackCredential]);
-        error = res.error;
-      }
-
-      if (error) throw error;
-      
-      // Manter a senha e custom_fields descriptografados no estado local
       const localCredential: Credencial = {
         ...credencial,
-        id: encryptedCredential.id,
-        created_at: encryptedCredential.created_at,
+        id: encryptedCredential.id as string,
+        created_at: encryptedCredential.created_at as string,
         custom_fields: processedCustomFields
       };
       
-      set(state => ({ 
-        credenciais: { 
-          ...state.credenciais, 
-          [credencial.link_id]: localCredential 
-        } 
-      }));
+      const updatedCreds = {
+        ...get().credenciais,
+        [credencial.link_id]: localCredential
+      };
+      
+      set({ credenciais: updatedCreds });
+      setCached(CACHE_KEYS.CREDENCIAIS, updatedCreds);
+
+      try {
+        const { error } = await supabase
+          .from('credenciais')
+          .insert([encryptedCredential]);
+          
+        if (error && (error.message?.includes('custom_fields') || error.message?.includes('credential_type') || error.code === '42703' || error.message?.includes('column'))) {
+          const fallbackCredential = {
+            ...encryptedCredential,
+            custom_fields: undefined,
+            credential_type: undefined,
+            notes: `__CUSTOM_FIELDS_JSON__:${JSON.stringify({
+              notes: credencial.notes || '',
+              credential_type: credencial.credential_type || 'login',
+              custom_fields: encryptedCustomFields
+            })}`
+          };
+          delete fallbackCredential.custom_fields;
+          delete fallbackCredential.credential_type;
+          await supabase.from('credenciais').insert([fallbackCredential]);
+        }
+      } catch (err) {
+        console.warn('Supabase credential insert offline:', err);
+      }
       
       toast.success('Credenciais salvas com sucesso! (Criptografadas)');
     } catch (error) {
@@ -760,7 +779,6 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     set({ loading: true });
     
     try {
-      // Encontrar a credencial atual para obter o user_id
       const currentCredential = Object.values(get().credenciais).find(cred => cred.id === id);
       if (!currentCredential) {
         throw new Error('Credencial não encontrada');
@@ -768,7 +786,6 @@ export const useLinkStore = create<LinkState>((set, get) => ({
 
       const userId = currentCredential.user_id;
 
-      // Processar custom_fields criptografando campos confidenciais
       const processedCustomFields = credencialData.custom_fields !== undefined 
         ? credencialData.custom_fields 
         : currentCredential.custom_fields;
@@ -780,54 +797,50 @@ export const useLinkStore = create<LinkState>((set, get) => ({
         return f;
       }) || [];
       
-      // Criptografar a senha se foi fornecida
-      const encryptedData: Record<string, unknown> = {
-        ...credencialData,
-        password: credencialData.password ? encryptPassword(credencialData.password, userId) : credencialData.password,
-        custom_fields: encryptedCustomFields
-      };
-      
-      let { error } = await supabase
-        .from('credenciais')
-        .update(encryptedData)
-        .eq('id', id);
-        
-      // Fallback se a coluna custom_fields ou credential_type não existir
-      if (error && (error.message?.includes('custom_fields') || error.message?.includes('credential_type') || error.code === '42703' || error.message?.includes('column'))) {
-        console.warn('Fallback: updating custom fields in notes metadata');
-        const fallbackData = {
-          ...encryptedData,
-          custom_fields: undefined,
-          credential_type: undefined,
-          notes: `__CUSTOM_FIELDS_JSON__:${JSON.stringify({
-            notes: credencialData.notes !== undefined ? credencialData.notes : (currentCredential.notes || ''),
-            credential_type: credencialData.credential_type || currentCredential.credential_type || 'login',
-            custom_fields: encryptedCustomFields
-          })}`
-        };
-        delete fallbackData.custom_fields;
-        delete fallbackData.credential_type;
-        const res = await supabase.from('credenciais').update(fallbackData).eq('id', id);
-        error = res.error;
-      }
-
-      if (error) throw error;
-      
-      // Manter os dados descriptografados no estado local
       const localData = {
         ...credencialData,
         custom_fields: processedCustomFields
       };
       
-      set(state => {
-        const updatedCredential = { ...currentCredential, ...localData };
-        return {
-          credenciais: { 
-            ...state.credenciais, 
-            [updatedCredential.link_id]: updatedCredential as Credencial 
-          }
+      const updatedCredential = { ...currentCredential, ...localData };
+      const updatedCreds = {
+        ...get().credenciais,
+        [updatedCredential.link_id]: updatedCredential as Credencial
+      };
+      
+      set({ credenciais: updatedCreds });
+      setCached(CACHE_KEYS.CREDENCIAIS, updatedCreds);
+
+      try {
+        const encryptedData: Record<string, unknown> = {
+          ...credencialData,
+          password: credencialData.password ? encryptPassword(credencialData.password, userId) : credencialData.password,
+          custom_fields: encryptedCustomFields
         };
-      });
+        
+        const { error } = await supabase
+          .from('credenciais')
+          .update(encryptedData)
+          .eq('id', id);
+          
+        if (error && (error.message?.includes('custom_fields') || error.message?.includes('credential_type') || error.code === '42703' || error.message?.includes('column'))) {
+          const fallbackData = {
+            ...encryptedData,
+            custom_fields: undefined,
+            credential_type: undefined,
+            notes: `__CUSTOM_FIELDS_JSON__:${JSON.stringify({
+              notes: credencialData.notes !== undefined ? credencialData.notes : (currentCredential.notes || ''),
+              credential_type: credencialData.credential_type || currentCredential.credential_type || 'login',
+              custom_fields: encryptedCustomFields
+            })}`
+          };
+          delete fallbackData.custom_fields;
+          delete fallbackData.credential_type;
+          await supabase.from('credenciais').update(fallbackData).eq('id', id);
+        }
+      } catch (err) {
+        console.warn('Supabase credential update offline:', err);
+      }
       
       toast.success('Credenciais atualizadas com sucesso! (Criptografadas)');
     } catch (error) {
@@ -842,23 +855,24 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     set({ loading: true });
     
     try {
-      const { error } = await supabase
-        .from('credenciais')
-        .delete()
-        .eq('id', id);
-        
-      if (error) throw error;
-      
-      set(state => {
-        const newCredentials = { ...state.credenciais };
-        // Find and remove credential by id
-        Object.keys(newCredentials).forEach(linkId => {
-          if (newCredentials[linkId].id === id) {
-            delete newCredentials[linkId];
-          }
-        });
-        return { credenciais: newCredentials };
+      const newCredentials = { ...get().credenciais };
+      Object.keys(newCredentials).forEach(linkId => {
+        if (newCredentials[linkId].id === id) {
+          delete newCredentials[linkId];
+        }
       });
+      
+      set({ credenciais: newCredentials });
+      setCached(CACHE_KEYS.CREDENCIAIS, newCredentials);
+
+      try {
+        await supabase
+          .from('credenciais')
+          .delete()
+          .eq('id', id);
+      } catch (err) {
+        console.warn('Supabase credential delete offline:', err);
+      }
       
       toast.success('Credenciais removidas com sucesso!');
     } catch (error) {
@@ -875,14 +889,10 @@ export const useLinkStore = create<LinkState>((set, get) => ({
   
   getLinkPreview: async (url: string): Promise<string | null> => {
     try {
-      // Instead of trying to fetch the actual page (which may fail due to CORS),
-      // use common patterns to generate a preview
       const urlObj = new URL(url);
       const hostname = urlObj.hostname;
       
-      // Common patterns for favicons and logos
       if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) {
-        // For YouTube links, extract video ID and use thumbnail
         const videoId = url.includes('youtu.be/') 
           ? url.split('youtu.be/')[1].split('?')[0]
           : url.includes('v=') 
@@ -894,7 +904,6 @@ export const useLinkStore = create<LinkState>((set, get) => ({
         }
       }
       
-      // Check for common social media sites
       if (hostname.includes('twitter.com') || hostname.includes('x.com')) {
         return 'https://abs.twimg.com/responsive-web/client-web/icon-ios.b1fc7275.png';
       }
@@ -915,11 +924,9 @@ export const useLinkStore = create<LinkState>((set, get) => ({
         return 'https://github.githubassets.com/assets/github-mark-9be88460eaa6.svg';
       }
       
-      // For general sites, try to use a service that generates website previews
       return `https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://${hostname}&size=128`;
-      
     } catch (error) {
-      console.error('Error generating link preview:', error);
+      console.debug('Error generating link preview:', error);
       return null;
     }
   }

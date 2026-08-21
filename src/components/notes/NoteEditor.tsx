@@ -10,7 +10,8 @@ import {
   Strikethrough, List, ListOrdered, AlignLeft, AlignCenter, AlignRight, AlignJustify,
   Highlighter, Palette, TableProperties, Plus, ChevronRight, Combine,
   Code2, ShieldCheck, Link as LinkIcon, Type, Terminal, KeyRound, Sparkles, Wand2,
-  Camera, Image as ImageIcon, Upload, Download, Copy, ChevronDown, Undo2, Redo2, PanelLeftOpen
+  Camera, Image as ImageIcon, Upload, Download, Copy, ChevronDown, Undo2, Redo2, PanelLeftOpen,
+  Shapes, Pencil, Search
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -19,10 +20,12 @@ import { ScriptBlock } from './dev/ScriptBlock';
 import { SecretVaultBlock } from './dev/SecretVaultBlock';
 import { LinkCardBlock } from './dev/LinkCardBlock';
 import { ImageBlock } from './dev/ImageBlock';
+import { WhiteboardBlock } from './dev/WhiteboardBlock';
 import { InsertLinkModal } from './dev/InsertLinkModal';
 import { RelatedLinksDrawer } from './dev/RelatedLinksDrawer';
 import { AiAssistantModal } from './AiAssistantModal';
 import { ScreenCropModal } from './ScreenCropModal';
+import { GlobalNotesSearchModal } from './GlobalNotesSearchModal';
 import { SettingsModal } from '@/components/settings/SettingsModal';
 import { captureScreen, fileToDataUrl } from '@/lib/screenCapture';
 import { toast } from 'sonner';
@@ -363,6 +366,9 @@ function TextBlock({
       <Rnd
         size={{ width: block.width, height: block.height }}
         position={{ x: block.x, y: block.y }}
+        style={{
+          zIndex: isSelected ? 30 : 10,
+        }}
         onDragStop={(_, d) => updateBlock(block.id, { x: d.x, y: d.y })}
         onResizeStop={(_, __, ref, ___, position) => {
           updateBlock(block.id, {
@@ -375,7 +381,7 @@ function TextBlock({
         minWidth={150}
         minHeight={36}
         dragHandleClassName="drag-handle"
-        className={`group ${isSelected ? 'z-20' : 'z-10'}`}
+        className={`group ${isSelected ? 'z-30' : 'z-10'}`}
         onClick={(e) => {
           e.stopPropagation();
           setSelectedId(block.id);
@@ -645,6 +651,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [isInsertLinkOpen, setIsInsertLinkOpen] = useState(false);
   const [isRelatedLinksOpen, setIsRelatedLinksOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
 
   // Gemini AI Assistant Modal State
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
@@ -661,6 +668,47 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastLoadedPageIdRef = useRef<string | null>(null);
   const lastSavedContentRef = useRef<string | null>(null);
+
+  // Global keyboard shortcut for search (Ctrl+K or Cmd+K)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsSearchOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Listen for scroll & highlight target block event from search
+  useEffect(() => {
+    const handleScrollToBlock = (e: Event) => {
+      const customEvent = e as CustomEvent<{ pageId: string; blockId?: string }>;
+      if (!customEvent.detail || customEvent.detail.pageId !== pageId) return;
+
+      const targetBlockId = customEvent.detail.blockId;
+      if (!targetBlockId) return;
+
+      setSelectedBlockId(targetBlockId);
+
+      // Locate block and scroll canvas
+      setBlocks((currentBlocks) => {
+        const targetBlock = currentBlocks.find((b) => b.id === targetBlockId);
+        if (targetBlock && canvasRef.current) {
+          canvasRef.current.scrollTo({
+            left: Math.max(0, targetBlock.x - 60),
+            top: Math.max(0, targetBlock.y - 60),
+            behavior: 'smooth',
+          });
+        }
+        return currentBlocks;
+      });
+    };
+
+    window.addEventListener('meuhub_scroll_to_block', handleScrollToBlock);
+    return () => window.removeEventListener('meuhub_scroll_to_block', handleScrollToBlock);
+  }, [pageId]);
 
   const relatedLinksCount = useMemo(() => {
     return relations.filter((r) => r.note_id === pageId).length;
@@ -862,10 +910,28 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
     }
   };
 
-  // Helper to calculate spawn position near current view
-  const getSpawnPosition = () => {
+  // Helper to calculate spawn position avoiding overlapping on top of existing notes
+  const getSpawnPosition = (blockWidth = 440, blockHeight = 220) => {
     const scrollLeft = canvasRef.current?.scrollLeft || 0;
     const scrollTop = canvasRef.current?.scrollTop || 0;
+    
+    // Check if user has existing blocks
+    if (blocks.length > 0) {
+      // Find the lowest bottom of existing blocks
+      const maxY = blocks.reduce((acc, b) => {
+        const h = typeof b.height === 'number' ? b.height : parseInt(String(b.height)) || 180;
+        return Math.max(acc, b.y + h);
+      }, 0);
+
+      // Position comfortably below existing content or at top if user scrolled down
+      if (scrollTop < maxY) {
+        return {
+          x: Math.max(30, scrollLeft + 40),
+          y: maxY + 24,
+        };
+      }
+    }
+
     const offset = (blocks.length % 6) * 25;
     return {
       x: Math.max(30, scrollLeft + 50 + offset),
@@ -873,11 +939,43 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
     };
   };
 
+  // Bring a block to the highest visual layer (front of DOM stack)
+  const bringBlockToFront = useCallback((id: string) => {
+    setBlocks((prev) => {
+      const idx = prev.findIndex((b) => b.id === id);
+      if (idx === -1 || idx === prev.length - 1) return prev;
+      const target = prev[idx];
+      const rest = prev.filter((b) => b.id !== id);
+      const updated = [...rest, target];
+      const json = JSON.stringify(updated);
+      lastSavedContentRef.current = json;
+      updatePage(pageId, { conteudo: json });
+      return updated;
+    });
+    setSelectedBlockId(id);
+  }, [pageId, updatePage]);
+
+  // Send a block to the back of the DOM stack
+  const sendBlockToBack = useCallback((id: string) => {
+    setBlocks((prev) => {
+      const idx = prev.findIndex((b) => b.id === id);
+      if (idx <= 0) return prev;
+      const target = prev[idx];
+      const rest = prev.filter((b) => b.id !== id);
+      const updated = [target, ...rest];
+      const json = JSON.stringify(updated);
+      lastSavedContentRef.current = json;
+      updatePage(pageId, { conteudo: json });
+      return updated;
+    });
+    setSelectedBlockId(id);
+  }, [pageId, updatePage]);
+
   // Add a new Text & Table block
   const handleAddTextBlock = (e?: React.MouseEvent) => {
     e?.stopPropagation();
     const cleaned = purgeAndSave(blocks, null);
-    const pos = getSpawnPosition();
+    const pos = getSpawnPosition(440, 180);
     const newBlock: CanvasBlock = {
       id: `text_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       x: pos.x,
@@ -896,7 +994,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   const handleAddScriptBlock = (e?: React.MouseEvent) => {
     e?.stopPropagation();
     const cleaned = purgeAndSave(blocks, null);
-    const pos = getSpawnPosition();
+    const pos = getSpawnPosition(560, 380);
     const newBlock: CanvasBlock = {
       id: `script_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       x: pos.x,
@@ -922,7 +1020,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   const handleAddVaultBlock = (e?: React.MouseEvent) => {
     e?.stopPropagation();
     const cleaned = purgeAndSave(blocks, null);
-    const pos = getSpawnPosition();
+    const pos = getSpawnPosition(520, 340);
     const newBlock: CanvasBlock = {
       id: `vault_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       x: pos.x,
@@ -937,6 +1035,29 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
     setBlocks(nextBlocks);
     setSelectedBlockId(newBlock.id);
     updatePage(pageId, { conteudo: JSON.stringify(nextBlocks) });
+  };
+
+  // Add a new Whiteboard / Flowchart Drawing block (Excalidraw-like)
+  const handleAddWhiteboardBlock = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const cleaned = purgeAndSave(blocks, null);
+    const pos = getSpawnPosition(760, 420);
+    const newBlock: CanvasBlock = {
+      id: `draw_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      x: pos.x,
+      y: pos.y,
+      width: 760,
+      height: 420,
+      type: 'whiteboard',
+      drawingTitle: 'Quadro de Processos & Diagrama',
+      elements: [],
+      canvasBg: 'grid',
+    };
+    const nextBlocks = [...cleaned, newBlock];
+    setBlocks(nextBlocks);
+    setSelectedBlockId(newBlock.id);
+    updatePage(pageId, { conteudo: JSON.stringify(nextBlocks) });
+    toast.success('Quadro de diagramas adicionado!');
   };
 
   // Add an existing link card block
@@ -1147,7 +1268,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
     <div className="flex flex-col h-full bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-slate-200 dark:border-zinc-800 overflow-hidden transition-colors">
       {/* Title Header */}
       <div className="px-6 py-4 border-b border-border bg-white dark:bg-zinc-900 z-20 shrink-0 flex flex-col gap-3">
-        <div className="flex items-start gap-3 flex-1 min-w-0 w-full">
+        <div className="flex items-start justify-between gap-3 flex-1 min-w-0 w-full">
           <div className="flex flex-col w-full min-w-0">
             <input
               className="text-2xl font-bold border-none outline-none w-full bg-transparent placeholder-slate-300 dark:placeholder-zinc-600 text-slate-800 dark:text-zinc-100 truncate"
@@ -1161,6 +1282,21 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
               </span>
             )}
           </div>
+
+          {/* Global Search Button in Note Top Bar */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setIsSearchOpen(true)}
+            className="h-8 px-3 text-xs bg-slate-50 dark:bg-zinc-800 hover:bg-indigo-50 dark:hover:bg-zinc-700 text-slate-600 dark:text-zinc-300 hover:text-indigo-600 dark:hover:text-indigo-400 border-slate-200 dark:border-zinc-700 rounded-xl gap-2 shadow-2xs font-medium shrink-0"
+            title="Pesquisar em todas as notas, códigos, textos, diagramas e credenciais (Ctrl+K)"
+          >
+            <Search size={14} className="text-slate-400 dark:text-zinc-500" />
+            <span className="hidden sm:inline">Pesquisar tudo</span>
+            <kbd className="hidden sm:inline-block px-1.5 py-0.2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded text-[9px] font-mono font-semibold text-slate-400">
+              Ctrl+K
+            </kbd>
+          </Button>
         </div>
 
         {/* Developer Action Bar / Quick Insert Buttons */}
@@ -1247,6 +1383,18 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
           >
             <ShieldCheck size={14} className="text-amber-600 dark:text-amber-400" />
             <span className="hidden sm:inline">Credenciais</span>
+          </Button>
+
+          {/* Insert Whiteboard / Flowchart Drawing Block (Excalidraw-like) */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleAddWhiteboardBlock}
+            className="h-8 px-2.5 text-xs bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100/80 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800 rounded-md gap-1.5 shadow-2xs font-semibold"
+            title="Inserir quadro de desenho livre e diagramas de fluxo estilo Excalidraw (com IA)"
+          >
+            <Shapes size={14} className="text-purple-600 dark:text-purple-400" />
+            <span className="hidden sm:inline">Quadro / Fluxo</span>
           </Button>
 
           {/* Insert Registered Link Card */}
@@ -1349,6 +1497,21 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
               );
             }
 
+            if (block.type === 'whiteboard') {
+              return (
+                <WhiteboardBlock
+                  key={block.id}
+                  block={block}
+                  updateBlock={updateBlock}
+                  removeBlock={removeBlock}
+                  isSelected={selectedBlockId === block.id}
+                  setSelectedId={setSelectedBlockId}
+                  bringToFront={bringBlockToFront}
+                  sendToBack={sendBlockToBack}
+                />
+              );
+            }
+
             // Default Text Block
             return (
               <TextBlock
@@ -1427,6 +1590,12 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
       <SettingsModal
         open={isSettingsModalOpen}
         onOpenChange={setIsSettingsModalOpen}
+      />
+
+      {/* Global Search Modal */}
+      <GlobalNotesSearchModal
+        open={isSearchOpen}
+        onOpenChange={setIsSearchOpen}
       />
     </div>
   );

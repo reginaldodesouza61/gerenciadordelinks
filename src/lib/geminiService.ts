@@ -197,3 +197,107 @@ ${context}`;
     throw err;
   }
 }
+
+import { DrawingElement } from '@/types/notes';
+
+export interface GeneratedDiagramResponse {
+  title: string;
+  elements: DrawingElement[];
+  description?: string;
+}
+
+export async function generateDiagramWithAi(
+  userPrompt: string, 
+  noteTitle?: string
+): Promise<GeneratedDiagramResponse> {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) {
+    throw new Error('CHAVE_NAO_CONFIGURADA');
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  const systemInstruction = `Você é um Arquiteto de Software e Designer de Diagramas visuais do MeuHub.
+Sua missão é converter a descrição do usuário em um diagrama ou fluxograma visual estruturado com elementos perfeitamente posicionados em uma grade (canvas 2D).
+Retorne ESTRITAMENTE um JSON válido com o seguinte formato, sem formatação Markdown (\`\`\`json ou \`\`\`):
+{
+  "title": "Nome do Fluxo/Diagrama",
+  "description": "Breve explicação do fluxo em 1 frase",
+  "elements": [
+    {
+      "id": "node-1",
+      "type": "rectangle" | "diamond" | "ellipse" | "cylinder" | "card" | "arrow" | "text",
+      "x": 60,
+      "y": 60,
+      "width": 160,
+      "height": 60,
+      "text": "1. Início / Solicitação",
+      "strokeColor": "#6366f1",
+      "fillColor": "#eef2ff",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "fontSize": 13,
+      "textColor": "#1e293b",
+      "rounded": true
+    },
+    {
+      "id": "arrow-1",
+      "type": "arrow",
+      "x": 140,
+      "y": 120,
+      "width": 0,
+      "height": 70,
+      "text": "Submete",
+      "strokeColor": "#6366f1",
+      "strokeWidth": 2,
+      "fontSize": 11,
+      "textColor": "#475569"
+    }
+  ]
+}
+
+REGRAS DE POSICIONAMENTO E DESIGN:
+1. Posicionamento Lógico: Organize o fluxo em ordem cronológica (de cima para baixo no eixo Y, ou da esquerda para a direita no eixo X). Espaçamento padrão entre nós: ~70px a 100px.
+2. Tipos de Formas:
+   - "rectangle": Processos, Ações, APIs, Microsserviços (rounded: true)
+   - "diamond": Decisões, Validações, Condições (Sim / Não)
+   - "cylinder": Bancos de Dados, Armazenamento, Cache
+   - "ellipse": Início / Fim do fluxo
+   - "arrow": Setas conectando nós (x, y = ponto inicial; width = deltaX, height = deltaY). Pode incluir texto explicativo (ex: "Sim", "Não", "200 OK", "Erro").
+   - "card": Anotação importante ou requisitos
+3. Cores harmoniosas profissionais:
+   - Início/Fim: verde (#10b981 / fill #ecfdf5)
+   - Processos gerais: indigo (#6366f1 / fill #eef2ff) ou azul (#0284c7 / fill #f0f9ff)
+   - Decisão/Validação: âmbar/amarelo (#d97706 / fill #fffbeb)
+   - Banco de dados: roxo (#8b5cf6 / fill #f5f3ff) ou esmeralda (#059669 / fill #ecfdf5)
+   - Falha/Erro: vermelho (#ef4444 / fill #fef2f2)
+4. Retorne APENAS o JSON puro.`;
+
+  const prompt = `Crie um diagrama de fluxo visual completo e profissional para o seguinte pedido:
+${userPrompt}
+${noteTitle ? `Contexto da anotação: "${noteTitle}"` : ''}`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: prompt,
+      config: {
+        systemInstruction,
+        temperature: 0.3,
+      }
+    });
+
+    let rawText = response.text || '';
+    rawText = rawText.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+
+    const parsed = JSON.parse(rawText) as GeneratedDiagramResponse;
+    if (parsed && Array.isArray(parsed.elements)) {
+      return parsed;
+    }
+    throw new Error('Formato de resposta inválido');
+  } catch (err) {
+    console.error('Erro ao gerar diagrama com IA:', err);
+    throw err;
+  }
+}
+

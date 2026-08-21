@@ -3,7 +3,11 @@ import { useAuthStore } from '@/lib/store/authStore';
 import { useNoteStore } from '@/lib/store/noteStore';
 import { NotesSidebar } from './NotesSidebar';
 import { NoteEditor } from './NoteEditor';
-import { Menu, X, ChevronLeft, ChevronRight, PanelLeftOpen, PanelLeftClose, Folder, FileText } from 'lucide-react';
+import { GlobalNotesSearchModal } from './GlobalNotesSearchModal';
+import { 
+  Menu, X, ChevronLeft, ChevronRight, PanelLeftOpen, PanelLeftClose, 
+  Folder, FileText, Search 
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'meuhub_notes_sidebar_collapsed';
@@ -12,6 +16,7 @@ export function NotesContainer() {
   const { user } = useAuthStore();
   const { fetchNotes, activePageId, isLoading } = useNoteStore();
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [isDesktopSidebarCollapsed, setIsDesktopSidebarCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
@@ -21,6 +26,18 @@ export function NotesContainer() {
   });
   const [sidebarWidth, setSidebarWidth] = useState(288); // Default 288px (w-72)
   const [isResizing, setIsResizing] = useState(false);
+
+  // Global keyboard shortcut for Ctrl+K
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsSearchModalOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const toggleSidebarCollapse = (collapsed: boolean) => {
     setIsDesktopSidebarCollapsed(collapsed);
@@ -117,6 +134,18 @@ export function NotesContainer() {
             >
               <PanelLeftOpen size={16} />
             </button>
+
+            <button
+              type="button"
+              className="h-8 w-8 flex items-center justify-center rounded-lg bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300 hover:bg-indigo-600 hover:text-white border border-slate-200 dark:border-zinc-700 shadow-xs transition-all mt-1"
+              title="Pesquisar em tudo (Ctrl+K)"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsSearchModalOpen(true);
+              }}
+            >
+              <Search size={15} />
+            </button>
           </div>
 
           <div className="flex-1 flex items-center justify-center my-4">
@@ -173,20 +202,39 @@ export function NotesContainer() {
                 <p className="text-gray-500 dark:text-zinc-400 text-sm mb-5 leading-relaxed">
                   Selecione uma anotação no menu lateral ou crie uma nova para começar a editar no quadro livre.
                 </p>
-                {isDesktopSidebarCollapsed && (
+                <div className="flex flex-wrap items-center justify-center gap-2">
                   <Button
-                    onClick={() => toggleSidebarCollapse(false)}
-                    className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-xs"
+                    onClick={() => setIsSearchModalOpen(true)}
+                    variant="outline"
+                    className="gap-2 border-slate-200 dark:border-zinc-700 hover:bg-slate-50 dark:hover:bg-zinc-800 font-semibold rounded-xl shadow-xs"
                   >
-                    <PanelLeftOpen className="h-4 w-4" />
-                    Abrir Menu de Seções
+                    <Search className="h-4 w-4 text-indigo-600" />
+                    Pesquisar em Tudo
+                    <kbd className="px-1.5 py-0.5 text-[9px] bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded font-mono text-slate-500">
+                      Ctrl+K
+                    </kbd>
                   </Button>
-                )}
+                  {isDesktopSidebarCollapsed && (
+                    <Button
+                      onClick={() => toggleSidebarCollapse(false)}
+                      className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-xs"
+                    >
+                      <PanelLeftOpen className="h-4 w-4" />
+                      Abrir Menu de Seções
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
           </div>
         )}
       </div>
+
+      {/* Global Search Modal fallback for when no active page is open */}
+      <GlobalNotesSearchModal
+        open={isSearchModalOpen}
+        onOpenChange={setIsSearchModalOpen}
+      />
     </div>
   );
 }
