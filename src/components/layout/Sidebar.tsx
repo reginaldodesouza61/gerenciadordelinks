@@ -164,7 +164,7 @@ export function Sidebar() {
             >
               <Home className="h-4 w-4" />
               <span className="text-sm">Todos os Links</span>
-              <Badge variant="secondary" className="ml-auto text-[10px] px-1.5 h-4 min-w-[1.25rem] border-none bg-zinc-200 text-zinc-600">
+              <Badge variant="secondary" className="ml-auto text-[10px] px-1.5 h-4 min-w-[1.25rem] border-none bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
                 {links.length}
               </Badge>
             </Button>
@@ -178,10 +178,10 @@ export function Sidebar() {
               )}
               onClick={() => setActiveFilter('favorites')}
             >
-              <Star className={cn("h-4 w-4", activeFilter === 'favorites' && "fill-zinc-600")} />
+              <Star className={cn("h-4 w-4", activeFilter === 'favorites' && "fill-zinc-600 dark:fill-zinc-300")} />
               <span className="text-sm">Favoritos</span>
               {favoriteLinks.length > 0 && (
-                <Badge variant="secondary" className="ml-auto text-[10px] px-1.5 h-4 border-none bg-zinc-200 text-zinc-600">
+                <Badge variant="secondary" className="ml-auto text-[10px] px-1.5 h-4 border-none bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
                   {favoriteLinks.length}
                 </Badge>
               )}

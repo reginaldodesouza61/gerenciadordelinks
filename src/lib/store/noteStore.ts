@@ -130,15 +130,19 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   },
 
   updatePage: async (id, updates) => {
-    const { error } = await supabase.from('note_pages').update(updates).eq('id', id);
-    if (error) {
-      console.error(error);
-      toast.error('Erro ao salvar página');
-      return;
-    }
+    // Optimistically update zustand store immediately
     set(state => ({
       pages: state.pages.map(p => p.id === id ? { ...p, ...updates } : p)
     }));
+
+    const { error } = await supabase.from('note_pages').update(updates).eq('id', id);
+    if (error) {
+      console.error('Supabase update page error:', error);
+      // If error code is table missing, inform the user
+      if (['42P01', 'PGRST205'].includes(error.code)) {
+        toast.error('Tabela note_pages não encontrada no Supabase.');
+      }
+    }
   },
 
   deletePage: async (id) => {

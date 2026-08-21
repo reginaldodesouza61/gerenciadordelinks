@@ -114,7 +114,7 @@ export function LinkCard({ link, categoria, subcategoria, onEdit }: LinkCardProp
       <CardContent className="flex-grow p-4">
         <div className="space-y-2">
           <div className="flex items-start justify-between gap-2">
-            <h3 className="text-sm font-bold leading-tight line-clamp-2 group-hover:text-zinc-600 transition-colors text-zinc-900">
+            <h3 className="text-sm font-bold leading-tight line-clamp-2 group-hover:text-zinc-600 dark:group-hover:text-zinc-300 transition-colors text-zinc-900 dark:text-zinc-100">
               {link.titulo}
             </h3>
             <DropdownMenu>
@@ -148,19 +148,19 @@ export function LinkCard({ link, categoria, subcategoria, onEdit }: LinkCardProp
           </div>
 
           {link.descricao && (
-            <p className="text-xs text-muted-foreground dark:text-zinc-500 line-clamp-2 leading-relaxed">
+            <p className="text-xs text-muted-foreground dark:text-zinc-400 line-clamp-2 leading-relaxed">
               {link.descricao}
             </p>
           )}
 
           <div className="flex flex-wrap gap-1.5 pt-1">
             {categoria && (
-              <span className="px-2 py-0.5 bg-zinc-100 text-zinc-800 rounded-full text-[9px] font-bold">
+              <span className="px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-full text-[9px] font-bold">
                 {categoria.nome}
               </span>
             )}
             {subcategoria && (
-              <span className="px-2 py-0.5 bg-zinc-50 text-zinc-500 rounded-full text-[9px] font-bold border border-zinc-100">
+              <span className="px-2 py-0.5 bg-zinc-50 dark:bg-zinc-800/60 text-zinc-500 dark:text-zinc-400 rounded-full text-[9px] font-bold border border-zinc-100 dark:border-zinc-700/60">
                 {subcategoria.nome}
               </span>
             )}

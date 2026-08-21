@@ -98,19 +98,19 @@ export function LinkContainer() {
   };
   
   return (
-    <div className="h-full flex flex-col bg-zinc-50/30">
-      <div className="p-4 md:p-8 glass flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-200/50">
+    <div className="h-full flex flex-col bg-zinc-50/30 dark:bg-zinc-950 transition-colors">
+      <div className="p-4 md:p-8 glass flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-200/50 dark:border-zinc-800/50">
         <div>
           <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-foreground">
             {getHeaderTitle()}
           </h2>
-          <p className="text-sm font-medium text-zinc-400 mt-1">
+          <p className="text-sm font-medium text-zinc-400 dark:text-zinc-500 mt-1">
             {displayLinks.length} {displayLinks.length === 1 ? 'link encontrado' : 'links encontrados'}
           </p>
         </div>
         <Button 
           onClick={handleAddLink} 
-          className="shadow-sm rounded-xl px-8 h-12 font-bold bg-primary hover:bg-primary/90 text-white transition-all transform hover:-translate-y-0.5 border-none"
+          className="shadow-sm rounded-xl px-8 h-12 font-bold bg-primary hover:bg-primary/90 text-primary-foreground transition-all transform hover:-translate-y-0.5 border-none"
         >
           <Plus className="h-5 w-5 mr-2" /> Adicionar Link
         </Button>

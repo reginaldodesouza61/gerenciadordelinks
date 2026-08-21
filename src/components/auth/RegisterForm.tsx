@@ -38,7 +38,7 @@ export function RegisterForm({ onToggleForm }: RegisterFormProps) {
       <CardHeader>
         <CardTitle>Cadastrar</CardTitle>
         <CardDescription>
-          Crie uma conta para gerenciar seus links
+          Crie uma conta para acessar seu workspace no MeuHub
         </CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit}>

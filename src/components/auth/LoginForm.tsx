@@ -24,7 +24,7 @@ export function LoginForm({ onToggleForm }: LoginFormProps) {
       <CardHeader>
         <CardTitle>Entrar</CardTitle>
         <CardDescription>
-          Entre com seu e-mail e senha para acessar seus links
+          Entre com seu e-mail e senha para acessar seu workspace
         </CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit}>

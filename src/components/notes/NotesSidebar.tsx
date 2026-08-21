@@ -150,7 +150,9 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
         <div 
           className={cn(
             "group/page flex items-center justify-between rounded-md px-2 py-1 cursor-pointer transition-colors text-sm w-full",
-            isActive ? "bg-indigo-100 text-indigo-800 font-medium" : "hover:bg-gray-100 text-gray-600"
+            isActive 
+              ? "bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-300 font-medium" 
+              : "hover:bg-gray-100 dark:hover:bg-zinc-800/60 text-gray-600 dark:text-zinc-300"
           )}
           style={{ paddingLeft: `${Math.max(8, depth * 12)}px` }}
           onClick={() => { 
@@ -162,7 +164,7 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
             {hasSubpages ? (
               <button
                 type="button"
-                className="p-0.5 rounded hover:bg-slate-200 shrink-0 text-slate-500"
+                className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-zinc-700 shrink-0 text-slate-500 dark:text-zinc-400"
                 onClick={(e) => {
                   e.stopPropagation();
                   togglePage(page.id);
@@ -173,14 +175,14 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
             ) : (
               <div className="w-[19px] shrink-0" />
             )}
-            <FileText size={13} className={isActive ? "text-indigo-500 shrink-0" : "text-gray-400 shrink-0"} />
+            <FileText size={13} className={isActive ? "text-indigo-500 shrink-0" : "text-gray-400 dark:text-zinc-500 shrink-0"} />
             <span className="text-[13px] truncate" title={page.titulo}>{page.titulo}</span>
           </div>
 
           <div className="flex items-center shrink-0 gap-1 opacity-0 group-hover/page:opacity-100 focus-within:opacity-100 transition-opacity">
             <button 
               type="button"
-              className="h-5 w-5 rounded hover:bg-black/5 text-gray-500 flex items-center justify-center transition-colors" 
+              className="h-5 w-5 rounded hover:bg-black/5 dark:hover:bg-white/10 text-gray-500 dark:text-zinc-400 flex items-center justify-center transition-colors" 
               onClick={(e) => { 
                 e.stopPropagation(); 
                 openDialog('page', 'create', page.section_id, '', page.id); 
@@ -191,18 +193,18 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
             </button>
             <button 
               type="button"
-              className="h-5 w-5 rounded hover:bg-black/5 text-gray-500 flex items-center justify-center transition-colors" 
+              className="h-5 w-5 rounded hover:bg-black/5 dark:hover:bg-white/10 text-gray-500 dark:text-zinc-400 flex items-center justify-center transition-colors" 
               onClick={(e) => { 
                 e.stopPropagation(); 
                 openDialog('page', 'edit', page.id, page.titulo); 
-              }}
+              }} 
               title="Editar"
             >
               <Edit2 size={13} />
             </button>
             <button 
               type="button"
-              className="h-5 w-5 rounded hover:bg-red-100 hover:text-red-600 text-gray-500 flex items-center justify-center transition-colors" 
+              className="h-5 w-5 rounded hover:bg-red-100 dark:hover:bg-red-950/60 hover:text-red-600 dark:hover:text-red-400 text-gray-500 dark:text-zinc-400 flex items-center justify-center transition-colors" 
               onClick={(e) => handleDeleteClick(e, 'page', page.id)}
               title="Excluir"
             >
@@ -222,8 +224,8 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
   };
 
   return (
-    <div className="h-full w-full flex flex-col glass-card border-y-0 border-l-0 border-r bg-white/50">
-      <div className="p-4 flex-shrink-0 border-b border-gray-100 flex items-center gap-2">
+    <div className="h-full w-full flex flex-col glass-card border-y-0 border-l-0 border-r border-border bg-white/50 dark:bg-zinc-900/50">
+      <div className="p-4 flex-shrink-0 border-b border-border flex items-center gap-2">
         <Button 
           className="flex-1 shadow-sm rounded-xl font-bold gap-2 bg-indigo-600 hover:bg-indigo-700 text-white transition-all border-none"
           onClick={() => openDialog('section', 'create')}
@@ -234,7 +236,7 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
           <Button
             variant="ghost"
             size="icon"
-            className="h-10 w-10 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl"
+            className="h-10 w-10 text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-xl"
             onClick={onCollapse}
             title="Recolher menu lateral"
           >
@@ -245,10 +247,10 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
 
       <div className="flex-1 px-3 py-4 overflow-y-auto overflow-x-hidden">
         {sections.length === 0 ? (
-          <div className="text-center py-8 text-gray-500">
-            <Folder className="h-10 w-10 mx-auto mb-3 text-gray-300" />
+          <div className="text-center py-8 text-gray-500 dark:text-zinc-400">
+            <Folder className="h-10 w-10 mx-auto mb-3 text-gray-300 dark:text-zinc-600" />
             <p className="text-sm font-medium">Nenhuma seção criada</p>
-            <p className="text-xs text-gray-400 mt-1">Crie uma seção para organizar suas notas.</p>
+            <p className="text-xs text-gray-400 dark:text-zinc-500 mt-1">Crie uma seção para organizar suas notas.</p>
           </div>
         ) : (
           <div className="space-y-3 w-full">
@@ -258,7 +260,9 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
                 <div 
                   className={cn(
                     "group flex items-center justify-between rounded-lg px-2 py-1.5 cursor-pointer transition-colors w-full",
-                    activeSectionId === section.id ? "bg-indigo-50 text-indigo-700" : "hover:bg-gray-100 text-gray-700"
+                    activeSectionId === section.id 
+                      ? "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300" 
+                      : "hover:bg-gray-100 dark:hover:bg-zinc-800/60 text-gray-700 dark:text-zinc-200"
                   )}
                   onClick={() => {
                     setActiveSectionId(section.id);
@@ -267,13 +271,13 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
                 >
                   <div className="flex items-center gap-2 flex-1 min-w-0 mr-1">
                     {expandedSections.includes(section.id) ? <ChevronDown size={14} className="shrink-0" /> : <ChevronRight size={14} className="shrink-0" />}
-                    <Folder size={14} className={activeSectionId === section.id ? "text-indigo-500 shrink-0" : "text-gray-400 shrink-0"} />
+                    <Folder size={14} className={activeSectionId === section.id ? "text-indigo-500 shrink-0" : "text-gray-400 dark:text-zinc-500 shrink-0"} />
                     <span className="text-sm font-semibold truncate" title={section.nome}>{section.nome}</span>
                   </div>
                   <div className="flex items-center shrink-0 gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                     <button 
                       type="button"
-                      className="h-6 w-6 rounded hover:bg-black/5 text-gray-600 flex items-center justify-center transition-colors" 
+                      className="h-6 w-6 rounded hover:bg-black/5 dark:hover:bg-white/10 text-gray-600 dark:text-zinc-400 flex items-center justify-center transition-colors" 
                       onClick={(e) => { e.stopPropagation(); openDialog('page', 'create', section.id); }} 
                       title="Nova página"
                     >
@@ -281,7 +285,7 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
                     </button>
                     <button 
                       type="button"
-                      className="h-6 w-6 rounded hover:bg-black/5 text-gray-600 flex items-center justify-center transition-colors" 
+                      className="h-6 w-6 rounded hover:bg-black/5 dark:hover:bg-white/10 text-gray-600 dark:text-zinc-400 flex items-center justify-center transition-colors" 
                       onClick={(e) => { e.stopPropagation(); openDialog('section', 'edit', section.id, section.nome); }} 
                       title="Editar"
                     >
@@ -289,7 +293,7 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
                     </button>
                     <button 
                       type="button"
-                      className="h-6 w-6 rounded hover:bg-red-100 hover:text-red-600 text-gray-600 flex items-center justify-center transition-colors" 
+                      className="h-6 w-6 rounded hover:bg-red-100 dark:hover:bg-red-950/60 hover:text-red-600 dark:hover:text-red-400 text-gray-600 dark:text-zinc-400 flex items-center justify-center transition-colors" 
                       onClick={(e) => handleDeleteClick(e, 'section', section.id)} 
                       title="Excluir"
                     >
@@ -300,9 +304,9 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
 
                 {/* Pages List (Recursive) */}
                 {expandedSections.includes(section.id) && (
-                  <div className="ml-5 space-y-0.5 border-l-2 border-gray-100 pl-1 overflow-hidden">
+                  <div className="ml-5 space-y-0.5 border-l-2 border-gray-100 dark:border-zinc-800 pl-1 overflow-hidden">
                     {pages.filter(p => p.section_id === section.id && !p.parent_id).length === 0 ? (
-                      <div className="text-[11px] text-gray-400 italic px-2 py-1">Sem páginas</div>
+                      <div className="text-[11px] text-gray-400 dark:text-zinc-500 italic px-2 py-1">Sem páginas</div>
                     ) : (
                       pages.filter(p => p.section_id === section.id && !p.parent_id).map(page => renderPage(page, 0))
                     )}

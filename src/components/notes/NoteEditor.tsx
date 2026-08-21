@@ -1,15 +1,24 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useNoteStore } from '@/lib/store/noteStore';
+import { useAuthStore } from '@/lib/store/authStore';
+import { CanvasBlock } from '@/types/notes';
+import { Link } from '@/types/supabase';
 import { Rnd } from 'react-rnd';
 import { Button } from '@/components/ui/button';
 import { 
   MousePointer2, GripHorizontal, Trash2, Bold, Italic, Underline as UnderlineIcon,
   Strikethrough, List, ListOrdered, AlignLeft, AlignCenter, AlignRight, AlignJustify,
-  Highlighter, Palette, TableProperties, Plus, ChevronRight, Combine
+  Highlighter, Palette, TableProperties, Plus, ChevronRight, Combine,
+  Code2, ShieldCheck, Link as LinkIcon, Type, Terminal, KeyRound
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { TablePicker } from './TablePicker';
+import { ScriptBlock } from './dev/ScriptBlock';
+import { SecretVaultBlock } from './dev/SecretVaultBlock';
+import { LinkCardBlock } from './dev/LinkCardBlock';
+import { InsertLinkModal } from './dev/InsertLinkModal';
+import { RelatedLinksDrawer } from './dev/RelatedLinksDrawer';
 
 import { EditorContent, useEditor, Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -23,15 +32,6 @@ import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
 import { Highlight } from '@tiptap/extension-highlight';
 import { Underline } from '@tiptap/extension-underline';
-
-interface CanvasBlock {
-  id: string;
-  x: number;
-  y: number;
-  width: number | string;
-  height: number | string;
-  content: string;
-}
 
 const TEXT_COLORS = [
   { name: 'Preto', value: '#0f172a' },
@@ -54,9 +54,12 @@ const HIGHLIGHT_COLORS = [
   { name: 'Roxo', value: '#e9d5ff' },
 ];
 
-function isBlockEmpty(htmlContent: string): boolean {
-  if (!htmlContent) return true;
-  const text = htmlContent
+function isBlockEmpty(block: CanvasBlock): boolean {
+  if (block.type && block.type !== 'text') {
+    return false;
+  }
+  if (!block.content) return true;
+  const text = block.content
     .replace(/<[^>]*>/g, '')
     .replace(/&nbsp;/g, ' ')
     .trim();
@@ -66,7 +69,7 @@ function isBlockEmpty(htmlContent: string): boolean {
 function GlobalToolbar({ editor }: { editor: Editor | null }) {
   if (!editor) {
     return (
-      <div className="border-b border-slate-200 w-full shrink-0"></div>
+      <div className="border-b border-slate-200 dark:border-zinc-800 w-full shrink-0"></div>
     );
   }
 
@@ -77,7 +80,7 @@ function GlobalToolbar({ editor }: { editor: Editor | null }) {
   else if (editor.isActive('heading', { level: 3 })) textType = 'h3';
 
   return (
-    <div className="flex flex-wrap items-center gap-1 px-3 py-1.5 min-h-11 border-b bg-slate-50/90 text-slate-700 shrink-0 select-none">
+    <div className="flex flex-wrap items-center gap-1 px-3 py-1.5 min-h-11 border-b border-slate-200 dark:border-zinc-800 bg-slate-50/90 dark:bg-zinc-900 text-slate-700 dark:text-zinc-200 shrink-0 select-none">
       {/* Heading / Text Size Selector */}
       <Select 
         value={textType}
@@ -93,7 +96,7 @@ function GlobalToolbar({ editor }: { editor: Editor | null }) {
           }
         }}
       >
-        <SelectTrigger className="w-[130px] h-7 text-xs bg-white border-slate-200">
+        <SelectTrigger className="w-[130px] h-7 text-xs bg-white dark:bg-zinc-800 border-slate-200 dark:border-zinc-700">
           <SelectValue placeholder="Estilo do Texto" />
         </SelectTrigger>
         <SelectContent>
@@ -106,7 +109,7 @@ function GlobalToolbar({ editor }: { editor: Editor | null }) {
 
       {/* Font Family Selector */}
       <Select onValueChange={(val) => editor.chain().focus().setFontFamily(val).run()}>
-        <SelectTrigger className="w-[110px] h-7 text-xs bg-white border-slate-200">
+        <SelectTrigger className="w-[110px] h-7 text-xs bg-white dark:bg-zinc-800 border-slate-200 dark:border-zinc-700">
           <SelectValue placeholder="Fonte" />
         </SelectTrigger>
         <SelectContent>
@@ -118,40 +121,40 @@ function GlobalToolbar({ editor }: { editor: Editor | null }) {
         </SelectContent>
       </Select>
 
-      <div className="w-px h-5 bg-slate-300 mx-0.5" />
+      <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
 
       {/* Text Styles */}
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('bold') ? 'bg-slate-200 text-slate-900 font-bold' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleBold().run(); }} title="Negrito (Ctrl+B)"><Bold size={14} /></Button>
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('italic') ? 'bg-slate-200 text-slate-900' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleItalic().run(); }} title="Itálico (Ctrl+I)"><Italic size={14} /></Button>
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('underline') ? 'bg-slate-200 text-slate-900' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleUnderline().run(); }} title="Sublinhado (Ctrl+U)"><UnderlineIcon size={14} /></Button>
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('strike') ? 'bg-slate-200 text-slate-900' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleStrike().run(); }} title="Tachado"><Strikethrough size={14} /></Button>
+      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('bold') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white font-bold' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleBold().run(); }} title="Negrito (Ctrl+B)"><Bold size={14} /></Button>
+      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('italic') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleItalic().run(); }} title="Itálico (Ctrl+I)"><Italic size={14} /></Button>
+      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('underline') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleUnderline().run(); }} title="Sublinhado (Ctrl+U)"><UnderlineIcon size={14} /></Button>
+      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('strike') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleStrike().run(); }} title="Tachado"><Strikethrough size={14} /></Button>
       
-      <div className="w-px h-5 bg-slate-300 mx-0.5" />
+      <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
 
       {/* Text Color Picker Popover */}
       <Popover>
         <PopoverTrigger asChild>
           <Button variant="ghost" size="sm" className="h-7 px-1.5 gap-1 text-xs" title="Cor do Texto">
             <Palette size={14} style={{ color: (editor.getAttributes('textStyle').color as string) || '#0f172a' }} />
-            <span className="w-3 h-3 rounded-full border border-slate-300" style={{ backgroundColor: (editor.getAttributes('textStyle').color as string) || '#0f172a' }} />
+            <span className="w-3 h-3 rounded-full border border-slate-300 dark:border-zinc-600" style={{ backgroundColor: (editor.getAttributes('textStyle').color as string) || '#0f172a' }} />
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-48 p-2" align="start">
-          <p className="text-[11px] font-semibold text-slate-500 mb-1.5">Cor do Texto</p>
+          <p className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 mb-1.5">Cor do Texto</p>
           <div className="grid grid-cols-4 gap-1.5 mb-2">
             {TEXT_COLORS.map((c) => (
               <button
                 key={c.value}
                 type="button"
-                className="w-8 h-8 rounded-md border border-slate-200 flex items-center justify-center hover:scale-110 transition-transform"
+                className="w-8 h-8 rounded-md border border-slate-200 dark:border-zinc-700 flex items-center justify-center hover:scale-110 transition-transform"
                 style={{ backgroundColor: c.value }}
                 title={c.name}
                 onClick={() => editor.chain().focus().setColor(c.value).run()}
               />
             ))}
           </div>
-          <div className="pt-1.5 border-t flex items-center justify-between">
-            <span className="text-[11px] text-slate-500">Personalizado:</span>
+          <div className="pt-1.5 border-t border-slate-100 dark:border-zinc-800 flex items-center justify-between">
+            <span className="text-[11px] text-slate-500 dark:text-zinc-400">Personalizado:</span>
             <input 
               type="color" 
               onInput={event => editor.chain().focus().setColor((event.target as HTMLInputElement).value).run()} 
@@ -167,17 +170,17 @@ function GlobalToolbar({ editor }: { editor: Editor | null }) {
         <PopoverTrigger asChild>
           <Button variant="ghost" size="sm" className="h-7 px-1.5 gap-1 text-xs" title="Cor de Realce (Fundo)">
             <Highlighter size={14} className="text-amber-500" />
-            <span className="w-3 h-3 rounded-full border border-slate-300 bg-amber-200" />
+            <span className="w-3 h-3 rounded-full border border-slate-300 dark:border-zinc-600 bg-amber-200" />
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-48 p-2" align="start">
-          <p className="text-[11px] font-semibold text-slate-500 mb-1.5">Cor de Realce</p>
+          <p className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 mb-1.5">Cor de Realce</p>
           <div className="grid grid-cols-4 gap-1.5">
             {HIGHLIGHT_COLORS.map((c) => (
               <button
                 key={c.name}
                 type="button"
-                className="w-8 h-8 rounded-md border border-slate-200 flex items-center justify-center text-xs hover:scale-110 transition-transform"
+                className="w-8 h-8 rounded-md border border-slate-200 dark:border-zinc-700 flex items-center justify-center text-xs hover:scale-110 transition-transform"
                 style={{ backgroundColor: c.value || '#ffffff' }}
                 title={c.name}
                 onClick={() => {
@@ -195,21 +198,21 @@ function GlobalToolbar({ editor }: { editor: Editor | null }) {
         </PopoverContent>
       </Popover>
 
-      <div className="w-px h-5 bg-slate-300 mx-0.5" />
+      <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
       
       {/* Alignment */}
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive({ textAlign: 'left' }) ? 'bg-slate-200' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().setTextAlign('left').run(); }} title="Alinhar à Esquerda"><AlignLeft size={14} /></Button>
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive({ textAlign: 'center' }) ? 'bg-slate-200' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().setTextAlign('center').run(); }} title="Centralizar"><AlignCenter size={14} /></Button>
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive({ textAlign: 'right' }) ? 'bg-slate-200' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().setTextAlign('right').run(); }} title="Alinhar à Direita"><AlignRight size={14} /></Button>
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive({ textAlign: 'justify' }) ? 'bg-slate-200' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().setTextAlign('justify').run(); }} title="Justificar"><AlignJustify size={14} /></Button>
+      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive({ textAlign: 'left' }) ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().setTextAlign('left').run(); }} title="Alinhar à Esquerda"><AlignLeft size={14} /></Button>
+      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive({ textAlign: 'center' }) ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().setTextAlign('center').run(); }} title="Centralizar"><AlignCenter size={14} /></Button>
+      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive({ textAlign: 'right' }) ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().setTextAlign('right').run(); }} title="Alinhar à Direita"><AlignRight size={14} /></Button>
+      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive({ textAlign: 'justify' }) ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().setTextAlign('justify').run(); }} title="Justificar"><AlignJustify size={14} /></Button>
       
-      <div className="w-px h-5 bg-slate-300 mx-0.5" />
+      <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
       
       {/* Lists */}
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('bulletList') ? 'bg-slate-200' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleBulletList().run(); }} title="Lista com Marcadores"><List size={14} /></Button>
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('orderedList') ? 'bg-slate-200' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleOrderedList().run(); }} title="Lista Numerada"><ListOrdered size={14} /></Button>
+      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('bulletList') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleBulletList().run(); }} title="Lista com Marcadores"><List size={14} /></Button>
+      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('orderedList') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleOrderedList().run(); }} title="Lista Numerada"><ListOrdered size={14} /></Button>
       
-      <div className="w-px h-5 bg-slate-300 mx-0.5" />
+      <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
 
       {/* Table Insert */}
       <TablePicker onSelect={(rows, cols) => editor.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run()} />
@@ -329,16 +332,16 @@ function TextBlock({
         >
           {/* Top Handle Bar - OneNote style: visible on hover or selection */}
           <div
-            className={`h-5 bg-slate-100/90 border border-slate-300 border-b-0 rounded-t flex items-center px-1 transition-opacity ${
+            className={`h-5 bg-slate-100/90 dark:bg-zinc-800/90 border border-slate-300 dark:border-zinc-700 border-b-0 rounded-t flex items-center px-1 transition-opacity ${
               isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
             }`}
           >
-            <div className="drag-handle cursor-grab active:cursor-grabbing flex-1 h-full flex items-center justify-center text-slate-400 hover:text-slate-600">
+            <div className="drag-handle cursor-grab active:cursor-grabbing flex-1 h-full flex items-center justify-center text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300">
               <GripHorizontal size={14} />
             </div>
             <button
               type="button"
-              className="text-slate-400 hover:text-red-500 p-0.5 rounded hover:bg-slate-200"
+              className="text-slate-400 hover:text-red-500 p-0.5 rounded hover:bg-slate-200 dark:hover:bg-zinc-700"
               onClick={(e) => {
                 e.stopPropagation();
                 removeBlock(block.id);
@@ -353,13 +356,13 @@ function TextBlock({
           <div
             className={`flex-1 p-2 w-full h-full overflow-visible transition-all ${
               isSelected
-                ? 'border border-slate-300 rounded-b bg-white/90 shadow-sm'
-                : 'border border-transparent group-hover:border-slate-200 rounded-b bg-transparent'
+                ? 'border border-slate-300 dark:border-zinc-700 rounded-b bg-white/90 dark:bg-zinc-900/90 shadow-sm'
+                : 'border border-transparent group-hover:border-slate-200 dark:group-hover:border-zinc-800 rounded-b bg-transparent'
             }`}
           >
             <EditorContent
               editor={editor}
-              className="prose prose-sm prose-p:my-0.5 prose-p:leading-normal max-w-none focus:outline-none focus:ring-0 focus:border-none [&_*]:outline-none [&_*]:focus:outline-none w-full h-full cursor-text"
+              className="prose dark:prose-invert prose-sm prose-p:my-0.5 prose-p:leading-normal max-w-none focus:outline-none focus:ring-0 focus:border-none [&_*]:outline-none [&_*]:focus:outline-none w-full h-full cursor-text"
             />
           </div>
         </div>
@@ -368,17 +371,17 @@ function TextBlock({
       {/* Clean Right-Click Context Menu for Table */}
       {contextMenu && editor && (
         <div
-          className="fixed z-50 min-w-[210px] bg-white rounded-lg shadow-xl border border-slate-200 py-1 text-xs text-slate-700 animate-in fade-in zoom-in-95 duration-100 select-none"
+          className="fixed z-50 min-w-[210px] bg-white dark:bg-zinc-900 rounded-lg shadow-xl border border-slate-200 dark:border-zinc-800 py-1 text-xs text-slate-700 dark:text-zinc-200 animate-in fade-in zoom-in-95 duration-100 select-none"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="px-3 py-1 font-semibold text-[10px] text-slate-400 uppercase tracking-wider">
+          <div className="px-3 py-1 font-semibold text-[10px] text-slate-400 dark:text-zinc-500 uppercase tracking-wider">
             Tabela
           </div>
           
           <button
             type="button"
-            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 flex items-center gap-2 font-medium text-slate-700"
+            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center gap-2 font-medium text-slate-700 dark:text-zinc-200"
             onClick={() => {
               editor.chain().focus().addColumnBefore().run();
               setContextMenu(null);
@@ -390,7 +393,7 @@ function TextBlock({
           
           <button
             type="button"
-            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 flex items-center gap-2 font-medium text-slate-700"
+            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center gap-2 font-medium text-slate-700 dark:text-zinc-200"
             onClick={() => {
               editor.chain().focus().addColumnAfter().run();
               setContextMenu(null);
@@ -400,11 +403,11 @@ function TextBlock({
             Adicionar coluna à direita
           </button>
 
-          <div className="my-1 border-t border-slate-100" />
+          <div className="my-1 border-t border-slate-100 dark:border-zinc-800" />
 
           <button
             type="button"
-            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 flex items-center gap-2 font-medium text-slate-700"
+            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center gap-2 font-medium text-slate-700 dark:text-zinc-200"
             onClick={() => {
               editor.chain().focus().addRowBefore().run();
               setContextMenu(null);
@@ -416,7 +419,7 @@ function TextBlock({
 
           <button
             type="button"
-            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 flex items-center gap-2 font-medium text-slate-700"
+            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center gap-2 font-medium text-slate-700 dark:text-zinc-200"
             onClick={() => {
               editor.chain().focus().addRowAfter().run();
               setContextMenu(null);
@@ -426,11 +429,11 @@ function TextBlock({
             Adicionar linha abaixo
           </button>
 
-          <div className="my-1 border-t border-slate-100" />
+          <div className="my-1 border-t border-slate-100 dark:border-zinc-800" />
 
           <button
             type="button"
-            className="w-full text-left px-3 py-1.5 hover:bg-rose-50 text-rose-600 flex items-center gap-2 font-medium"
+            className="w-full text-left px-3 py-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 flex items-center gap-2 font-medium"
             onClick={() => {
               editor.chain().focus().deleteColumn().run();
               setContextMenu(null);
@@ -442,7 +445,7 @@ function TextBlock({
 
           <button
             type="button"
-            className="w-full text-left px-3 py-1.5 hover:bg-rose-50 text-rose-600 flex items-center gap-2 font-medium"
+            className="w-full text-left px-3 py-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 flex items-center gap-2 font-medium"
             onClick={() => {
               editor.chain().focus().deleteRow().run();
               setContextMenu(null);
@@ -452,11 +455,11 @@ function TextBlock({
             Remover linha
           </button>
 
-          <div className="my-1 border-t border-slate-100" />
+          <div className="my-1 border-t border-slate-100 dark:border-zinc-800" />
 
           <button
             type="button"
-            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 flex items-center gap-2 font-medium text-slate-700"
+            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center gap-2 font-medium text-slate-700 dark:text-zinc-200"
             onClick={() => {
               editor.chain().focus().mergeCells().run();
               setContextMenu(null);
@@ -468,7 +471,7 @@ function TextBlock({
 
           <button
             type="button"
-            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 flex items-center gap-2 font-medium text-slate-700"
+            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center gap-2 font-medium text-slate-700 dark:text-zinc-200"
             onClick={() => {
               editor.chain().focus().selectColumn().mergeCells().run();
               setContextMenu(null);
@@ -480,7 +483,7 @@ function TextBlock({
 
           <button
             type="button"
-            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 flex items-center gap-2 font-medium text-slate-700"
+            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center gap-2 font-medium text-slate-700 dark:text-zinc-200"
             onClick={() => {
               editor.chain().focus().selectRow().mergeCells().run();
               setContextMenu(null);
@@ -490,11 +493,11 @@ function TextBlock({
             Mesclar linha atual
           </button>
 
-          <div className="my-1 border-t border-slate-100" />
+          <div className="my-1 border-t border-slate-100 dark:border-zinc-800" />
 
           <button
             type="button"
-            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 flex items-center gap-2 font-medium text-slate-700"
+            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center gap-2 font-medium text-slate-700 dark:text-zinc-200"
             onClick={() => {
               editor.chain().focus().selectColumn().run();
               setContextMenu(null);
@@ -506,7 +509,7 @@ function TextBlock({
 
           <button
             type="button"
-            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 flex items-center gap-2 font-medium text-slate-700"
+            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center gap-2 font-medium text-slate-700 dark:text-zinc-200"
             onClick={() => {
               editor.chain().focus().selectRow().run();
               setContextMenu(null);
@@ -518,7 +521,7 @@ function TextBlock({
 
           <button
             type="button"
-            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 flex items-center gap-2 font-medium text-slate-700"
+            className="w-full text-left px-3 py-1.5 hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center gap-2 font-medium text-slate-700 dark:text-zinc-200"
             onClick={() => {
               editor.chain().focus().splitCell().run();
               setContextMenu(null);
@@ -528,11 +531,11 @@ function TextBlock({
             Dividir célula mesclada
           </button>
 
-          <div className="my-1 border-t border-slate-100" />
+          <div className="my-1 border-t border-slate-100 dark:border-zinc-800" />
 
           <button
             type="button"
-            className="w-full text-left px-3 py-1.5 bg-rose-50/80 hover:bg-rose-600 hover:text-white text-rose-600 flex items-center gap-2 font-medium transition-colors"
+            className="w-full text-left px-3 py-1.5 bg-rose-50/80 dark:bg-rose-950/40 hover:bg-rose-600 hover:text-white text-rose-600 flex items-center gap-2 font-medium transition-colors"
             onClick={() => {
               editor.chain().focus().deleteTable().run();
               setContextMenu(null);
@@ -554,16 +557,35 @@ interface NoteEditorProps {
 }
 
 export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: NoteEditorProps) {
-  const { pages, updatePage } = useNoteStore();
+  const { pages, updatePage, relations } = useNoteStore();
   const page = pages.find((p) => p.id === pageId);
   const [blocks, setBlocks] = useState<CanvasBlock[]>([]);
   const [activeEditor, setActiveEditor] = useState<Editor | null>(null);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+  const [isInsertLinkOpen, setIsInsertLinkOpen] = useState(false);
+  const [isRelatedLinksOpen, setIsRelatedLinksOpen] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const lastLoadedPageIdRef = useRef<string | null>(null);
+  const lastSavedContentRef = useRef<string | null>(null);
 
-  // Load and parse content
+  const relatedLinksCount = useMemo(() => {
+    return relations.filter((r) => r.note_id === pageId).length;
+  }, [relations, pageId]);
+
+  // Load and parse content on page switch
   useEffect(() => {
     if (!page) return;
+
+    // Skip reload if this update was triggered by our own internal save on the same page
+    if (
+      lastLoadedPageIdRef.current === pageId &&
+      lastSavedContentRef.current === page.conteudo
+    ) {
+      return;
+    }
+
+    lastLoadedPageIdRef.current = pageId;
+    lastSavedContentRef.current = page.conteudo || null;
 
     let parsedBlocks: CanvasBlock[] = [];
     try {
@@ -579,6 +601,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
               y: 40,
               width: 600,
               height: 'auto',
+              type: 'text',
               content: page.conteudo,
             },
           ];
@@ -589,7 +612,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
     }
 
     // Filter out unselected empty blocks on load
-    const validBlocks = parsedBlocks.filter((b) => !isBlockEmpty(b.content));
+    const validBlocks = parsedBlocks.filter((b) => !isBlockEmpty(b));
     setBlocks(validBlocks.length > 0 ? validBlocks : parsedBlocks);
     setActiveEditor(null);
     setSelectedBlockId(null);
@@ -599,10 +622,12 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   const purgeAndSave = useCallback(
     (currentBlocks: CanvasBlock[], activeId?: string | null) => {
       const cleaned = currentBlocks.filter(
-        (b) => b.id === activeId || !isBlockEmpty(b.content)
+        (b) => b.id === activeId || !isBlockEmpty(b)
       );
       setBlocks(cleaned);
-      updatePage(pageId, { conteudo: JSON.stringify(cleaned) });
+      const json = JSON.stringify(cleaned);
+      lastSavedContentRef.current = json;
+      updatePage(pageId, { conteudo: json });
       return cleaned;
     },
     [pageId, updatePage]
@@ -611,17 +636,120 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   const updateBlock = (id: string, updates: Partial<CanvasBlock>) => {
     const updated = blocks.map((b) => (b.id === id ? { ...b, ...updates } : b));
     setBlocks(updated);
-    updatePage(pageId, { conteudo: JSON.stringify(updated) });
+    const json = JSON.stringify(updated);
+    lastSavedContentRef.current = json;
+    updatePage(pageId, { conteudo: json });
   };
 
   const removeBlock = (id: string) => {
     const updated = blocks.filter((b) => b.id !== id);
     setBlocks(updated);
-    updatePage(pageId, { conteudo: JSON.stringify(updated) });
+    const json = JSON.stringify(updated);
+    lastSavedContentRef.current = json;
+    updatePage(pageId, { conteudo: json });
     if (selectedBlockId === id) {
       setSelectedBlockId(null);
       setActiveEditor(null);
     }
+  };
+
+  // Helper to calculate spawn position near current view
+  const getSpawnPosition = () => {
+    const scrollLeft = canvasRef.current?.scrollLeft || 0;
+    const scrollTop = canvasRef.current?.scrollTop || 0;
+    const offset = (blocks.length % 6) * 25;
+    return {
+      x: Math.max(30, scrollLeft + 50 + offset),
+      y: Math.max(30, scrollTop + 60 + offset),
+    };
+  };
+
+  // Add a new Text & Table block
+  const handleAddTextBlock = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const cleaned = purgeAndSave(blocks, null);
+    const pos = getSpawnPosition();
+    const newBlock: CanvasBlock = {
+      id: `text_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      x: pos.x,
+      y: pos.y,
+      width: 440,
+      height: 'auto',
+      type: 'text',
+      content: '<p></p>',
+    };
+    const nextBlocks = [...cleaned, newBlock];
+    setBlocks(nextBlocks);
+    setSelectedBlockId(newBlock.id);
+  };
+
+  // Add a new Script / Code block
+  const handleAddScriptBlock = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const cleaned = purgeAndSave(blocks, null);
+    const pos = getSpawnPosition();
+    const newBlock: CanvasBlock = {
+      id: `script_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      x: pos.x,
+      y: pos.y,
+      width: 560,
+      height: 380,
+      type: 'script',
+      language: 'bash',
+      filename: 'script.sh',
+      targetPurpose: 'Script de automação / deploy',
+      description: 'Executar no terminal para compilar ou rodar tarefas agendadas.',
+      code: '#!/bin/bash\n# Script de automação\necho "Executando tarefas..."',
+      wrapLines: false,
+      showDescription: true,
+    };
+    const nextBlocks = [...cleaned, newBlock];
+    setBlocks(nextBlocks);
+    setSelectedBlockId(newBlock.id);
+    updatePage(pageId, { conteudo: JSON.stringify(nextBlocks) });
+  };
+
+  // Add a new Secret / Token Vault block
+  const handleAddVaultBlock = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const cleaned = purgeAndSave(blocks, null);
+    const pos = getSpawnPosition();
+    const newBlock: CanvasBlock = {
+      id: `vault_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      x: pos.x,
+      y: pos.y,
+      width: 480,
+      height: 290,
+      type: 'vault',
+      vaultTitle: 'Tokens & Credenciais Seguras',
+      secrets: [],
+    };
+    const nextBlocks = [...cleaned, newBlock];
+    setBlocks(nextBlocks);
+    setSelectedBlockId(newBlock.id);
+    updatePage(pageId, { conteudo: JSON.stringify(nextBlocks) });
+  };
+
+  // Add an existing link card block
+  const handleInsertLinkCard = (link: Link) => {
+    const cleaned = purgeAndSave(blocks, null);
+    const pos = getSpawnPosition();
+    const newBlock: CanvasBlock = {
+      id: `link_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      x: pos.x,
+      y: pos.y,
+      width: 380,
+      height: 190,
+      type: 'link',
+      linkId: link.id,
+      linkTitle: link.titulo,
+      linkUrl: link.url,
+      linkDescription: link.descricao,
+    };
+    const nextBlocks = [...cleaned, newBlock];
+    setBlocks(nextBlocks);
+    setSelectedBlockId(newBlock.id);
+    updatePage(pageId, { conteudo: JSON.stringify(nextBlocks) });
   };
 
   const handleCanvasClick = (e: React.MouseEvent) => {
@@ -637,8 +765,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
         id: `block_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
         x,
         y,
-        width: 380,
+        width: 400,
         height: 'auto',
+        type: 'text',
         content: '<p></p>',
       };
 
@@ -656,14 +785,14 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   // Dynamically calculate canvas dimensions based on blocks position so scrollbars only appear when needed
   const canvasWidth = useMemo(() => {
     if (blocks.length === 0) return '100%';
-    const maxX = Math.max(...blocks.map((b) => b.x + (typeof b.width === 'number' ? b.width : parseInt(String(b.width)) || 400)));
-    return Math.max(100, maxX + 200);
+    const maxX = Math.max(...blocks.map((b) => b.x + (typeof b.width === 'number' ? b.width : parseInt(String(b.width)) || 450)));
+    return Math.max(100, maxX + 250);
   }, [blocks]);
 
   const canvasHeight = useMemo(() => {
     if (blocks.length === 0) return '100%';
-    const maxY = Math.max(...blocks.map((b) => b.y + (typeof b.height === 'number' ? b.height : parseInt(String(b.height)) || 300)));
-    return Math.max(100, maxY + 200);
+    const maxY = Math.max(...blocks.map((b) => b.y + (typeof b.height === 'number' ? b.height : parseInt(String(b.height)) || 320)));
+    return Math.max(100, maxY + 250);
   }, [blocks]);
 
   const formattedDate = useMemo(() => {
@@ -682,40 +811,108 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   if (!page) return null;
 
   return (
-    <div className="flex flex-col h-full bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div className="flex flex-col h-full bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-slate-200 dark:border-zinc-800 overflow-hidden transition-colors">
       {/* Title Header */}
-      <div className="px-6 py-4 border-b bg-white z-20 shrink-0 flex items-start gap-3">
-        {isSidebarCollapsed && onToggleSidebar && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onToggleSidebar}
-            className="h-8 w-8 text-slate-500 hover:text-slate-800 shrink-0 hover:bg-slate-100 rounded-md mt-1"
-            title="Expandir menu lateral"
-          >
-            <ChevronRight size={18} />
-          </Button>
-        )}
-        <div className="flex flex-col w-full">
-          <input
-            className="text-2xl font-bold border-none outline-none w-full bg-transparent placeholder-slate-300 text-slate-800"
-            value={page.titulo}
-            onChange={(e) => updatePage(page.id, { titulo: e.target.value })}
-            placeholder="Título da página..."
-          />
-          {formattedDate && (
-            <span className="text-[12px] text-slate-400 font-medium capitalize mt-0.5">
-              {formattedDate}
-            </span>
+      <div className="px-6 py-3.5 border-b border-border bg-white dark:bg-zinc-900 z-20 shrink-0 flex items-center justify-between gap-4">
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          {isSidebarCollapsed && onToggleSidebar && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onToggleSidebar}
+              className="h-8 w-8 text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-100 shrink-0 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-md mt-0.5"
+              title="Expandir menu lateral"
+            >
+              <ChevronRight size={18} />
+            </Button>
           )}
+          <div className="flex flex-col w-full min-w-0">
+            <input
+              className="text-2xl font-bold border-none outline-none w-full bg-transparent placeholder-slate-300 dark:placeholder-zinc-600 text-slate-800 dark:text-zinc-100"
+              value={page.titulo}
+              onChange={(e) => updatePage(page.id, { titulo: e.target.value })}
+              placeholder="Título da anotação..."
+            />
+            {formattedDate && (
+              <span className="text-[11px] text-slate-400 dark:text-zinc-500 font-medium capitalize mt-0.5">
+                {formattedDate}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Developer Action Bar / Quick Insert Buttons */}
+        <div className="flex items-center gap-1.5 shrink-0 select-none">
+          {/* Insert Text Block */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleAddTextBlock}
+            className="h-8 px-2.5 text-xs bg-white dark:bg-zinc-800 text-slate-700 dark:text-zinc-200 hover:bg-slate-50 dark:hover:bg-zinc-700 hover:text-slate-900 dark:hover:text-white border-slate-200 dark:border-zinc-700 rounded-md gap-1.5 shadow-2xs font-medium"
+            title="Inserir caixa de texto ou tabela no quadro"
+          >
+            <Type size={14} className="text-slate-500 dark:text-zinc-400" />
+            <span className="hidden sm:inline">Texto</span>
+          </Button>
+
+          {/* Insert Script Block */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleAddScriptBlock}
+            className="h-8 px-2.5 text-xs bg-slate-900 dark:bg-emerald-950/80 hover:bg-slate-800 dark:hover:bg-emerald-900 text-white dark:text-emerald-300 border-slate-900 dark:border-emerald-800 rounded-md gap-1.5 shadow-2xs font-medium"
+            title="Inserir bloco de código / script com syntax highlighting"
+          >
+            <Code2 size={14} className="text-emerald-400" />
+            <span className="hidden sm:inline">Script / Código</span>
+          </Button>
+
+          {/* Insert Secret Vault Block */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleAddVaultBlock}
+            className="h-8 px-2.5 text-xs bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100/80 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800 rounded-md gap-1.5 shadow-2xs font-medium"
+            title="Inserir cofre para guardar tokens de API, senhas e variáveis .env"
+          >
+            <ShieldCheck size={14} className="text-amber-600 dark:text-amber-400" />
+            <span className="hidden sm:inline">Tokens & Senhas</span>
+          </Button>
+
+          {/* Insert Registered Link Card */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setIsInsertLinkOpen(true)}
+            className="h-8 px-2.5 text-xs bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100/80 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 rounded-md gap-1.5 shadow-2xs font-medium"
+            title="Vincular e embutir link cadastrado no quadro"
+          >
+            <LinkIcon size={14} className="text-indigo-600 dark:text-indigo-400" />
+            <span className="hidden md:inline">Inserir Link</span>
+          </Button>
+
+          {/* View Related Links Drawer */}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setIsRelatedLinksOpen(true)}
+            className="h-8 px-2.5 text-xs text-slate-600 dark:text-zinc-300 hover:text-indigo-700 dark:hover:text-indigo-300 hover:bg-indigo-50/60 dark:hover:bg-indigo-950/60 rounded-md gap-1.5 font-medium relative"
+            title="Ver e gerenciar links relacionados a esta página"
+          >
+            <LinkIcon size={14} className="text-indigo-500 dark:text-indigo-400" />
+            <span className="hidden lg:inline">Links Relacionados</span>
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 font-bold">
+              {relatedLinksCount}
+            </span>
+          </Button>
         </div>
       </div>
 
-      {/* Formatting Toolbar */}
+      {/* Formatting Toolbar (Active when a text editor is focused) */}
       <GlobalToolbar editor={activeEditor} />
 
       {/* Canvas Area */}
-      <div className="flex-1 overflow-auto bg-[#ffffff] relative w-full h-full">
+      <div className="flex-1 overflow-auto bg-[#ffffff] dark:bg-zinc-950 relative w-full h-full">
         <div
           ref={canvasRef}
           className="relative cursor-text"
@@ -727,27 +924,87 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
           }}
           onClick={handleCanvasClick}
         >
-          {blocks.map((block) => (
-            <TextBlock
-              key={block.id}
-              block={block}
-              updateBlock={updateBlock}
-              removeBlock={removeBlock}
-              setActiveEditor={setActiveEditor}
-              isSelected={selectedBlockId === block.id}
-              setSelectedId={setSelectedBlockId}
-            />
-          ))}
+          {blocks.map((block) => {
+            if (block.type === 'script') {
+              return (
+                <ScriptBlock
+                  key={block.id}
+                  block={block}
+                  updateBlock={updateBlock}
+                  removeBlock={removeBlock}
+                  isSelected={selectedBlockId === block.id}
+                  setSelectedId={setSelectedBlockId}
+                />
+              );
+            }
+
+            if (block.type === 'vault') {
+              return (
+                <SecretVaultBlock
+                  key={block.id}
+                  block={block}
+                  updateBlock={updateBlock}
+                  removeBlock={removeBlock}
+                  isSelected={selectedBlockId === block.id}
+                  setSelectedId={setSelectedBlockId}
+                />
+              );
+            }
+
+            if (block.type === 'link') {
+              return (
+                <LinkCardBlock
+                  key={block.id}
+                  block={block}
+                  updateBlock={updateBlock}
+                  removeBlock={removeBlock}
+                  isSelected={selectedBlockId === block.id}
+                  setSelectedId={setSelectedBlockId}
+                />
+              );
+            }
+
+            // Default Text Block
+            return (
+              <TextBlock
+                key={block.id}
+                block={block}
+                updateBlock={updateBlock}
+                removeBlock={removeBlock}
+                setActiveEditor={setActiveEditor}
+                isSelected={selectedBlockId === block.id}
+                setSelectedId={setSelectedBlockId}
+              />
+            );
+          })}
 
           {blocks.length === 0 && (
             <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none text-slate-400 flex flex-col items-center">
               <MousePointer2 size={28} className="mb-2 opacity-40 text-indigo-500" />
-              <p className="text-sm font-medium text-slate-500">Clique em qualquer lugar da folha para começar a escrever</p>
-              <p className="text-xs text-slate-400 mt-1">Sua página funciona como um quadro livre (estilo OneNote)</p>
+              <p className="text-sm font-medium text-slate-600">Quadro de Anotações para Desenvolvedores</p>
+              <p className="text-xs text-slate-400 mt-1 text-center max-w-sm">
+                Clique em qualquer lugar da folha para escrever, ou use a barra superior para adicionar scripts de código, cofres de tokens/credenciais ou links cadastrados.
+              </p>
             </div>
           )}
         </div>
       </div>
+
+      {/* Insert Link Modal */}
+      <InsertLinkModal
+        isOpen={isInsertLinkOpen}
+        onClose={() => setIsInsertLinkOpen(false)}
+        pageId={page.id}
+        onInsertCardBlock={handleInsertLinkCard}
+      />
+
+      {/* Related Links Drawer / Manager */}
+      <RelatedLinksDrawer
+        isOpen={isRelatedLinksOpen}
+        onClose={() => setIsRelatedLinksOpen(false)}
+        pageId={page.id}
+        onInsertCardBlock={handleInsertLinkCard}
+      />
     </div>
   );
 }

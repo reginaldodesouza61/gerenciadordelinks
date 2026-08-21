@@ -40,12 +40,12 @@ export default function Dashboard() {
   }, [fetchCategorias, fetchSubcategorias, fetchCredenciais, user]);
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
+    <div className="flex flex-col h-screen bg-gray-50 dark:bg-zinc-950 text-foreground transition-colors duration-200">
       <Header activeTab={activeTab} setActiveTab={setActiveTab} />
       
       {/* Mobile sidebar toggle button (Only for Links view) */}
       {activeTab === 'links' && (
-        <div className="md:hidden bg-white border-b px-4 py-2 flex justify-between items-center">
+        <div className="md:hidden bg-white dark:bg-zinc-900 border-b border-border px-4 py-2 flex justify-between items-center">
           <Button
             variant="ghost"
             size="sm"
@@ -68,9 +68,9 @@ export default function Dashboard() {
             
             {/* Mobile Sidebar Overlay */}
             {isMobileSidebarOpen && (
-              <div className="md:hidden fixed inset-0 z-50 bg-black bg-opacity-50" onClick={() => setIsMobileSidebarOpen(false)}>
-                <div className="bg-white h-full w-80 max-w-[85vw] shadow-xl" onClick={(e) => e.stopPropagation()}>
-                  <div className="p-3 border-b flex justify-between items-center">
+              <div className="md:hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-xs" onClick={() => setIsMobileSidebarOpen(false)}>
+                <div className="bg-white dark:bg-zinc-900 h-full w-80 max-w-[85vw] shadow-xl" onClick={(e) => e.stopPropagation()}>
+                  <div className="p-3 border-b border-border flex justify-between items-center">
                     <h2 className="font-semibold text-base">Categorias</h2>
                     <Button
                       variant="ghost"

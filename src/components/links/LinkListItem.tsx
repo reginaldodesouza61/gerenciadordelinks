@@ -73,26 +73,26 @@ export function LinkListItem({ link, categoria, subcategoria, onEdit }: LinkList
   return (
     <>
       <div 
-        className="bg-white group p-3 md:p-4 hover:ring-1 hover:ring-zinc-300 transition-all duration-300 cursor-pointer rounded-xl border border-zinc-200 shadow-sm"
+        className="bg-white dark:bg-zinc-900 group p-3 md:p-4 hover:ring-1 hover:ring-zinc-300 dark:hover:ring-zinc-700 transition-all duration-300 cursor-pointer rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
         onClick={handleOpenLink}
       >
         <div className="flex items-center gap-4">
-          <div className="h-12 w-12 rounded-xl bg-muted/50 flex-shrink-0 flex items-center justify-center overflow-hidden border border-border/50">
+          <div className="h-12 w-12 rounded-xl bg-muted/50 dark:bg-zinc-800/80 flex-shrink-0 flex items-center justify-center overflow-hidden border border-border/50">
             {link.imagem_url ? (
               <img src={link.imagem_url} alt="" className="h-full w-full object-cover" />
             ) : (
-              <Globe className="h-6 w-6 text-muted-foreground/30" />
+              <Globe className="h-6 w-6 text-muted-foreground/30 dark:text-zinc-500" />
             )}
           </div>
 
           <div className="flex-1 min-w-0 space-y-1">
             <div className="flex items-center gap-2">
-              <h3 className="font-bold text-sm md:text-base truncate group-hover:text-zinc-600 transition-colors text-zinc-900">
+              <h3 className="font-bold text-sm md:text-base truncate group-hover:text-zinc-600 dark:group-hover:text-zinc-300 transition-colors text-zinc-900 dark:text-zinc-100">
                 {link.titulo}
               </h3>
               <div className="flex gap-1 shrink-0">
                 {categoria && (
-                  <span className="px-2 py-0.5 bg-zinc-100 text-zinc-800 rounded-full text-[9px] font-bold border border-zinc-200">
+                  <span className="px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-full text-[9px] font-bold border border-zinc-200 dark:border-zinc-700">
                     {categoria.nome}
                   </span>
                 )}
@@ -110,7 +110,7 @@ export function LinkListItem({ link, categoria, subcategoria, onEdit }: LinkList
                 <span className="truncate max-w-[200px]">{formatUrl(link.url)}</span>
               </div>
               {link.descricao && (
-                <span className="hidden md:inline text-xs text-muted-foreground dark:text-zinc-500 truncate max-w-md">
+                <span className="hidden md:inline text-xs text-muted-foreground dark:text-zinc-400 truncate max-w-md">
                   • {link.descricao}
                 </span>
               )}
@@ -123,11 +123,11 @@ export function LinkListItem({ link, categoria, subcategoria, onEdit }: LinkList
               variant="ghost"
               className={cn(
                 "h-9 w-9 rounded-full transition-colors",
-                isFavorite ? "text-zinc-900 hover:bg-zinc-100" : "text-zinc-400 hover:bg-zinc-50"
+                isFavorite ? "text-amber-500 dark:text-amber-400 hover:bg-zinc-100 dark:hover:bg-zinc-800" : "text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800"
               )}
               onClick={handleFavoriteClick}
             >
-              <Star className={cn("h-4 w-4", isFavorite && "fill-zinc-900")} />
+              <Star className={cn("h-4 w-4", isFavorite && "fill-amber-500 dark:fill-amber-400")} />
             </Button>
 
             <div className="hidden sm:flex items-center gap-1">

@@ -13,8 +13,8 @@ export default function Auth() {
     <div className="min-h-screen flex items-center justify-center p-4 bg-gray-50">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold mb-2 text-primary">Gerenciador de Links</h1>
-          <p className="text-gray-500">Organize seus links de forma prática e eficiente</p>
+          <h1 className="text-3xl font-bold mb-2 text-primary">MeuHub</h1>
+          <p className="text-gray-500">Seu workspace completo para links, anotações e desenvolvimento</p>
         </div>
         
         {isLogin ? (

@@ -43,6 +43,45 @@
     --sidebar-border: 240 5% 92%;
     --sidebar-ring: 240 5% 35%;
   }
+
+  .dark {
+    --background: 240 10% 4%;
+    --foreground: 0 0% 98%;
+
+    --card: 240 10% 6%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 240 10% 6%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 240 5% 90%;
+    --primary-foreground: 240 6% 10%;
+
+    --secondary: 240 4% 14%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 240 4% 14%;
+    --muted-foreground: 240 5% 65%;
+
+    --accent: 240 4% 14%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 4% 16%;
+    --input: 240 4% 16%;
+    --ring: 240 5% 65%;
+
+    --sidebar-background: 240 6% 8%;
+    --sidebar-foreground: 240 5% 90%;
+    --sidebar-primary: 240 5% 90%;
+    --sidebar-primary-foreground: 240 6% 10%;
+    --sidebar-accent: 240 4% 14%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 240 4% 16%;
+    --sidebar-ring: 240 5% 65%;
+  }
 }
 
 @layer base {
@@ -58,19 +97,27 @@
       radial-gradient(at 0% 0%, hsla(240, 5%, 80%, 0.1) 0, transparent 50%),
       radial-gradient(at 100% 0%, hsla(240, 5%, 80%, 0.1) 0, transparent 50%);
   }
+
+  .dark body,
+  html.dark body {
+    background-color: #09090b;
+    background-image: 
+      radial-gradient(at 0% 0%, hsla(240, 5%, 30%, 0.15) 0, transparent 50%),
+      radial-gradient(at 100% 0%, hsla(240, 5%, 30%, 0.15) 0, transparent 50%);
+  }
 }
 
 @layer utilities {
   .glass {
-    @apply bg-white/80 backdrop-blur-xl border-b border-zinc-200/50;
+    @apply bg-white/80 dark:bg-zinc-900/80 backdrop-blur-xl border-b border-zinc-200/50 dark:border-zinc-800/50;
   }
   
   .glass-card {
-    @apply bg-white border border-zinc-200 shadow-sm transition-all duration-300;
+    @apply bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm transition-all duration-300;
   }
 
   .text-gradient {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-zinc-700 to-zinc-400;
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-zinc-800 to-zinc-500 dark:from-zinc-100 dark:to-zinc-400;
   }
 
   .touch-manipulation {
@@ -138,6 +185,11 @@
     border-radius: 4px;
   }
 
+  .dark .prose .ProseMirror table,
+  .dark .ProseMirror table {
+    border-color: #334155;
+  }
+
   .prose .ProseMirror table td,
   .prose .ProseMirror table th,
   .ProseMirror table td,
@@ -150,12 +202,26 @@
     position: relative;
   }
 
+  .dark .prose .ProseMirror table td,
+  .dark .prose .ProseMirror table th,
+  .dark .ProseMirror table td,
+  .dark .ProseMirror table th {
+    border-color: #334155;
+  }
+
   .prose .ProseMirror table th,
   .ProseMirror table th {
     font-weight: 600;
     text-align: left;
     background-color: #f8fafc;
     border-bottom: 2px solid #cbd5e1;
+  }
+
+  .dark .prose .ProseMirror table th,
+  .dark .ProseMirror table th {
+    background-color: #1e293b;
+    border-bottom: 2px solid #334155;
+    color: #f1f5f9;
   }
 
   .ProseMirror table .selectedCell {
