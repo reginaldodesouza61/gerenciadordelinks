@@ -232,24 +232,24 @@ export function GlobalNotesSearchModal({
               // 3. Vault / Credentials Blocks
               else if (block.type === 'vault') {
                 const title = block.vaultTitle || 'Cofre de Credenciais';
-                const creds = block.vaultCredentials || [];
-                const credsText = creds
-                  .map((c) => `${c.service || ''} ${c.username || ''} ${c.notes || ''} ${c.url || ''} ${c.tags?.join(' ') || ''}`)
+                const secretsList = (block.secrets || (block as unknown as { vaultCredentials?: Record<string, unknown>[] }).vaultCredentials || []) as Record<string, unknown>[];
+                const credsText = secretsList
+                  .map((c) => `${c.key || c.service || ''} ${c.username || ''} ${c.notes || ''} ${c.url || ''} ${c.bankName || ''} ${c.clientId || ''}`)
                   .join(' ');
                 const fullVaultText = `${title} ${credsText}`;
 
                 if (term && fullVaultText.toLowerCase().includes(term)) {
-                  const matchedCred = creds.find(
+                  const matchedCred = secretsList.find(
                     (c) =>
-                      c.service?.toLowerCase().includes(term) ||
-                      c.username?.toLowerCase().includes(term) ||
-                      c.notes?.toLowerCase().includes(term) ||
-                      c.url?.toLowerCase().includes(term)
+                      String(c.key || c.service || '').toLowerCase().includes(term) ||
+                      String(c.username || '').toLowerCase().includes(term) ||
+                      String(c.notes || '').toLowerCase().includes(term) ||
+                      String(c.url || '').toLowerCase().includes(term)
                   );
 
                   const credSnippet = matchedCred
-                    ? `Serviço: ${matchedCred.service || 'Sem nome'}${matchedCred.username ? ` | Usuário: ${matchedCred.username}` : ''}${matchedCred.notes ? ` | Obs: ${matchedCred.notes}` : ''}`
-                    : `Cofre com ${creds.length} credenciais cadastradas`;
+                    ? `Serviço: ${matchedCred.key || matchedCred.service || 'Sem nome'}${matchedCred.username ? ` | Usuário: ${matchedCred.username}` : ''}${matchedCred.notes ? ` | Obs: ${matchedCred.notes}` : ''}`
+                    : `Cofre com ${secretsList.length} credenciais cadastradas`;
 
                   list.push({
                     id: `vault_${block.id || index}`,
@@ -262,7 +262,7 @@ export function GlobalNotesSearchModal({
                     pageId: page.id,
                     pageTitle: page.titulo,
                     blockId: block.id,
-                    extraMeta: `${creds.length} logins/chaves`,
+                    extraMeta: `${secretsList.length} logins/chaves`,
                   });
                 }
               }

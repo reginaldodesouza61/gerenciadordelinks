@@ -32,9 +32,9 @@ export const SYSTEM_INFO = {
 
 export function getGeminiApiKey(): string {
   try {
-    return localStorage.getItem(GEMINI_STORAGE_KEY) || '';
+    return localStorage.getItem(GEMINI_STORAGE_KEY) || (import.meta.env.VITE_GEMINI_API_KEY as string) || '';
   } catch {
-    return '';
+    return (import.meta.env.VITE_GEMINI_API_KEY as string) || '';
   }
 }
 

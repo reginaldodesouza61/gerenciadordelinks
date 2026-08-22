@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { toast } from 'sonner';
 import { generatePassword } from '@/lib/utils/passwordUtils';
-import { encryptSecretItem, decryptSecretItem } from '@/lib/encryption';
+import { isFieldEncrypted, decryptSecretItem, cleanSecretDisplay } from '@/lib/encryption';
 
 const SECRET_TYPES: { id: SecretType; label: string; icon: React.ElementType; color: string }[] = [
   { id: 'password', label: 'Senha (Usuário & Senha)', icon: Lock, color: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800' },
@@ -112,8 +112,16 @@ export function SecretVaultBlock({
     let isMounted = true;
     async function loadSecrets() {
       if (block.secrets && Array.isArray(block.secrets)) {
-        const decrypted = await Promise.all(block.secrets.map(s => decryptSecretItem(s)));
-        if (isMounted) setDecryptedSecrets(decrypted);
+        try {
+          const decrypted = await Promise.all(block.secrets.map(s => decryptSecretItem(s)));
+          if (isMounted) {
+            setDecryptedSecrets(decrypted);
+          }
+        } catch {
+          if (isMounted) {
+            setDecryptedSecrets(block.secrets);
+          }
+        }
       } else {
         if (isMounted) setDecryptedSecrets([]);
       }
@@ -164,7 +172,7 @@ export function SecretVaultBlock({
     if (item.bankAgency) lines.push(`🏢 Agência: ${item.bankAgency}`);
     if (item.bankAccount) lines.push(`💳 Conta: ${item.bankAccount}${item.bankAccountType ? ` (${item.bankAccountType})` : ''}`);
     if (item.pixKey) lines.push(`💠 Chave PIX: ${item.pixKey}`);
-    if (item.transactionPassword) lines.push(`🔒 Senha de Transação: ${item.transactionPassword}`);
+    if (item.transactionPassword) lines.push(`📱 Senha do App: ${item.transactionPassword}`);
 
     // Credit Card fields
     if (item.cardBrand) lines.push(`💳 Bandeira: ${item.cardBrand}`);
@@ -482,21 +490,20 @@ export function SecretVaultBlock({
     };
 
     if (editingItem) {
-      const encryptedMapped = await Promise.all(secrets.map(async (s) =>
-        s.id === editingItem.id ? await encryptSecretItem({ ...s, ...itemData }) : await encryptSecretItem(s)
-      ));
-      updatedSecrets = encryptedMapped;
+      updatedSecrets = secrets.map((s) =>
+        s.id === editingItem.id ? { ...s, id: editingItem.id, ...itemData } : s
+      );
       toast.success('Credencial atualizada com sucesso!');
     } else {
-      const newItem = await encryptSecretItem({
+      const newItem: SecretItem = {
         id: generateId(),
         ...itemData
-      });
-      const processedExisting = await Promise.all(secrets.map(s => encryptSecretItem(s)));
-      updatedSecrets = [...processedExisting, newItem];
+      };
+      updatedSecrets = [...secrets, newItem];
       toast.success('Credencial adicionada ao cofre!');
     }
 
+    setDecryptedSecrets(updatedSecrets);
     updateBlock(block.id, { secrets: updatedSecrets });
     setIsDialogOpen(false);
     setEditingItem(null);
@@ -506,24 +513,27 @@ export function SecretVaultBlock({
   const handleDeleteItem = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     const remaining = secrets.filter((s) => s.id !== id);
-    const encryptedRemaining = await Promise.all(remaining.map((s) => encryptSecretItem(s)));
-    updateBlock(block.id, { secrets: encryptedRemaining });
+    setDecryptedSecrets(remaining);
+    updateBlock(block.id, { secrets: remaining });
     toast.success('Credencial removida do cofre');
   };
 
   return (
     <>
       <Rnd
-        size={{ width: block.width || 540, height: block.height || 380 }}
-        position={{ x: block.x, y: block.y }}
+        size={{ 
+          width: typeof block.width === 'number' ? block.width : parseInt(String(block.width), 10) || 540, 
+          height: typeof block.height === 'number' ? block.height : parseInt(String(block.height), 10) || 380 
+        }}
+        position={{ x: block.x || 40, y: block.y || 40 }}
         style={{
           zIndex: isSelected ? 35 : 12,
         }}
         onDragStop={(_, d) => updateBlock(block.id, { x: d.x, y: d.y })}
         onResizeStop={(_, __, ref, ___, position) => {
           updateBlock(block.id, {
-            width: ref.style.width,
-            height: ref.style.height,
+            width: parseInt(ref.style.width, 10) || 540,
+            height: parseInt(ref.style.height, 10) || 380,
             ...position,
           });
         }}
@@ -847,7 +857,7 @@ export function SecretVaultBlock({
                           <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px] col-span-full">
                             <div className="truncate flex items-center gap-1.5">
                               <Lock size={12} className="text-emerald-500 shrink-0" />
-                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">SENHA DE TRANSAÇÃO:</span>
+                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">SENHA DO APP:</span>
                               <span className="font-mono truncate">
                                 {revealedIds[`${item.id}_tx`] ? item.transactionPassword : '••••••••'}
                               </span>
@@ -866,9 +876,9 @@ export function SecretVaultBlock({
                               </button>
                               <button
                                 type="button"
-                                onClick={(e) => copyTextToClipboard(item.transactionPassword || '', 'Senha de Transação', item.id, 'tx_password', e)}
+                                onClick={(e) => copyTextToClipboard(item.transactionPassword || '', 'Senha do App', item.id, 'tx_password', e)}
                                 className="p-0.5 rounded text-slate-400 hover:text-emerald-600"
-                                title="Copiar Senha de Transação"
+                                title="Copiar Senha do App"
                               >
                                 {copiedActionMap[`${item.id}_tx_password`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
                               </button>
@@ -1089,7 +1099,13 @@ export function SecretVaultBlock({
                       <div className="flex items-center gap-1.5 shrink-0 text-slate-400 text-[10px] select-none font-sans font-semibold">
                         <KeyRound size={11} className="text-amber-400" />
                         <span>
-                          {item.type === 'azure_graph' || item.type === 'oauth_api' ? 'Secret:' : item.type === 'api_token' ? 'Token:' : 'Senha:'}
+                          {item.type === 'azure_graph' || item.type === 'oauth_api'
+                            ? 'Secret:' 
+                            : item.type === 'api_token' 
+                            ? 'Token:' 
+                            : item.type === 'bank'
+                            ? 'Senha / PIN:'
+                            : 'Senha:'}
                         </span>
                       </div>
 
@@ -1668,9 +1684,22 @@ export function SecretVaultBlock({
                 </div>
 
                 <div>
+                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
+                    Senha do App / Acesso Eletrônico (Login)
+                  </label>
+                  <Input
+                    type={showDialogPassword ? 'text' : 'password'}
+                    placeholder="Ex: Senha de 8 dígitos ou alfanumérica do app"
+                    value={formTransactionPassword}
+                    onChange={(e) => setFormTransactionPassword(e.target.value)}
+                    className="font-mono text-xs h-8"
+                  />
+                </div>
+
+                <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block">
-                      Senha do App / Login <span className="text-rose-500">*</span>
+                      Senha de Transação / PIN (PIX / TED / Cartão) <span className="text-rose-500">*</span>
                     </label>
                     <button
                       type="button"
@@ -1683,24 +1712,11 @@ export function SecretVaultBlock({
                   </div>
                   <Input
                     type={showDialogPassword ? 'text' : 'password'}
-                    placeholder="Senha de acesso ao aplicativo do banco"
+                    placeholder="PIN de 4 ou 6 dígitos para transferências/PIX"
                     value={formValue}
                     onChange={(e) => setFormValue(e.target.value)}
                     className="font-mono text-xs h-8"
                     required
-                  />
-                </div>
-
-                <div>
-                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 block mb-1">
-                    Senha de Transação / PIN (PIX/TED)
-                  </label>
-                  <Input
-                    type={showDialogPassword ? 'text' : 'password'}
-                    placeholder="PIN de 4/6 dígitos ou senha de confirmação de TED/PIX"
-                    value={formTransactionPassword}
-                    onChange={(e) => setFormTransactionPassword(e.target.value)}
-                    className="font-mono text-xs h-8"
                   />
                 </div>
               </div>

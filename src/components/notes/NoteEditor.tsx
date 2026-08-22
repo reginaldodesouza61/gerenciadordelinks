@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useNoteStore } from '@/lib/store/noteStore';
 import { useAuthStore } from '@/lib/store/authStore';
-import { decryptSecretField } from '@/lib/encryption';
+import { decryptNoteContent, isFieldEncrypted } from '@/lib/encryption';
 import { CanvasBlock } from '@/types/notes';
 import { Link } from '@/types/supabase';
 import { Rnd } from 'react-rnd';
@@ -830,22 +830,16 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
     try {
       if (page.conteudo) {
         const raw = page.conteudo.trim();
-        let isEncrypted = false;
-        try {
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === 'object' && parsed.ciphertext && parsed.iv && parsed.salt) {
-            isEncrypted = true;
-          }
-        } catch {
-          // not json
-        }
 
-        if (isEncrypted) {
-          decryptSecretField(raw).then(decrypted => {
+        if (isFieldEncrypted(raw)) {
+          decryptNoteContent(raw).then(decrypted => {
             if (decrypted && decrypted !== raw) {
               try {
                 if (decrypted.trim().startsWith('[')) {
-                  setBlocks(JSON.parse(decrypted));
+                  const blocksData = JSON.parse(decrypted);
+                  lastSavedContentRef.current = decrypted;
+                  lastLoadedPageIdRef.current = pageId;
+                  setBlocks(blocksData);
                   updatePage(pageId, { conteudo: decrypted });
                 }
               } catch {
@@ -857,19 +851,17 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
         } else if (raw.startsWith('[')) {
           parsedBlocks = JSON.parse(raw);
         } else {
-          if (!raw.startsWith('U2FsdGVkX1')) {
-            parsedBlocks = [
-              {
-                id: `block_${Date.now()}`,
-                x: 40,
-                y: 40,
-                width: 600,
-                height: 'auto',
-                type: 'text',
-                content: raw,
-              },
-            ];
-          }
+          parsedBlocks = [
+            {
+              id: `block_${Date.now()}`,
+              x: 40,
+              y: 40,
+              width: 600,
+              height: 'auto',
+              type: 'text',
+              content: raw,
+            },
+          ];
         }
       }
     } catch (e) {
@@ -898,44 +890,46 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
     [pageId, updatePage]
   );
 
-  const updateBlock = (id: string, updates: Partial<CanvasBlock>) => {
-    const updated = blocks.map((b) => (b.id === id ? { ...b, ...updates } : b));
-    setBlocks(updated);
-    const json = JSON.stringify(updated);
-    lastSavedContentRef.current = json;
-    updatePage(pageId, { conteudo: json });
-  };
+  const updateBlock = useCallback((id: string, updates: Partial<CanvasBlock>) => {
+    setBlocks((prev) => {
+      const updated = prev.map((b) => (b.id === id ? { ...b, ...updates } : b));
+      const json = JSON.stringify(updated);
+      lastSavedContentRef.current = json;
+      updatePage(pageId, { conteudo: json });
+      return updated;
+    });
+  }, [pageId, updatePage]);
 
-  const removeBlock = (id: string) => {
-    const blockToRemove = blocks.find((b) => b.id === id);
-    const updated = blocks.filter((b) => b.id !== id);
-    setBlocks(updated);
-    const json = JSON.stringify(updated);
-    lastSavedContentRef.current = json;
-    updatePage(pageId, { conteudo: json });
-    if (selectedBlockId === id) {
-      setSelectedBlockId(null);
-      setActiveEditor(null);
-    }
-    if (blockToRemove && !isBlockEmpty(blockToRemove)) {
-      toast('Bloco removido', {
-        duration: 7000,
-        action: {
-          label: 'Desfazer',
-          onClick: () => {
-            setBlocks((prev) => {
-              const restored = [...prev, blockToRemove];
-              const restoredJson = JSON.stringify(restored);
-              lastSavedContentRef.current = restoredJson;
-              updatePage(pageId, { conteudo: restoredJson });
-              return restored;
-            });
-            toast.success('Bloco restaurado!');
+  const removeBlock = useCallback((id: string) => {
+    setBlocks((prev) => {
+      const blockToRemove = prev.find((b) => b.id === id);
+      const updated = prev.filter((b) => b.id !== id);
+      const json = JSON.stringify(updated);
+      lastSavedContentRef.current = json;
+      updatePage(pageId, { conteudo: json });
+      if (blockToRemove && !isBlockEmpty(blockToRemove)) {
+        toast('Bloco removido', {
+          duration: 7000,
+          action: {
+            label: 'Desfazer',
+            onClick: () => {
+              setBlocks((current) => {
+                const restored = [...current, blockToRemove];
+                const restoredJson = JSON.stringify(restored);
+                lastSavedContentRef.current = restoredJson;
+                updatePage(pageId, { conteudo: restoredJson });
+                return restored;
+              });
+              toast.success('Bloco restaurado!');
+            },
           },
-        },
-      });
-    }
-  };
+        });
+      }
+      return updated;
+    });
+    setSelectedBlockId((curr) => (curr === id ? null : curr));
+    setActiveEditor(null);
+  }, [pageId, updatePage]);
 
   // Helper to calculate spawn position avoiding overlapping on top of existing notes
   const getSpawnPosition = (blockWidth = 440, blockHeight = 220) => {
@@ -999,7 +993,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   }, [pageId, updatePage]);
 
   // Add a new Text & Table block
-  const handleAddTextBlock = (e?: React.MouseEvent) => {
+  const handleAddTextBlock = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation();
     const cleaned = purgeAndSave(blocks, null);
     const pos = getSpawnPosition(440, 180);
@@ -1015,10 +1009,13 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
     const nextBlocks = [...cleaned, newBlock];
     setBlocks(nextBlocks);
     setSelectedBlockId(newBlock.id);
-  };
+    const json = JSON.stringify(nextBlocks);
+    lastSavedContentRef.current = json;
+    updatePage(pageId, { conteudo: json });
+  }, [blocks, purgeAndSave, pageId, updatePage]);
 
   // Add a new Script / Code block
-  const handleAddScriptBlock = (e?: React.MouseEvent) => {
+  const handleAddScriptBlock = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation();
     const cleaned = purgeAndSave(blocks, null);
     const pos = getSpawnPosition(560, 380);
@@ -1040,11 +1037,13 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
     const nextBlocks = [...cleaned, newBlock];
     setBlocks(nextBlocks);
     setSelectedBlockId(newBlock.id);
-    updatePage(pageId, { conteudo: JSON.stringify(nextBlocks) });
-  };
+    const json = JSON.stringify(nextBlocks);
+    lastSavedContentRef.current = json;
+    updatePage(pageId, { conteudo: json });
+  }, [blocks, purgeAndSave, pageId, updatePage]);
 
   // Add a new Secret / Token Vault block
-  const handleAddVaultBlock = (e?: React.MouseEvent) => {
+  const handleAddVaultBlock = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation();
     const cleaned = purgeAndSave(blocks, null);
     const pos = getSpawnPosition(520, 340);
@@ -1061,11 +1060,13 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
     const nextBlocks = [...cleaned, newBlock];
     setBlocks(nextBlocks);
     setSelectedBlockId(newBlock.id);
-    updatePage(pageId, { conteudo: JSON.stringify(nextBlocks) });
-  };
+    const json = JSON.stringify(nextBlocks);
+    lastSavedContentRef.current = json;
+    updatePage(pageId, { conteudo: json });
+  }, [blocks, purgeAndSave, pageId, updatePage]);
 
   // Add a new Whiteboard / Flowchart Drawing block (Excalidraw-like)
-  const handleAddWhiteboardBlock = (e?: React.MouseEvent) => {
+  const handleAddWhiteboardBlock = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation();
     const cleaned = purgeAndSave(blocks, null);
     const pos = getSpawnPosition(960, 600);
@@ -1083,12 +1084,14 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
     const nextBlocks = [...cleaned, newBlock];
     setBlocks(nextBlocks);
     setSelectedBlockId(newBlock.id);
-    updatePage(pageId, { conteudo: JSON.stringify(nextBlocks) });
+    const json = JSON.stringify(nextBlocks);
+    lastSavedContentRef.current = json;
+    updatePage(pageId, { conteudo: json });
     toast.success('Quadro de diagramas adicionado!');
-  };
+  }, [blocks, purgeAndSave, pageId, updatePage]);
 
   // Add an existing link card block
-  const handleInsertLinkCard = (link: Link) => {
+  const handleInsertLinkCard = useCallback((link: Link) => {
     const cleaned = purgeAndSave(blocks, null);
     const pos = getSpawnPosition();
     const newBlock: CanvasBlock = {
@@ -1106,8 +1109,10 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
     const nextBlocks = [...cleaned, newBlock];
     setBlocks(nextBlocks);
     setSelectedBlockId(newBlock.id);
-    updatePage(pageId, { conteudo: JSON.stringify(nextBlocks) });
-  };
+    const json = JSON.stringify(nextBlocks);
+    lastSavedContentRef.current = json;
+    updatePage(pageId, { conteudo: json });
+  }, [blocks, purgeAndSave, pageId, updatePage]);
 
   // Insert Image / Screenshot Block helper
   const insertImageBlock = useCallback((

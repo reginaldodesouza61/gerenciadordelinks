@@ -12,11 +12,16 @@ interface LoginFormProps {
 export function LoginForm({ onToggleForm }: LoginFormProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const { signIn, loading } = useAuthStore();
+  const { signIn, signInAsGuest, loading } = useAuthStore();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     await signIn(email, password);
+  };
+
+  const handleGuestAccess = () => {
+    signInAsGuest();
+    window.location.href = '/';
   };
 
   return (
@@ -52,7 +57,7 @@ export function LoginForm({ onToggleForm }: LoginFormProps) {
             />
           </div>
         </CardContent>
-        <CardFooter className="flex flex-col space-y-4">
+        <CardFooter className="flex flex-col space-y-3">
           <Button 
             type="submit" 
             className="w-full"
@@ -60,11 +65,21 @@ export function LoginForm({ onToggleForm }: LoginFormProps) {
           >
             {loading ? 'Entrando...' : 'Entrar'}
           </Button>
+
+          <Button 
+            type="button"
+            variant="outline"
+            onClick={handleGuestAccess}
+            className="w-full text-xs font-semibold"
+          >
+            Acessar Workspace Rapidamente
+          </Button>
+
           <Button 
             type="button"
             variant="link" 
             onClick={onToggleForm}
-            className="w-full"
+            className="w-full text-xs text-muted-foreground"
           >
             Não tem uma conta? Cadastre-se
           </Button>
