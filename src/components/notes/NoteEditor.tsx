@@ -12,10 +12,18 @@ import {
   Highlighter, Palette, TableProperties, Plus, ChevronRight, Combine,
   Code2, ShieldCheck, Link as LinkIcon, Type, Terminal, KeyRound, Sparkles, Wand2,
   Camera, Image as ImageIcon, Upload, Download, Copy, ChevronDown, Undo2, Redo2, PanelLeftOpen,
-  Shapes, Pencil, Search, Network, Workflow
+  Shapes, Pencil, Search, Network, Workflow, Maximize2, Minimize2, ChevronUp, PlusCircle, Layers, Clock
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuItem, 
+  DropdownMenuLabel, 
+  DropdownMenuSeparator, 
+  DropdownMenuTrigger 
+} from '@/components/ui/dropdown-menu';
 import { TablePicker } from './TablePicker';
 import { ScriptBlock } from './dev/ScriptBlock';
 import { SecretVaultBlock } from './dev/SecretVaultBlock';
@@ -163,9 +171,7 @@ function GlobalToolbar({
   onOpenAi?: () => void;
 }) {
   if (!editor) {
-    return (
-      <div className="border-b border-slate-200 dark:border-zinc-800 w-full shrink-0"></div>
-    );
+    return null;
   }
 
   // Determine current heading or paragraph
@@ -175,7 +181,7 @@ function GlobalToolbar({
   else if (editor.isActive('heading', { level: 3 })) textType = 'h3';
 
   return (
-    <div className="flex flex-wrap items-center gap-1 px-3 py-1.5 min-h-11 border-b border-slate-200 dark:border-zinc-800 bg-slate-50/90 dark:bg-zinc-900 text-slate-700 dark:text-zinc-200 shrink-0 select-none">
+    <div className="flex flex-wrap items-center gap-1 px-2.5 py-1 min-h-9 border-b border-slate-200 dark:border-zinc-800 bg-slate-50/90 dark:bg-zinc-900 text-slate-700 dark:text-zinc-200 shrink-0 select-none text-xs transition-all">
       {/* Heading / Text Size Selector */}
       <Select 
         value={textType}
@@ -891,6 +897,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [isInsertLinkOpen, setIsInsertLinkOpen] = useState(false);
   const [isRelatedLinksOpen, setIsRelatedLinksOpen] = useState(false);
+  const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
 
   // Gemini AI Assistant Modal State
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
@@ -920,22 +927,19 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
       setSelectedBlockId(targetBlockId);
 
       // Locate block and scroll canvas
-      setBlocks((currentBlocks) => {
-        const targetBlock = currentBlocks.find((b) => b.id === targetBlockId);
-        if (targetBlock && canvasRef.current) {
-          canvasRef.current.scrollTo({
-            left: Math.max(0, targetBlock.x - 60),
-            top: Math.max(0, targetBlock.y - 60),
-            behavior: 'smooth',
-          });
-        }
-        return currentBlocks;
-      });
+      const targetBlock = blocks.find((b) => b.id === targetBlockId);
+      if (targetBlock && canvasRef.current) {
+        canvasRef.current.scrollTo({
+          left: Math.max(0, targetBlock.x - 60),
+          top: Math.max(0, targetBlock.y - 60),
+          behavior: 'smooth',
+        });
+      }
     };
 
     window.addEventListener('meuhub_scroll_to_block', handleScrollToBlock);
     return () => window.removeEventListener('meuhub_scroll_to_block', handleScrollToBlock);
-  }, [pageId]);
+  }, [pageId, blocks]);
 
   const relatedLinksCount = useMemo(() => {
     return relations.filter((r) => r.note_id === pageId).length;
@@ -1121,7 +1125,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
       const updated = prev.map((b) => (b.id === id ? { ...b, ...updates } : b));
       const json = JSON.stringify(updated);
       lastSavedContentRef.current = json;
-      updatePage(pageId, { conteudo: json });
+      Promise.resolve().then(() => {
+        updatePage(pageId, { conteudo: json });
+      });
       return updated;
     });
   }, [pageId, updatePage]);
@@ -1132,7 +1138,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
       const updated = prev.filter((b) => b.id !== id);
       const json = JSON.stringify(updated);
       lastSavedContentRef.current = json;
-      updatePage(pageId, { conteudo: json });
+      Promise.resolve().then(() => {
+        updatePage(pageId, { conteudo: json });
+      });
       if (blockToRemove && !isBlockEmpty(blockToRemove)) {
         toast('Bloco removido', {
           duration: 7000,
@@ -1143,7 +1151,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                 const restored = [...current, blockToRemove];
                 const restoredJson = JSON.stringify(restored);
                 lastSavedContentRef.current = restoredJson;
-                updatePage(pageId, { conteudo: restoredJson });
+                Promise.resolve().then(() => {
+                  updatePage(pageId, { conteudo: restoredJson });
+                });
                 return restored;
               });
               toast.success('Bloco restaurado!');
@@ -1196,7 +1206,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
       const updated = [...rest, target];
       const json = JSON.stringify(updated);
       lastSavedContentRef.current = json;
-      updatePage(pageId, { conteudo: json });
+      Promise.resolve().then(() => {
+        updatePage(pageId, { conteudo: json });
+      });
       return updated;
     });
     setSelectedBlockId(id);
@@ -1212,7 +1224,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
       const updated = [target, ...rest];
       const json = JSON.stringify(updated);
       lastSavedContentRef.current = json;
-      updatePage(pageId, { conteudo: json });
+      Promise.resolve().then(() => {
+        updatePage(pageId, { conteudo: json });
+      });
       return updated;
     });
     setSelectedBlockId(id);
@@ -1539,6 +1553,20 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
   const formattedDate = useMemo(() => {
     if (!page?.created_at) return '';
     const date = new Date(page.created_at);
+    const dateStr = new Intl.DateTimeFormat('pt-BR', { 
+      weekday: 'short',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(date);
+    return dateStr.charAt(0).toUpperCase() + dateStr.slice(1);
+  }, [page?.created_at]);
+
+  const formattedDateFull = useMemo(() => {
+    if (!page?.created_at) return '';
+    const date = new Date(page.created_at);
     return new Intl.DateTimeFormat('pt-BR', { 
       weekday: 'long', 
       year: 'numeric', 
@@ -1553,177 +1581,230 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
 
   return (
     <div className="flex flex-col h-full bg-white dark:bg-zinc-900 rounded-lg shadow-sm border border-slate-200 dark:border-zinc-800 overflow-hidden transition-colors">
-      {/* Title Header */}
-      <div className="px-6 py-4 border-b border-border bg-white dark:bg-zinc-900 z-20 shrink-0 flex flex-col gap-3">
-        <div className="flex items-start justify-between gap-3 flex-1 min-w-0 w-full">
-          <div className="flex flex-col w-full min-w-0">
+      {/* Discrete Top Header Bar */}
+      {!isHeaderCollapsed ? (
+        <div className="px-3.5 py-1.5 border-b border-slate-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 z-20 shrink-0 flex items-center justify-between gap-2 transition-all">
+          {/* Left: Title & Date */}
+          <div className="flex items-center gap-2 min-w-0 flex-1">
             <input
-              className="text-2xl font-bold border-none outline-none w-full bg-transparent placeholder-slate-300 dark:placeholder-zinc-600 text-slate-800 dark:text-zinc-100 truncate"
+              className="text-base sm:text-lg font-bold border-none outline-none bg-transparent placeholder-slate-300 dark:placeholder-zinc-600 text-slate-800 dark:text-zinc-100 truncate max-w-[240px] sm:max-w-[340px] focus:ring-0"
               value={page.titulo}
               onChange={(e) => updatePage(page.id, { titulo: e.target.value })}
               placeholder="Título da anotação..."
             />
             {formattedDate && (
-              <span className="text-[11px] text-slate-400 dark:text-zinc-500 font-medium capitalize mt-0.5 whitespace-nowrap">
-                {formattedDate}
+              <span 
+                className="text-[11px] text-slate-500 dark:text-zinc-400 font-medium whitespace-nowrap shrink-0 flex items-center gap-1 bg-slate-100/90 dark:bg-zinc-800/90 px-2 py-0.5 rounded-md"
+                title={`Criado em: ${formattedDateFull}`}
+              >
+                <Clock size={11} className="text-slate-400 dark:text-zinc-500" />
+                <span>{formattedDate}</span>
               </span>
             )}
           </div>
 
-          {/* Global Search Button in Note Top Bar */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => onOpenSearch?.()}
-            className="h-8 px-3 text-xs bg-slate-50 dark:bg-zinc-800 hover:bg-indigo-50 dark:hover:bg-zinc-700 text-slate-600 dark:text-zinc-300 hover:text-indigo-600 dark:hover:text-indigo-400 border-slate-200 dark:border-zinc-700 rounded-xl gap-2 shadow-2xs font-medium shrink-0"
-            title="Pesquisar em todas as notas, códigos, textos, diagramas e credenciais (Ctrl+K)"
-          >
-            <Search size={14} className="text-slate-400 dark:text-zinc-500" />
-            <span className="hidden sm:inline">Pesquisar tudo</span>
-            <kbd className="hidden sm:inline-block px-1.5 py-0.2 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded text-[9px] font-mono font-semibold text-slate-400">
-              Ctrl+K
-            </kbd>
-          </Button>
-        </div>
-
-        {/* Developer Action Bar / Quick Insert Buttons */}
-        <div className="flex items-center flex-wrap gap-1.5 shrink-0 select-none">
-          {/* Gemini AI Assistant Button */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => handleOpenAiAssistant()}
-            className="h-8 px-2.5 text-xs bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/80 dark:to-purple-950/80 hover:from-indigo-100 hover:to-purple-100 dark:hover:from-indigo-900 dark:hover:to-purple-900 text-indigo-700 dark:text-indigo-200 border-indigo-200 dark:border-indigo-800 rounded-md gap-1.5 shadow-2xs font-semibold"
-            title="Assistente com Inteligência Artificial (Gemini): Melhorar texto, requisitos, fluxos e casos de uso"
-          >
-            <Sparkles size={14} className="text-indigo-600 dark:text-indigo-400" />
-            <span className="hidden sm:inline">IA Gemini</span>
-          </Button>
-
-          {/* Screen Capture / Add Image Button */}
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 px-2.5 text-xs bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100/80 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 border-sky-300 dark:border-sky-800 rounded-md gap-1.5 shadow-2xs font-medium"
-                title="Capturar print de tela ou carregar imagem"
-              >
-                <Camera size={14} className="text-sky-600 dark:text-sky-400" />
-                <span className="hidden sm:inline">Capturar Tela</span>
-                <ChevronDown size={11} className="opacity-60 -ml-0.5" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-52 p-1.5" align="end">
-              <div className="space-y-1">
-                <button
-                  type="button"
+          {/* Right: Consolidated Discrete Action Controls */}
+          <div className="flex items-center gap-1.5 shrink-0 select-none">
+            {/* Add Block Dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  className="h-7 px-2.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg gap-1.5 shadow-2xs transition-colors"
+                  title="Adicionar blocos de conteúdo no quadro"
+                >
+                  <Plus size={14} />
+                  <span>Bloco</span>
+                  <ChevronDown size={11} className="opacity-70" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56 p-1.5">
+                <DropdownMenuLabel className="text-[11px] text-slate-400 dark:text-zinc-500 font-normal px-2 py-1">
+                  Inserir no quadro:
+                </DropdownMenuLabel>
+                <DropdownMenuItem
+                  onClick={handleAddTextBlock}
+                  className="text-xs cursor-pointer gap-2 py-1.5 font-medium"
+                >
+                  <Type size={14} className="text-slate-500 dark:text-zinc-400" />
+                  <span>Texto & Tabela</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={handleAddScriptBlock}
+                  className="text-xs cursor-pointer gap-2 py-1.5 font-medium"
+                >
+                  <Code2 size={14} className="text-emerald-500" />
+                  <span>Script / Código</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={handleAddVaultBlock}
+                  className="text-xs cursor-pointer gap-2 py-1.5 font-medium"
+                >
+                  <ShieldCheck size={14} className="text-amber-500" />
+                  <span>Credenciais & Senhas</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={handleAddWhiteboardBlock}
+                  className="text-xs cursor-pointer gap-2 py-1.5 font-medium"
+                >
+                  <Shapes size={14} className="text-purple-500" />
+                  <span>Lousa & Fluxograma</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={handleAddDrawioBlock}
+                  className="text-xs cursor-pointer gap-2 py-1.5 font-medium"
+                >
+                  <Network size={14} className="text-amber-600 dark:text-amber-400" />
+                  <span>Diagrama Draw.io</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
                   onClick={handleCaptureScreen}
-                  className="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-sky-50 dark:hover:bg-sky-950/60 text-slate-700 dark:text-zinc-200 flex items-center gap-2 font-medium transition-colors"
+                  className="text-xs cursor-pointer gap-2 py-1.5 font-medium"
                 >
-                  <Camera size={14} className="text-sky-600 dark:text-sky-400" />
+                  <Camera size={14} className="text-sky-500" />
                   <span>Capturar Tela (Print)</span>
-                </button>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => fileInputRef.current?.click()}
+                  className="text-xs cursor-pointer gap-2 py-1.5 font-medium"
+                >
+                  <ImageIcon size={14} className="text-slate-500" />
+                  <span>Carregar Imagem</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => setIsInsertLinkOpen(true)}
+                  className="text-xs cursor-pointer gap-2 py-1.5 font-medium"
+                >
+                  <LinkIcon size={14} className="text-indigo-500" />
+                  <span>Inserir Link Cadastrado</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Gemini AI */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handleOpenAiAssistant()}
+              className="h-7 px-2 text-xs bg-purple-50/80 dark:bg-purple-950/40 hover:bg-purple-100 text-purple-700 dark:text-purple-300 border-purple-200/80 dark:border-purple-800/80 rounded-lg gap-1 font-medium shadow-2xs"
+              title="Assistente com Inteligência Artificial (Gemini)"
+            >
+              <Sparkles size={13} className="text-purple-600 dark:text-purple-400" />
+              <span className="hidden sm:inline">IA Gemini</span>
+            </Button>
+
+            {/* Search Button */}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => onOpenSearch?.()}
+              className="h-7 px-2 text-xs text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg gap-1.5 font-medium"
+              title="Pesquisar em todas as notas (Ctrl+K)"
+            >
+              <Search size={14} className="text-slate-400 dark:text-zinc-500" />
+              <kbd className="hidden md:inline-block px-1 py-0.2 bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded text-[9px] font-mono text-slate-400">
+                Ctrl+K
+              </kbd>
+            </Button>
+
+            {/* Related Links */}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setIsRelatedLinksOpen(true)}
+              className="h-7 px-2 text-xs text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg gap-1 font-medium relative"
+              title="Ver e gerenciar links relacionados a esta página"
+            >
+              <LinkIcon size={13} className="text-indigo-500 dark:text-indigo-400" />
+              <span className="hidden lg:inline">Links</span>
+              <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-indigo-100 dark:bg-indigo-900/80 text-indigo-700 dark:text-indigo-300 font-bold">
+                {relatedLinksCount}
+              </span>
+            </Button>
+
+            <div className="w-px h-4 bg-slate-200 dark:bg-zinc-800 mx-0.5" />
+
+            {/* Collapse Header Toggle for Maximum Workspace */}
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => setIsHeaderCollapsed(true)}
+              className="h-7 w-7 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg"
+              title="Modo Foco: Ocultar barra superior para ter espaço total de trabalho"
+            >
+              <ChevronUp size={15} />
+            </Button>
+          </div>
+        </div>
+      ) : (
+        /* Collapsed Ultra-Discrete Top Strip */
+        <div className="h-7 px-3 border-b border-slate-200 dark:border-zinc-800 bg-slate-50/90 dark:bg-zinc-900/90 z-20 shrink-0 flex items-center justify-between gap-2 text-xs select-none">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="font-semibold text-slate-700 dark:text-zinc-300 truncate max-w-[200px]">
+              {page.titulo || 'Sem título'}
+            </span>
+            {formattedDate && (
+              <span 
+                className="hidden sm:inline-flex text-[10px] text-slate-400 dark:text-zinc-500 font-medium whitespace-nowrap shrink-0 items-center gap-1"
+                title={`Criado em: ${formattedDateFull}`}
+              >
+                <span>•</span>
+                <Clock size={10} className="text-slate-400 dark:text-zinc-500" />
+                <span>{formattedDate}</span>
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5">
+            {/* Quick Add Block Button in Collapsed Mode */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full text-left px-2.5 py-1.5 text-xs rounded-md hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-200 flex items-center gap-2 font-medium transition-colors"
+                  className="h-5 px-2 text-[11px] bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 rounded flex items-center gap-1 font-medium"
+                  title="Adicionar bloco"
                 >
-                  <ImageIcon size={14} className="text-slate-500 dark:text-zinc-400" />
-                  <span>Carregar Imagem do PC</span>
+                  <Plus size={12} />
+                  <span>Bloco</span>
                 </button>
-              </div>
-            </PopoverContent>
-          </Popover>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56 p-1.5">
+                <DropdownMenuItem onClick={handleAddTextBlock} className="text-xs cursor-pointer gap-2 py-1.5 font-medium">
+                  <Type size={14} className="text-slate-500" />
+                  <span>Texto & Tabela</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleAddScriptBlock} className="text-xs cursor-pointer gap-2 py-1.5 font-medium">
+                  <Code2 size={14} className="text-emerald-500" />
+                  <span>Script / Código</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleAddVaultBlock} className="text-xs cursor-pointer gap-2 py-1.5 font-medium">
+                  <ShieldCheck size={14} className="text-amber-500" />
+                  <span>Credenciais</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleAddWhiteboardBlock} className="text-xs cursor-pointer gap-2 py-1.5 font-medium">
+                  <Shapes size={14} className="text-purple-500" />
+                  <span>Lousa & Fluxograma</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleAddDrawioBlock} className="text-xs cursor-pointer gap-2 py-1.5 font-medium">
+                  <Network size={14} className="text-amber-600" />
+                  <span>Draw.io</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
-          {/* Insert Text Block */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleAddTextBlock}
-            className="h-8 px-2.5 text-xs bg-white dark:bg-zinc-800 text-slate-700 dark:text-zinc-200 hover:bg-slate-50 dark:hover:bg-zinc-700 hover:text-slate-900 dark:hover:text-white border-slate-200 dark:border-zinc-700 rounded-md gap-1.5 shadow-2xs font-medium"
-            title="Inserir caixa de texto ou tabela no quadro"
-          >
-            <Type size={14} className="text-slate-500 dark:text-zinc-400" />
-            <span className="hidden sm:inline">Texto</span>
-          </Button>
-
-          {/* Insert Script Block */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleAddScriptBlock}
-            className="h-8 px-2.5 text-xs bg-slate-900 dark:bg-emerald-950/80 hover:bg-slate-800 dark:hover:bg-emerald-900 text-white dark:text-emerald-300 border-slate-900 dark:border-emerald-800 rounded-md gap-1.5 shadow-2xs font-medium"
-            title="Inserir bloco de código / script com syntax highlighting"
-          >
-            <Code2 size={14} className="text-emerald-400" />
-            <span className="hidden sm:inline">Script / Código</span>
-          </Button>
-
-          {/* Insert Secret Vault Block */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleAddVaultBlock}
-            className="h-8 px-2.5 text-xs bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100/80 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800 rounded-md gap-1.5 shadow-2xs font-medium"
-            title="Inserir cofre para guardar credenciais, logins, senhas, links e tokens"
-          >
-            <ShieldCheck size={14} className="text-amber-600 dark:text-amber-400" />
-            <span className="hidden sm:inline">Credenciais</span>
-          </Button>
-
-          {/* Insert Whiteboard / Flowchart Drawing Block (Excalidraw-like) */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleAddWhiteboardBlock}
-            className="h-8 px-2.5 text-xs bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100/80 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800 rounded-md gap-1.5 shadow-2xs font-semibold"
-            title="Inserir quadro de desenho livre e diagramas de fluxo estilo Excalidraw (com IA)"
-          >
-            <Shapes size={14} className="text-purple-600 dark:text-purple-400" />
-            <span className="hidden sm:inline">Quadro / Fluxo</span>
-          </Button>
-
-          {/* Insert Draw.io Diagram Block */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleAddDrawioBlock}
-            className="h-8 px-2.5 text-xs bg-amber-50 dark:bg-amber-950/70 hover:bg-amber-100 dark:hover:bg-amber-900/70 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700 rounded-md gap-1.5 shadow-2xs font-semibold"
-            title="Inserir diagrama profissional do Draw.io (Arquitetura, Fluxogramas, UML, Banco ER)"
-          >
-            <Network size={14} className="text-amber-600 dark:text-amber-400" />
-            <span className="hidden sm:inline">Draw.io</span>
-          </Button>
-
-          {/* Insert Registered Link Card */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setIsInsertLinkOpen(true)}
-            className="h-8 px-2.5 text-xs bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100/80 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 rounded-md gap-1.5 shadow-2xs font-medium"
-            title="Vincular e embutir link cadastrado no quadro"
-          >
-            <LinkIcon size={14} className="text-indigo-600 dark:text-indigo-400" />
-            <span className="hidden md:inline">Inserir Link</span>
-          </Button>
-
-          {/* View Related Links Drawer */}
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setIsRelatedLinksOpen(true)}
-            className="h-8 px-2.5 text-xs text-slate-600 dark:text-zinc-300 hover:text-indigo-700 dark:hover:text-indigo-300 hover:bg-indigo-50/60 dark:hover:bg-indigo-950/60 rounded-md gap-1.5 font-medium relative"
-            title="Ver e gerenciar links relacionados a esta página"
-          >
-            <LinkIcon size={14} className="text-indigo-500 dark:text-indigo-400" />
-            <span className="hidden lg:inline">Links Relacionados</span>
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 font-bold">
-              {relatedLinksCount}
-            </span>
-          </Button>
+            <button
+              type="button"
+              onClick={() => setIsHeaderCollapsed(false)}
+              className="h-5 px-2 text-[11px] text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-zinc-800 rounded flex items-center gap-1 transition-colors"
+              title="Expandir barra de ferramentas completa"
+            >
+              <ChevronDown size={13} />
+              <span className="hidden sm:inline">Mostrar barra</span>
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Formatting Toolbar (Active when a text editor is focused) */}
       <GlobalToolbar editor={activeEditor} onOpenAi={() => handleOpenAiAssistant()} />
