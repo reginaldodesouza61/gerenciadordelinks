@@ -101,7 +101,10 @@ export function NotesContainer() {
         style={{ width: isDesktopSidebarCollapsed ? 0 : sidebarWidth }}
       >
         <div style={{ width: sidebarWidth }} className="h-full">
-          <NotesSidebar onCollapse={() => toggleSidebarCollapse(true)} />
+          <NotesSidebar 
+            onCollapse={() => toggleSidebarCollapse(true)} 
+            onOpenSearch={() => setIsSearchModalOpen(true)}
+          />
         </div>
       </div>
       
@@ -170,7 +173,7 @@ export function NotesContainer() {
               </Button>
             </div>
             <div className="h-[calc(100%-53px)]">
-              <NotesSidebar />
+              <NotesSidebar onOpenSearch={() => setIsSearchModalOpen(true)} />
             </div>
           </div>
         </div>
@@ -188,6 +191,7 @@ export function NotesContainer() {
               pageId={activePageId} 
               isSidebarCollapsed={isDesktopSidebarCollapsed}
               onToggleSidebar={() => toggleSidebarCollapse(!isDesktopSidebarCollapsed)}
+              onOpenSearch={() => setIsSearchModalOpen(true)}
             />
           </div>
         ) : (

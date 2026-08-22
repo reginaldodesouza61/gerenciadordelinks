@@ -13,13 +13,13 @@ import { useAuthStore } from '@/lib/store/authStore';
 import { cn } from '@/lib/utils';
 import { NotePage } from '@/types/notes';
 import { TrashModal } from './TrashModal';
-import { GlobalNotesSearchModal } from './GlobalNotesSearchModal';
 
 interface NotesSidebarProps {
   onCollapse?: () => void;
+  onOpenSearch?: () => void;
 }
 
-export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
+export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
   const { user } = useAuthStore();
   const { 
     sections, pages, 
@@ -35,7 +35,6 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
 
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [expandedPages, setExpandedPages] = useState<string[]>([]);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
   
   // Drag and drop state for sections
   const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
@@ -707,9 +706,6 @@ export function NotesSidebar({ onCollapse }: NotesSidebarProps) {
 
       {/* Trash / Deleted Notes Modal */}
       <TrashModal open={isTrashOpen} onOpenChange={setIsTrashOpen} />
-
-      {/* Global Notes Search Modal */}
-      <GlobalNotesSearchModal open={isSearchOpen} onOpenChange={setIsSearchOpen} />
     </div>
   );
 }

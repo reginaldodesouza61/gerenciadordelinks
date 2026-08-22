@@ -1387,7 +1387,10 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
   return (
     <>
       <Rnd
-        size={{ width: block.width || 960, height: block.height || 600 }}
+        size={{ 
+          width: typeof block.width === 'number' ? block.width : parseInt(String(block.width), 10) || 960, 
+          height: typeof block.height === 'number' ? block.height : parseInt(String(block.height), 10) || 600 
+        }}
         position={{ x: block.x, y: block.y }}
         style={{
           zIndex: isSelected ? 40 : 15,
@@ -1399,11 +1402,27 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
         onDragStop={(_e, d) => {
           updateBlock(block.id, { x: d.x, y: d.y });
         }}
-        onResizeStop={(_e, _direction, ref, _delta, position) => {
+        enableResizing={{
+          top: false,
+          right: true,
+          bottom: true,
+          left: false,
+          topRight: false,
+          bottomRight: true,
+          bottomLeft: false,
+          topLeft: false,
+        }}
+        resizeHandleStyles={{
+          right: { cursor: 'ew-resize', width: '8px', right: '-4px', zIndex: 35 },
+          bottom: { cursor: 'ns-resize', height: '8px', bottom: '-4px', zIndex: 35 },
+          bottomRight: { cursor: 'nwse-resize', width: '14px', height: '14px', right: '-4px', bottom: '-4px', zIndex: 36 },
+        }}
+        onResizeStop={(_e, direction, ref, _delta, position) => {
           updateBlock(block.id, {
             width: ref.offsetWidth,
             height: ref.offsetHeight,
-            ...position,
+            ...(direction.includes('left') ? { x: position.x } : {}),
+            ...(direction.includes('top') ? { y: position.y } : {}),
           });
         }}
         bounds="parent"

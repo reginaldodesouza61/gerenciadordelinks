@@ -27,7 +27,6 @@ import { InsertLinkModal } from './dev/InsertLinkModal';
 import { RelatedLinksDrawer } from './dev/RelatedLinksDrawer';
 import { AiAssistantModal } from './AiAssistantModal';
 import { ScreenCropModal } from './ScreenCropModal';
-import { GlobalNotesSearchModal } from './GlobalNotesSearchModal';
 import { SettingsModal } from '@/components/settings/SettingsModal';
 import { captureScreen, fileToDataUrl } from '@/lib/screenCapture';
 import { toast } from 'sonner';
@@ -44,6 +43,48 @@ import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
 import { Highlight } from '@tiptap/extension-highlight';
 import { Underline } from '@tiptap/extension-underline';
+
+const CustomTableCell = TableCell.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      backgroundColor: {
+        default: null,
+        parseHTML: element => element.style.backgroundColor || element.getAttribute('data-background-color') || null,
+        renderHTML: attributes => {
+          if (!attributes.backgroundColor) {
+            return {};
+          }
+          return {
+            style: `background-color: ${attributes.backgroundColor}`,
+            'data-background-color': attributes.backgroundColor,
+          };
+        },
+      },
+    };
+  },
+});
+
+const CustomTableHeader = TableHeader.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      backgroundColor: {
+        default: null,
+        parseHTML: element => element.style.backgroundColor || element.getAttribute('data-background-color') || null,
+        renderHTML: attributes => {
+          if (!attributes.backgroundColor) {
+            return {};
+          }
+          return {
+            style: `background-color: ${attributes.backgroundColor}`,
+            'data-background-color': attributes.backgroundColor,
+          };
+        },
+      },
+    };
+  },
+});
 
 const TEXT_COLORS = [
   { name: 'Preto', value: '#0f172a' },
@@ -65,6 +106,42 @@ const HIGHLIGHT_COLORS = [
   { name: 'Laranja', value: '#fed7aa' },
   { name: 'Roxo', value: '#e9d5ff' },
 ];
+
+const TABLE_BG_COLORS = [
+  { name: 'Sem cor', value: '' },
+  { name: 'Branco', value: '#ffffff' },
+  { name: 'Cinza Claro', value: '#f1f5f9' },
+  { name: 'Vermelho Claro', value: '#fee2e2' },
+  { name: 'Laranja Claro', value: '#ffedd5' },
+  { name: 'Amarelo Claro', value: '#fef9c3' },
+  { name: 'Verde Claro', value: '#dcfce7' },
+  { name: 'Azul Claro', value: '#dbeafe' },
+  { name: 'Roxo Claro', value: '#f3e8ff' },
+  { name: 'Rosa Claro', value: '#ffe4e6' },
+];
+
+function setEntireTableBackgroundColor(editor: Editor, color: string | null) {
+  const { state, dispatch } = editor.view;
+  const { $from } = state.selection;
+  for (let d = $from.depth; d > 0; d--) {
+    const node = $from.node(d);
+    if (node.type.name === 'table') {
+      const pos = $from.before(d);
+      const tr = state.tr;
+      node.descendants((child, childPos) => {
+        if (child.type.name === 'tableCell' || child.type.name === 'tableHeader') {
+          tr.setNodeMarkup(pos + 1 + childPos, undefined, {
+            ...child.attrs,
+            backgroundColor: color || null,
+          });
+        }
+      });
+      dispatch(tr);
+      return true;
+    }
+  }
+  return false;
+}
 
 function isBlockEmpty(block: CanvasBlock): boolean {
   if (block.type && block.type !== 'text') {
@@ -254,8 +331,79 @@ function GlobalToolbar({
 
       <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
 
-      {/* Table Insert */}
+      {/* Table Insert & Color Options */}
       <TablePicker onSelect={(rows, cols) => editor.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run()} />
+
+      {/* Table Background Color Picker Popover */}
+      {editor.isActive('table') && (
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs gap-1.5 bg-indigo-50/90 dark:bg-indigo-950/70 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100"
+              title="Cor de Fundo da Tabela / Células"
+            >
+              <TableProperties size={14} className="text-indigo-600 dark:text-indigo-400" />
+              <span className="font-medium text-[11px]">Cor da Tabela</span>
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-56 p-2.5" align="start">
+            <p className="text-[11px] font-semibold text-slate-600 dark:text-zinc-300 mb-1.5 flex items-center justify-between">
+              <span>Cor de Fundo</span>
+              <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-normal">Células</span>
+            </p>
+            <div className="grid grid-cols-5 gap-1.5 mb-2.5">
+              {TABLE_BG_COLORS.map((c) => (
+                <button
+                  key={c.name}
+                  type="button"
+                  className="w-7 h-7 rounded-md border border-slate-200 dark:border-zinc-700 flex items-center justify-center text-[10px] hover:scale-110 transition-transform shadow-2xs"
+                  style={{ backgroundColor: c.value || 'transparent' }}
+                  title={c.name}
+                  onClick={() => {
+                    if (c.value) {
+                      editor.chain().focus().setCellAttribute('backgroundColor', c.value).run();
+                    } else {
+                      editor.chain().focus().setCellAttribute('backgroundColor', null).run();
+                    }
+                  }}
+                >
+                  {!c.value && '✕'}
+                </button>
+              ))}
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 dark:border-zinc-800 flex flex-col gap-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-slate-500 dark:text-zinc-400">Personalizado:</span>
+                <input
+                  type="color"
+                  onInput={(e) => {
+                    const color = (e.target as HTMLInputElement).value;
+                    editor.chain().focus().setCellAttribute('backgroundColor', color).run();
+                  }}
+                  className="h-6 w-6 p-0 rounded cursor-pointer border-none bg-transparent"
+                  title="Escolher cor personalizada"
+                />
+              </div>
+
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="w-full h-7 text-[11px] mt-1 gap-1"
+                onClick={() => {
+                  const currentColor = (editor.getAttributes('tableCell').backgroundColor as string) || '#f1f5f9';
+                  setEntireTableBackgroundColor(editor, currentColor);
+                }}
+              >
+                Aplicar cor na tabela inteira
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
+      )}
 
       {/* Gemini AI Assistant Button */}
       {onOpenAi && (
@@ -319,8 +467,8 @@ function TextBlock({
         allowTableNodeSelection: true,
       }),
       TableRow,
-      TableHeader,
-      TableCell,
+      CustomTableHeader,
+      CustomTableCell,
       Highlight.configure({ multicolor: true }),
       Underline,
     ],
@@ -349,7 +497,12 @@ function TextBlock({
 
   useEffect(() => {
     if (isSelected && editor && !editor.isFocused) {
-      editor.commands.focus();
+      const timer = setTimeout(() => {
+        if (!editor.isFocused) {
+          editor.commands.focus();
+        }
+      }, 10);
+      return () => clearTimeout(timer);
     }
   }, [isSelected, editor]);
 
@@ -366,23 +519,47 @@ function TextBlock({
   return (
     <>
       <Rnd
-        size={{ width: block.width, height: block.height }}
+        size={{ 
+          width: typeof block.width === 'number' ? block.width : parseInt(String(block.width), 10) || 400, 
+          height: block.height === 'auto' || !block.height ? 'auto' : (typeof block.height === 'number' ? block.height : parseInt(String(block.height), 10) || 'auto'),
+        }}
         position={{ x: block.x, y: block.y }}
         style={{
           zIndex: isSelected ? 30 : 10,
         }}
+        onDragStart={() => {
+          setSelectedId(block.id);
+        }}
         onDragStop={(_, d) => updateBlock(block.id, { x: d.x, y: d.y })}
-        onResizeStop={(_, __, ref, ___, position) => {
+        enableResizing={{
+          top: false,
+          right: true,
+          bottom: true,
+          left: false,
+          topRight: false,
+          bottomRight: true,
+          bottomLeft: false,
+          topLeft: false,
+        }}
+        resizeHandleStyles={{
+          right: { cursor: 'ew-resize', width: '8px', right: '-4px', zIndex: 35 },
+          bottom: { cursor: 'ns-resize', height: '8px', bottom: '-4px', zIndex: 35 },
+          bottomRight: { cursor: 'nwse-resize', width: '14px', height: '14px', right: '-4px', bottom: '-4px', zIndex: 36 },
+        }}
+        onResizeStop={(_, direction, ref, ___, position) => {
+          const w = ref.offsetWidth;
+          const h = ref.offsetHeight;
           updateBlock(block.id, {
-            width: ref.style.width,
-            height: ref.style.height,
-            ...position,
+            width: w,
+            height: h,
+            ...(direction.includes('left') ? { x: position.x } : {}),
+            ...(direction.includes('top') ? { y: position.y } : {}),
           });
         }}
         bounds="parent"
-        minWidth={150}
-        minHeight={36}
-        dragHandleClassName="drag-handle"
+        minWidth={180}
+        minHeight={40}
+        dragHandleClassName="text-drag-handle"
         className={`group ${isSelected ? 'z-30' : 'z-10'}`}
         onClick={(e) => {
           e.stopPropagation();
@@ -391,7 +568,7 @@ function TextBlock({
         }}
       >
         <div 
-          className="relative w-full h-full flex flex-col"
+          className="relative w-full h-full min-h-[40px] flex flex-col"
           onContextMenu={(e) => {
             if (editor && editor.isActive('table')) {
               e.preventDefault();
@@ -402,50 +579,53 @@ function TextBlock({
             }
           }}
         >
-          {/* Top Handle Bar - OneNote style: visible on hover or selection */}
+          {/* Top Handle Bar - OneNote style: entire bar is a grab handle */}
           <div
-            className={`h-5 bg-slate-100/90 dark:bg-zinc-800/90 border border-slate-300 dark:border-zinc-700 border-b-0 rounded-t flex items-center px-1 transition-opacity ${
+            className={`h-5 bg-slate-100/95 dark:bg-zinc-800/95 border border-slate-300 dark:border-zinc-700 border-b-0 rounded-t flex items-center justify-between px-1.5 transition-opacity text-drag-handle cursor-grab active:cursor-grabbing select-none ${
               isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
             }`}
           >
-            <div className="drag-handle cursor-grab active:cursor-grabbing flex-1 h-full flex items-center justify-center text-slate-400 dark:text-zinc-500 hover:text-slate-600 dark:hover:text-zinc-300">
-              <GripHorizontal size={14} />
+            <div className="flex items-center gap-1.5 text-slate-400 dark:text-zinc-400 pointer-events-none">
+              <GripHorizontal size={13} />
+              <span className="text-[10px] font-medium tracking-tight">Texto</span>
             </div>
 
-            {/* AI Assistant Button directly on the box */}
-            {onOpenAiAssistant && (
+            <div className="flex items-center gap-1">
+              {/* AI Assistant Button directly on the box */}
+              {onOpenAiAssistant && (
+                <button
+                  type="button"
+                  className="text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 p-0.5 px-1 rounded hover:bg-indigo-50 dark:hover:bg-indigo-950/60 flex items-center gap-1 text-[10px] font-semibold transition-colors cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenAiAssistant(block.id, editor);
+                  }}
+                  title="Assistente Gemini IA: Melhorar texto, estruturar requisitos, fluxos e casos de uso"
+                >
+                  <Sparkles size={11} className="text-indigo-600 dark:text-indigo-400" />
+                  <span className="hidden xs:inline">IA</span>
+                </button>
+              )}
+
               <button
                 type="button"
-                className="text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 p-0.5 px-1 rounded hover:bg-indigo-50 dark:hover:bg-indigo-950/60 flex items-center gap-1 text-[10px] font-semibold transition-colors mr-1"
+                className="text-slate-400 hover:text-red-500 p-0.5 rounded hover:bg-slate-200 dark:hover:bg-zinc-700 cursor-pointer"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onOpenAiAssistant(block.id, editor);
+                  removeBlock(block.id);
                 }}
-                title="Assistente Gemini IA: Melhorar texto, estruturar requisitos, fluxos e casos de uso"
+                title="Excluir caixa"
               >
-                <Sparkles size={11} className="text-indigo-600 dark:text-indigo-400" />
-                <span className="hidden xs:inline">IA</span>
+                <Trash2 size={12} />
               </button>
-            )}
-
-            <button
-              type="button"
-              className="text-slate-400 hover:text-red-500 p-0.5 rounded hover:bg-slate-200 dark:hover:bg-zinc-700"
-              onClick={(e) => {
-                e.stopPropagation();
-                removeBlock(block.id);
-              }}
-              title="Excluir caixa"
-            >
-              <Trash2 size={12} />
-            </button>
+            </div>
           </div>
 
           {/* Content Box - Transparent when unselected, soft subtle container border when selected */}
           <div
-            className={`flex-1 p-2 w-full h-full overflow-visible transition-all ${
+            className={`flex-1 p-2 w-full h-full min-h-[30px] overflow-visible transition-all ${
               isSelected
-                ? 'border border-slate-300 dark:border-zinc-700 rounded-b bg-white/90 dark:bg-zinc-900/90 shadow-sm'
+                ? 'border border-slate-300 dark:border-zinc-700 rounded-b bg-white/95 dark:bg-zinc-900/95 shadow-sm'
                 : 'border border-transparent group-hover:border-slate-200 dark:group-hover:border-zinc-800 rounded-b bg-transparent'
             }`}
           >
@@ -454,6 +634,14 @@ function TextBlock({
               className="prose dark:prose-invert prose-sm prose-p:my-0.5 prose-p:leading-normal max-w-none focus:outline-none focus:ring-0 focus:border-none [&_*]:outline-none [&_*]:focus:outline-none w-full h-full cursor-text"
             />
           </div>
+
+          {/* Visual Resize Indicator on Bottom-Right Corner when Selected */}
+          {isSelected && (
+            <div 
+              className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-indigo-500 rounded-full border-2 border-white dark:border-zinc-900 shadow-xs pointer-events-none opacity-80" 
+              title="Puxe para redimensionar"
+            />
+          )}
         </div>
       </Rnd>
 
@@ -466,6 +654,53 @@ function TextBlock({
         >
           <div className="px-3 py-1 font-semibold text-[10px] text-slate-400 dark:text-zinc-500 uppercase tracking-wider">
             Tabela
+          </div>
+
+          {/* Table Background Color Section in Context Menu */}
+          <div className="px-3 py-1.5 bg-slate-50 dark:bg-zinc-800/60 my-1 border-y border-slate-100 dark:border-zinc-800">
+            <div className="text-[11px] font-semibold text-slate-600 dark:text-zinc-300 mb-1 flex items-center justify-between">
+              <span>Cor de fundo</span>
+              <span className="text-[10px] text-slate-400 font-normal">Células</span>
+            </div>
+            <div className="grid grid-cols-5 gap-1 mb-1.5">
+              {TABLE_BG_COLORS.map((c) => (
+                <button
+                  key={c.name}
+                  type="button"
+                  className="w-6 h-6 rounded border border-slate-200 dark:border-zinc-700 flex items-center justify-center text-[10px] hover:scale-110 transition-transform shadow-2xs"
+                  style={{ backgroundColor: c.value || 'transparent' }}
+                  title={c.name}
+                  onClick={() => {
+                    editor.chain().focus().setCellAttribute('backgroundColor', c.value || null).run();
+                    setContextMenu(null);
+                  }}
+                >
+                  {!c.value && '✕'}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 dark:border-zinc-700/60">
+              <button
+                type="button"
+                className="text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
+                onClick={() => {
+                  const currentColor = (editor.getAttributes('tableCell').backgroundColor as string) || '#f1f5f9';
+                  setEntireTableBackgroundColor(editor, currentColor);
+                  setContextMenu(null);
+                }}
+              >
+                Aplicar na tabela inteira
+              </button>
+              <input
+                type="color"
+                onInput={(e) => {
+                  const color = (e.target as HTMLInputElement).value;
+                  editor.chain().focus().setCellAttribute('backgroundColor', color).run();
+                }}
+                className="h-5 w-5 p-0 rounded cursor-pointer border-none bg-transparent"
+                title="Escolher cor personalizada"
+              />
+            </div>
           </div>
           
           <button
@@ -643,9 +878,10 @@ interface NoteEditorProps {
   pageId: string;
   isSidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
+  onOpenSearch?: () => void;
 }
 
-export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: NoteEditorProps) {
+export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpenSearch }: NoteEditorProps) {
   const pages = useNoteStore((state) => state.pages);
   const updatePage = useNoteStore((state) => state.updatePage);
   const relations = useNoteStore((state) => state.relations);
@@ -655,7 +891,6 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [isInsertLinkOpen, setIsInsertLinkOpen] = useState(false);
   const [isRelatedLinksOpen, setIsRelatedLinksOpen] = useState(false);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
 
   // Gemini AI Assistant Modal State
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
@@ -672,18 +907,6 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastLoadedPageIdRef = useRef<string | null>(null);
   const lastSavedContentRef = useRef<string | null>(null);
-
-  // Global keyboard shortcut for search (Ctrl+K or Cmd+K)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setIsSearchOpen((prev) => !prev);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
 
   // Listen for scroll & highlight target block event from search
   useEffect(() => {
@@ -1351,7 +1574,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
           <Button
             size="sm"
             variant="outline"
-            onClick={() => setIsSearchOpen(true)}
+            onClick={() => onOpenSearch?.()}
             className="h-8 px-3 text-xs bg-slate-50 dark:bg-zinc-800 hover:bg-indigo-50 dark:hover:bg-zinc-700 text-slate-600 dark:text-zinc-300 hover:text-indigo-600 dark:hover:text-indigo-400 border-slate-200 dark:border-zinc-700 rounded-xl gap-2 shadow-2xs font-medium shrink-0"
             title="Pesquisar em todas as notas, códigos, textos, diagramas e credenciais (Ctrl+K)"
           >
@@ -1681,12 +1904,6 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
       <SettingsModal
         open={isSettingsModalOpen}
         onOpenChange={setIsSettingsModalOpen}
-      />
-
-      {/* Global Search Modal */}
-      <GlobalNotesSearchModal
-        open={isSearchOpen}
-        onOpenChange={setIsSearchOpen}
       />
     </div>
   );

@@ -75,8 +75,8 @@ export function GlobalNotesSearchModal({
         inputRef.current?.select();
       }, 50);
     } else {
-      setQuery('');
-      setSelectedIndex(0);
+      setQuery((prev) => (prev ? '' : prev));
+      setSelectedIndex((prev) => (prev !== 0 ? 0 : prev));
     }
   }, [open]);
 

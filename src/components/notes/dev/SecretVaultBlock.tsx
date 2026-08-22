@@ -589,12 +589,31 @@ export function SecretVaultBlock({
         style={{
           zIndex: isSelected ? 35 : 12,
         }}
+        onDragStart={() => {
+          setSelectedId(block.id);
+        }}
         onDragStop={(_, d) => updateBlock(block.id, { x: d.x, y: d.y })}
-        onResizeStop={(_, __, ref, ___, position) => {
+        enableResizing={{
+          top: false,
+          right: true,
+          bottom: true,
+          left: false,
+          topRight: false,
+          bottomRight: true,
+          bottomLeft: false,
+          topLeft: false,
+        }}
+        resizeHandleStyles={{
+          right: { cursor: 'ew-resize', width: '8px', right: '-4px', zIndex: 35 },
+          bottom: { cursor: 'ns-resize', height: '8px', bottom: '-4px', zIndex: 35 },
+          bottomRight: { cursor: 'nwse-resize', width: '14px', height: '14px', right: '-4px', bottom: '-4px', zIndex: 36 },
+        }}
+        onResizeStop={(_, direction, ref, ___, position) => {
           updateBlock(block.id, {
-            width: parseInt(ref.style.width, 10) || 540,
-            height: parseInt(ref.style.height, 10) || 380,
-            ...position,
+            width: ref.offsetWidth,
+            height: ref.offsetHeight,
+            ...(direction.includes('left') ? { x: position.x } : {}),
+            ...(direction.includes('top') ? { y: position.y } : {}),
           });
         }}
         bounds="parent"
