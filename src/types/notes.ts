@@ -34,7 +34,7 @@ export interface DeletedNoteItem {
   sectionPages?: NotePage[];
 }
 
-export type BlockType = 'text' | 'script' | 'vault' | 'link' | 'image' | 'whiteboard';
+export type BlockType = 'text' | 'script' | 'vault' | 'link' | 'image' | 'whiteboard' | 'drawio';
 
 export type DrawingElementType = 
   | 'rectangle'
@@ -187,4 +187,11 @@ export interface CanvasBlock {
   drawingTitle?: string;
   elements?: DrawingElement[];
   canvasBg?: 'grid' | 'dots' | 'blank';
+
+  // For 'drawio' block (Diagrams.net / Draw.io professional architecture and flowcharts)
+  drawioTitle?: string;
+  drawioXml?: string;
+  drawioSvg?: string;
+  drawioPng?: string;
+  drawioLastEdited?: string;
 }

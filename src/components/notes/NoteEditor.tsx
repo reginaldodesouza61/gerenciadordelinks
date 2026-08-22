@@ -12,7 +12,7 @@ import {
   Highlighter, Palette, TableProperties, Plus, ChevronRight, Combine,
   Code2, ShieldCheck, Link as LinkIcon, Type, Terminal, KeyRound, Sparkles, Wand2,
   Camera, Image as ImageIcon, Upload, Download, Copy, ChevronDown, Undo2, Redo2, PanelLeftOpen,
-  Shapes, Pencil, Search
+  Shapes, Pencil, Search, Network, Workflow
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -22,6 +22,7 @@ import { SecretVaultBlock } from './dev/SecretVaultBlock';
 import { LinkCardBlock } from './dev/LinkCardBlock';
 import { ImageBlock } from './dev/ImageBlock';
 import { WhiteboardBlock } from './dev/WhiteboardBlock';
+import { DrawioBlock } from './dev/DrawioBlock';
 import { InsertLinkModal } from './dev/InsertLinkModal';
 import { RelatedLinksDrawer } from './dev/RelatedLinksDrawer';
 import { AiAssistantModal } from './AiAssistantModal';
@@ -1092,6 +1093,32 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
     toast.success('Quadro de diagramas adicionado!');
   }, [blocks, purgeAndSave, pageId, updatePage]);
 
+  // Add a new Draw.io Professional Diagram block
+  const handleAddDrawioBlock = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const cleaned = purgeAndSave(blocks, null);
+    const pos = getSpawnPosition(780, 500);
+    const newBlock: CanvasBlock = {
+      id: `drawio_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      x: pos.x,
+      y: pos.y,
+      width: 780,
+      height: 500,
+      type: 'drawio',
+      drawioTitle: 'Novo Diagrama Draw.io',
+      drawioXml: '',
+      drawioSvg: '',
+      drawioLastEdited: new Date().toISOString(),
+    };
+    const nextBlocks = [...cleaned, newBlock];
+    setBlocks(nextBlocks);
+    setSelectedBlockId(newBlock.id);
+    const json = JSON.stringify(nextBlocks);
+    lastSavedContentRef.current = json;
+    updatePage(pageId, { conteudo: json });
+    toast.success('Bloco de diagrama Draw.io adicionado!');
+  }, [blocks, purgeAndSave, pageId, updatePage]);
+
   // Add an existing link card block
   const handleInsertLinkCard = useCallback((link: Link) => {
     const cleaned = purgeAndSave(blocks, null);
@@ -1434,6 +1461,18 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
             <span className="hidden sm:inline">Quadro / Fluxo</span>
           </Button>
 
+          {/* Insert Draw.io Diagram Block */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleAddDrawioBlock}
+            className="h-8 px-2.5 text-xs bg-amber-50 dark:bg-amber-950/70 hover:bg-amber-100 dark:hover:bg-amber-900/70 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-700 rounded-md gap-1.5 shadow-2xs font-semibold"
+            title="Inserir diagrama profissional do Draw.io (Arquitetura, Fluxogramas, UML, Banco ER)"
+          >
+            <Network size={14} className="text-amber-600 dark:text-amber-400" />
+            <span className="hidden sm:inline">Draw.io</span>
+          </Button>
+
           {/* Insert Registered Link Card */}
           <Button
             size="sm"
@@ -1537,6 +1576,21 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
             if (block.type === 'whiteboard') {
               return (
                 <WhiteboardBlock
+                  key={block.id}
+                  block={block}
+                  updateBlock={updateBlock}
+                  removeBlock={removeBlock}
+                  isSelected={selectedBlockId === block.id}
+                  setSelectedId={setSelectedBlockId}
+                  bringToFront={bringBlockToFront}
+                  sendToBack={sendBlockToBack}
+                />
+              );
+            }
+
+            if (block.type === 'drawio') {
+              return (
+                <DrawioBlock
                   key={block.id}
                   block={block}
                   updateBlock={updateBlock}

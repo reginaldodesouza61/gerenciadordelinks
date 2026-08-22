@@ -349,6 +349,29 @@ export function GlobalNotesSearchModal({
                   });
                 }
               }
+
+              // 7. Draw.io Diagram Blocks
+              else if (block.type === 'drawio') {
+                const title = block.drawioTitle || 'Diagrama Draw.io';
+                const xml = block.drawioXml || '';
+                const fullDrawioText = `${title} ${xml}`;
+
+                if (term && fullDrawioText.toLowerCase().includes(term)) {
+                  list.push({
+                    id: `drawio_${block.id || index}`,
+                    type: 'whiteboard',
+                    title: title,
+                    subtitle: `Diagrama Draw.io em "${page.titulo}"`,
+                    snippet: `Diagrama de fluxo/arquitetura editável no Draw.io`,
+                    sectionId: page.section_id,
+                    sectionName: sectionName,
+                    pageId: page.id,
+                    pageTitle: page.titulo,
+                    blockId: block.id,
+                    extraMeta: 'Draw.io',
+                  });
+                }
+              }
             });
           }
         } catch {

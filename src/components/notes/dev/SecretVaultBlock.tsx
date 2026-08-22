@@ -134,6 +134,30 @@ export function SecretVaultBlock({
 
   const vaultTitle = block.vaultTitle || 'Cofre de Credenciais & Senhas';
 
+  // Master toggle: are all currently revealed?
+  const allSecretsRevealed = secrets.length > 0 && secrets.every(s => revealedIds[s.id] && (!s.transactionPassword || revealedIds[`${s.id}_tx`]));
+
+  // Toggle reveal all secrets at once
+  const toggleRevealAll = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (allSecretsRevealed) {
+      // Hide all
+      setRevealedIds({});
+      toast.info('Todas as senhas foram ocultadas.');
+    } else {
+      // Reveal all
+      const newRevealed: Record<string, boolean> = {};
+      secrets.forEach(s => {
+        newRevealed[s.id] = true;
+        if (s.transactionPassword) newRevealed[`${s.id}_tx`] = true;
+        if (s.cardCvv) newRevealed[`${s.id}_cvv`] = true;
+        if (s.clientSecret) newRevealed[`${s.id}_secret`] = true;
+      });
+      setRevealedIds(newRevealed);
+      toast.success('Todas as senhas estão visíveis!');
+    }
+  };
+
   // Toggle reveal password
   const toggleReveal = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -353,38 +377,55 @@ export function SecretVaultBlock({
     setIsDialogOpen(true);
   };
 
+  // Helper to detect if a value is empty or masked with bullets
+  const isMaskedVal = (str?: string | null) => {
+    if (!str) return true;
+    const t = str.trim();
+    return t === '' || t === '••••••••' || t === '********' || /^[*•]{3,}$/.test(t);
+  };
+
+  // Helper to remove masked bullets when opening edit dialog
+  const cleanMasked = (str?: string) => {
+    if (!str) return '';
+    const trimmed = str.trim();
+    if (trimmed === '••••••••' || trimmed === '********' || /^[*•]{3,}$/.test(trimmed)) {
+      return '';
+    }
+    return trimmed;
+  };
+
   const openEditModal = (item: SecretItem, e?: React.MouseEvent) => {
     e?.stopPropagation();
     setEditingItem(item);
-    setFormKey(item.key);
-    setFormUsername(item.username || '');
-    setFormValue(item.value || '');
-    setFormUrl(item.url || '');
+    setFormKey(cleanMasked(item.key) || (item.type === 'bank' ? 'Conta Bancária & PIX' : ''));
+    setFormUsername(cleanMasked(item.username));
+    setFormValue(cleanMasked(item.value));
+    setFormUrl(cleanMasked(item.url));
     setFormType(item.type || 'password');
     setFormEnv(item.env || 'prod');
-    setFormNotes(item.notes || '');
-    setFormClientId(item.clientId || '');
-    setFormClientSecret(item.clientSecret || '');
-    setFormTenantId(item.tenantId || '');
-    setFormObjectId(item.objectId || '');
-    setFormRedirectUri(item.redirectUri || '');
-    setFormDbHost(item.dbHost || '');
-    setFormDbPort(item.dbPort || '');
-    setFormDbName(item.dbName || '');
-    setFormDbUser(item.dbUser || '');
-    setFormBankName(item.bankName || '');
-    setFormBankAgency(item.bankAgency || '');
-    setFormBankAccount(item.bankAccount || '');
-    setFormBankAccountType(item.bankAccountType || 'Corrente');
-    setFormPixKey(item.pixKey || '');
-    setFormTransactionPassword(item.transactionPassword || '');
-    setFormCardholderName(item.cardholderName || '');
-    setFormCardNumber(item.cardNumber || '');
-    setFormCardExpiry(item.cardExpiry || '');
-    setFormCardCvv(item.cardCvv || '');
-    setFormCardBrand(item.cardBrand || 'Visa');
-    setFormCardLimit(item.cardLimit || '');
-    setFormCardDueDay(item.cardDueDay || '');
+    setFormNotes(cleanMasked(item.notes));
+    setFormClientId(cleanMasked(item.clientId));
+    setFormClientSecret(cleanMasked(item.clientSecret));
+    setFormTenantId(cleanMasked(item.tenantId));
+    setFormObjectId(cleanMasked(item.objectId));
+    setFormRedirectUri(cleanMasked(item.redirectUri));
+    setFormDbHost(cleanMasked(item.dbHost));
+    setFormDbPort(cleanMasked(item.dbPort));
+    setFormDbName(cleanMasked(item.dbName));
+    setFormDbUser(cleanMasked(item.dbUser));
+    setFormBankName(cleanMasked(item.bankName));
+    setFormBankAgency(cleanMasked(item.bankAgency));
+    setFormBankAccount(cleanMasked(item.bankAccount));
+    setFormBankAccountType(cleanMasked(item.bankAccountType) || 'Corrente');
+    setFormPixKey(cleanMasked(item.pixKey));
+    setFormTransactionPassword(cleanMasked(item.transactionPassword));
+    setFormCardholderName(cleanMasked(item.cardholderName));
+    setFormCardNumber(cleanMasked(item.cardNumber));
+    setFormCardExpiry(cleanMasked(item.cardExpiry));
+    setFormCardCvv(cleanMasked(item.cardCvv));
+    setFormCardBrand(cleanMasked(item.cardBrand) || 'Visa');
+    setFormCardLimit(cleanMasked(item.cardLimit));
+    setFormCardDueDay(cleanMasked(item.cardDueDay));
     setFormCustomFields(item.customFields || []);
     setShowDialogPassword(false);
     setIsDialogOpen(true);
@@ -585,6 +626,23 @@ export function SecretVaultBlock({
 
             {/* Right: Actions */}
             <div className="flex items-center gap-1.5 shrink-0">
+              {/* Reveal All / Hide All Toggle Button */}
+              {secrets.length > 0 && (
+                <button
+                  type="button"
+                  onClick={toggleRevealAll}
+                  className={`px-2 py-1 rounded text-[11px] font-medium border flex items-center gap-1 transition-all ${
+                    allSecretsRevealed
+                      ? 'bg-amber-100 dark:bg-amber-950/80 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-300 font-semibold'
+                      : 'bg-white dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-700 hover:text-slate-900 dark:hover:text-white shadow-2xs'
+                  }`}
+                  title={allSecretsRevealed ? "Ocultar todas as senhas" : "Revelar todas as senhas na tela"}
+                >
+                  {allSecretsRevealed ? <EyeOff size={12} className="text-amber-600" /> : <Eye size={12} />}
+                  <span>{allSecretsRevealed ? 'Ocultar' : 'Revelar'}</span>
+                </button>
+              )}
+
               {/* Copy Actions Menu */}
               <Popover>
                 <PopoverTrigger asChild>
@@ -687,16 +745,26 @@ export function SecretVaultBlock({
                 const typeConfig = SECRET_TYPES.find((t) => t.id === item.type) || SECRET_TYPES[0];
                 const envConfig = ENVIRONMENTS.find((e) => e.id === item.env) || ENVIRONMENTS[0];
 
+                const isMaskedTitle = isMaskedVal(item.key);
+                const displayTitle = isMaskedTitle ? typeConfig.label : item.key;
+
                 return (
                   <div
                     key={item.id}
-                    className="p-3 rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-slate-300 dark:hover:border-zinc-700 shadow-xs flex flex-col gap-2 transition-all group/item"
+                    className={`p-3 rounded-lg border bg-white dark:bg-zinc-900 shadow-xs flex flex-col gap-2 transition-all group/item ${
+                      isMaskedTitle 
+                        ? 'border-amber-300 dark:border-amber-800/80 ring-1 ring-amber-400/20' 
+                        : 'border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700'
+                    }`}
                   >
                     {/* Item Header: Service Name + Badges + Edit/Delete */}
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                        <span className="font-semibold text-xs text-slate-800 dark:text-zinc-100 truncate" title={item.key}>
-                          {item.key}
+                        <span 
+                          className={`font-semibold text-xs truncate ${isMaskedTitle ? 'text-amber-700 dark:text-amber-300 italic' : 'text-slate-800 dark:text-zinc-100'}`} 
+                          title={displayTitle}
+                        >
+                          {displayTitle}
                         </span>
                         
                         {/* Type Badge */}
@@ -709,6 +777,19 @@ export function SecretVaultBlock({
                           <span className={`text-[10px] px-1.5 py-0.2 rounded border font-mono font-semibold uppercase shrink-0 ${envConfig.badge}`}>
                             {item.env}
                           </span>
+                        )}
+
+                        {/* If Title or Data is incomplete/masked, show quick Edit prompt */}
+                        {isMaskedTitle && (
+                          <button
+                            type="button"
+                            onClick={(e) => openEditModal(item, e)}
+                            className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/80 dark:hover:bg-amber-900 text-amber-800 dark:text-amber-300 font-semibold border border-amber-300 dark:border-amber-700 flex items-center gap-1 shrink-0 shadow-2xs"
+                            title="Clique para preencher suas informações reais"
+                          >
+                            <Edit3 size={10} />
+                            <span>Preencher</span>
+                          </button>
                         )}
                       </div>
 
@@ -733,7 +814,7 @@ export function SecretVaultBlock({
                         <button
                           type="button"
                           onClick={(e) => openEditModal(item, e)}
-                          className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors opacity-0 group-hover/item:opacity-100"
+                          className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
                           title="Editar credencial"
                         >
                           <Edit3 size={12} />
@@ -743,7 +824,7 @@ export function SecretVaultBlock({
                         <button
                           type="button"
                           onClick={(e) => handleDeleteItem(item.id, e)}
-                          className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors opacity-0 group-hover/item:opacity-100"
+                          className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
                           title="Remover credencial"
                         >
                           <Trash2 size={12} />
@@ -784,13 +865,26 @@ export function SecretVaultBlock({
                     {/* Specific Fields: Bank Account */}
                     {item.type === 'bank' && (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                        {item.bankName && (
-                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
-                            <div className="truncate flex items-center gap-1">
-                              <Landmark size={12} className="text-emerald-500 shrink-0" />
-                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">BANCO:</span>
-                              <span className="font-mono truncate">{item.bankName}</span>
-                            </div>
+                        {/* Banco */}
+                        <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
+                          <div className="truncate flex items-center gap-1 min-w-0">
+                            <Landmark size={12} className="text-emerald-500 shrink-0" />
+                            <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px] shrink-0">BANCO:</span>
+                            <span className="font-mono truncate">
+                              {!isMaskedVal(item.bankName) ? (
+                                item.bankName
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={(e) => openEditModal(item, e)}
+                                  className="text-amber-600 dark:text-amber-400 hover:underline italic font-sans text-[10px]"
+                                >
+                                  (Definir banco)
+                                </button>
+                              )}
+                            </span>
+                          </div>
+                          {!isMaskedVal(item.bankName) && (
                             <button
                               type="button"
                               onClick={(e) => copyTextToClipboard(item.bankName || '', 'Banco', item.id, 'bank_name', e)}
@@ -799,15 +893,28 @@ export function SecretVaultBlock({
                             >
                               {copiedActionMap[`${item.id}_bank_name`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
                             </button>
-                          </div>
-                        )}
+                          )}
+                        </div>
 
-                        {item.bankAgency && (
-                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
-                            <div className="truncate flex items-center gap-1">
-                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">AGÊNCIA:</span>
-                              <span className="font-mono truncate">{item.bankAgency}</span>
-                            </div>
+                        {/* Agência */}
+                        <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
+                          <div className="truncate flex items-center gap-1 min-w-0">
+                            <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px] shrink-0">AGÊNCIA:</span>
+                            <span className="font-mono truncate">
+                              {!isMaskedVal(item.bankAgency) ? (
+                                item.bankAgency
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={(e) => openEditModal(item, e)}
+                                  className="text-amber-600 dark:text-amber-400 hover:underline italic font-sans text-[10px]"
+                                >
+                                  (Definir agência)
+                                </button>
+                              )}
+                            </span>
+                          </div>
+                          {!isMaskedVal(item.bankAgency) && (
                             <button
                               type="button"
                               onClick={(e) => copyTextToClipboard(item.bankAgency || '', 'Agência', item.id, 'bank_agency', e)}
@@ -816,15 +923,30 @@ export function SecretVaultBlock({
                             >
                               {copiedActionMap[`${item.id}_bank_agency`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
                             </button>
-                          </div>
-                        )}
+                          )}
+                        </div>
 
-                        {item.bankAccount && (
-                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
-                            <div className="truncate flex items-center gap-1">
-                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">CONTA ({item.bankAccountType || 'Corrente'}):</span>
-                              <span className="font-mono truncate">{item.bankAccount}</span>
-                            </div>
+                        {/* Conta */}
+                        <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
+                          <div className="truncate flex items-center gap-1 min-w-0">
+                            <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px] shrink-0">
+                              CONTA ({!isMaskedVal(item.bankAccountType) ? item.bankAccountType : 'Corrente'}):
+                            </span>
+                            <span className="font-mono truncate">
+                              {!isMaskedVal(item.bankAccount) ? (
+                                item.bankAccount
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={(e) => openEditModal(item, e)}
+                                  className="text-amber-600 dark:text-amber-400 hover:underline italic font-sans text-[10px]"
+                                >
+                                  (Definir conta)
+                                </button>
+                              )}
+                            </span>
+                          </div>
+                          {!isMaskedVal(item.bankAccount) && (
                             <button
                               type="button"
                               onClick={(e) => copyTextToClipboard(item.bankAccount || '', 'Conta', item.id, 'bank_account', e)}
@@ -833,13 +955,14 @@ export function SecretVaultBlock({
                             >
                               {copiedActionMap[`${item.id}_bank_account`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
                             </button>
-                          </div>
-                        )}
+                          )}
+                        </div>
 
+                        {/* Chave PIX */}
                         {item.pixKey && (
                           <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
-                            <div className="truncate flex items-center gap-1">
-                              <span className="font-bold text-emerald-600 dark:text-emerald-400 text-[10px]">PIX:</span>
+                            <div className="truncate flex items-center gap-1 min-w-0">
+                              <span className="font-bold text-emerald-600 dark:text-emerald-400 text-[10px] shrink-0">PIX:</span>
                               <span className="font-mono truncate">{item.pixKey}</span>
                             </div>
                             <button
@@ -853,27 +976,42 @@ export function SecretVaultBlock({
                           </div>
                         )}
 
-                        {item.transactionPassword && (
-                          <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px] col-span-full">
-                            <div className="truncate flex items-center gap-1.5">
-                              <Lock size={12} className="text-emerald-500 shrink-0" />
-                              <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px]">SENHA DO APP:</span>
-                              <span className="font-mono truncate">
-                                {revealedIds[`${item.id}_tx`] ? item.transactionPassword : '••••••••'}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setRevealedIds(prev => ({ ...prev, [`${item.id}_tx`]: !prev[`${item.id}_tx`] }));
-                                }}
-                                className="p-0.5 rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200"
-                                title={revealedIds[`${item.id}_tx`] ? "Ocultar" : "Revelar"}
-                              >
-                                {revealedIds[`${item.id}_tx`] ? <EyeOff size={11} /> : <Eye size={11} />}
-                              </button>
+                        {/* Senha do App */}
+                        <div className="flex items-center justify-between gap-1.5 px-2 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px] col-span-full">
+                          <div className="truncate flex items-center gap-1.5 min-w-0">
+                            <Lock size={12} className="text-emerald-500 shrink-0" />
+                            <span className="font-bold text-slate-500 dark:text-zinc-400 text-[10px] shrink-0">SENHA DO APP:</span>
+                            <span className="font-mono truncate">
+                              {revealedIds[`${item.id}_tx`] ? (
+                                !isMaskedVal(item.transactionPassword) ? (
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">{item.transactionPassword}</span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => openEditModal(item, e)}
+                                    className="text-amber-600 dark:text-amber-400 hover:underline italic font-sans text-[10px]"
+                                  >
+                                    (Não definida — clique para cadastrar)
+                                  </button>
+                                )
+                              ) : (
+                                !isMaskedVal(item.transactionPassword) ? '••••••••' : <span className="text-slate-400 italic text-[10px]">(Vazio)</span>
+                              )}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setRevealedIds(prev => ({ ...prev, [`${item.id}_tx`]: !prev[`${item.id}_tx`] }));
+                              }}
+                              className="p-0.5 rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200"
+                              title={revealedIds[`${item.id}_tx`] ? "Ocultar" : "Revelar"}
+                            >
+                              {revealedIds[`${item.id}_tx`] ? <EyeOff size={11} /> : <Eye size={11} />}
+                            </button>
+                            {!isMaskedVal(item.transactionPassword) && (
                               <button
                                 type="button"
                                 onClick={(e) => copyTextToClipboard(item.transactionPassword || '', 'Senha do App', item.id, 'tx_password', e)}
@@ -882,9 +1020,9 @@ export function SecretVaultBlock({
                               >
                                 {copiedActionMap[`${item.id}_tx_password`] === 'copied' ? <Check size={11} className="text-emerald-500" /> : <Copy size={11} />}
                               </button>
-                            </div>
+                            )}
                           </div>
-                        )}
+                        </div>
                       </div>
                     )}
 
@@ -1111,10 +1249,22 @@ export function SecretVaultBlock({
 
                       <div className="flex-1 overflow-hidden select-all font-mono px-1">
                         {isRevealed ? (
-                          <span className="text-emerald-400 break-all select-all font-medium">{item.clientSecret || item.value}</span>
+                          !isMaskedVal(item.clientSecret || item.value) ? (
+                            <span className="text-emerald-400 break-all select-all font-medium">{item.clientSecret || item.value}</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={(e) => openEditModal(item, e)}
+                              className="text-amber-400 hover:underline italic font-sans text-[10.5px] flex items-center gap-1"
+                            >
+                              <span>(Senha não definida — clique para cadastrar)</span>
+                            </button>
+                          )
                         ) : (
                           <span className="text-slate-400 tracking-widest select-none">
-                            {'•'.repeat(Math.min(24, Math.max(10, (item.clientSecret || item.value || '').length)))}
+                            {!isMaskedVal(item.clientSecret || item.value)
+                              ? '•'.repeat(Math.min(24, Math.max(10, (item.clientSecret || item.value || '').length)))
+                              : '••••••••••••'}
                           </span>
                         )}
                       </div>
@@ -1130,19 +1280,21 @@ export function SecretVaultBlock({
                       </button>
 
                       {/* Copy Secret Button */}
-                      <button
-                        type="button"
-                        onClick={(e) => copyTextToClipboard(item.clientSecret || item.value || '', 'Senha/Segredo', item.id, 'value', e)}
-                        className={`px-1.5 py-0.5 rounded text-[11px] font-mono flex items-center gap-1 shrink-0 transition-colors ${
-                          copiedActionMap[`${item.id}_value`] === 'copied'
-                            ? 'bg-emerald-600 text-white font-bold' 
-                            : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
-                        }`}
-                        title="Copiar valor secreto"
-                      >
-                        {copiedActionMap[`${item.id}_value`] === 'copied' ? <Check size={11} /> : <Copy size={11} />}
-                        <span>{copiedActionMap[`${item.id}_value`] === 'copied' ? 'Copiado!' : 'Copiar'}</span>
-                      </button>
+                      {!isMaskedVal(item.clientSecret || item.value) && (
+                        <button
+                          type="button"
+                          onClick={(e) => copyTextToClipboard(item.clientSecret || item.value || '', 'Senha/Segredo', item.id, 'value', e)}
+                          className={`px-1.5 py-0.5 rounded text-[11px] font-mono flex items-center gap-1 shrink-0 transition-colors ${
+                            copiedActionMap[`${item.id}_value`] === 'copied'
+                              ? 'bg-emerald-600 text-white font-bold' 
+                              : 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700'
+                          }`}
+                          title="Copiar valor secreto"
+                        >
+                          {copiedActionMap[`${item.id}_value`] === 'copied' ? <Check size={11} /> : <Copy size={11} />}
+                          <span>{copiedActionMap[`${item.id}_value`] === 'copied' ? 'Copiado!' : 'Copiar'}</span>
+                        </button>
+                      )}
                     </div>
 
                     {/* Custom dynamic fields */}

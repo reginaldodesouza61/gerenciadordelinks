@@ -264,7 +264,13 @@ export async function decryptSecretField(cipherTextOrPayload?: string): Promise<
   return raw;
 }
 
-const NON_ENCRYPTED_KEYS = new Set(['id', 'type', 'env', 'customFields']);
+const NON_ENCRYPTED_KEYS = new Set([
+  'id', 'type', 'env', 'customFields',
+  'key', 'url', 'username', 'bankName', 'bankAgency', 'bankAccountType',
+  'dbHost', 'dbPort', 'dbName', 'dbUser', 'cardBrand', 'cardholderName',
+  'notes', 'clientId', 'tenantId', 'objectId', 'redirectUri', 'pixKey',
+  'cardDueDay', 'cardLimit'
+]);
 
 /**
  * Encrypts all sensitive fields of a SecretItem.
@@ -274,7 +280,7 @@ export async function encryptSecretItem<T extends Record<string, unknown>>(item:
   for (const key of Object.keys(cloned)) {
     if (!NON_ENCRYPTED_KEYS.has(key) && typeof cloned[key] === 'string' && cloned[key]) {
       const val = (cloned[key] as string).trim();
-      if (!isFieldEncrypted(val)) {
+      if (val && !isFieldEncrypted(val) && !val.includes('••••••••') && !val.includes('********')) {
         (cloned as Record<string, unknown>)[key] = await encryptSecretField(val);
       }
     }
@@ -299,15 +305,15 @@ export async function encryptSecretItem<T extends Record<string, unknown>>(item:
 export async function decryptSecretItem<T extends Record<string, unknown>>(item: T): Promise<T> {
   const cloned = { ...item };
   for (const key of Object.keys(cloned)) {
-    if (!NON_ENCRYPTED_KEYS.has(key) && typeof cloned[key] === 'string' && cloned[key]) {
+    if (typeof cloned[key] === 'string' && cloned[key]) {
       const val = cloned[key] as string;
       if (isFieldEncrypted(val)) {
         const decrypted = await decryptSecretField(val);
         if (decrypted !== undefined && !isFieldEncrypted(decrypted)) {
           (cloned as Record<string, unknown>)[key] = decrypted;
         } else {
-          // If decryption was not possible, clean it up so raw JSON is never shown or kept in memory
-          (cloned as Record<string, unknown>)[key] = cleanSecretDisplay(val, '');
+          // If decryption fails, do NOT overwrite with bullets - leave as empty or original
+          (cloned as Record<string, unknown>)[key] = '';
         }
       }
     }
@@ -319,7 +325,7 @@ export async function decryptSecretItem<T extends Record<string, unknown>>(item:
         let cleanVal = cf.value;
         if (cleanVal && isFieldEncrypted(cleanVal)) {
           const dec = await decryptSecretField(cleanVal);
-          cleanVal = (dec && !isFieldEncrypted(dec)) ? dec : cleanSecretDisplay(cleanVal, '');
+          cleanVal = (dec && !isFieldEncrypted(dec)) ? dec : '';
         }
         return {
           ...cf,
