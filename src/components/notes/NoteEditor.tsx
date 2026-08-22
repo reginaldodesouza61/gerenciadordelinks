@@ -645,7 +645,9 @@ interface NoteEditorProps {
 }
 
 export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: NoteEditorProps) {
-  const { pages, updatePage, relations } = useNoteStore();
+  const pages = useNoteStore((state) => state.pages);
+  const updatePage = useNoteStore((state) => state.updatePage);
+  const relations = useNoteStore((state) => state.relations);
   const page = pages.find((p) => p.id === pageId);
   const [blocks, setBlocks] = useState<CanvasBlock[]>([]);
   const [activeEditor, setActiveEditor] = useState<Editor | null>(null);
@@ -1260,6 +1262,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar }: Note
       const nextBlocks = [...cleaned, newBlock];
       setBlocks(nextBlocks);
       setSelectedBlockId(newBlock.id);
+      const json = JSON.stringify(nextBlocks);
+      lastSavedContentRef.current = json;
+      updatePage(pageId, { conteudo: json });
     } else {
       // Clicked somewhere else (deselect & clean empty blocks)
       purgeAndSave(blocks, selectedBlockId);

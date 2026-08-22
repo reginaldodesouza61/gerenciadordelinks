@@ -57,7 +57,10 @@ export function GlobalNotesSearchModal({
   onOpenChange,
   onNavigateToBlock,
 }: GlobalNotesSearchModalProps) {
-  const { sections, pages, setActiveSectionId, setActivePageId } = useNoteStore();
+  const sections = useNoteStore((state) => state.sections);
+  const pages = useNoteStore((state) => state.pages);
+  const setActiveSectionId = useNoteStore((state) => state.setActiveSectionId);
+  const setActivePageId = useNoteStore((state) => state.setActivePageId);
   const [query, setQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<FilterCategory>('all');
   const [selectedIndex, setSelectedIndex] = useState(0);
