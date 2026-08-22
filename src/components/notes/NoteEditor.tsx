@@ -527,7 +527,7 @@ function TextBlock({
       <Rnd
         size={{ 
           width: typeof block.width === 'number' ? block.width : parseInt(String(block.width), 10) || 400, 
-          height: block.height === 'auto' || !block.height ? 'auto' : (typeof block.height === 'number' ? block.height : parseInt(String(block.height), 10) || 'auto'),
+          height: 'auto',
         }}
         position={{ x: block.x, y: block.y }}
         style={{
@@ -564,7 +564,7 @@ function TextBlock({
         }}
         bounds="parent"
         minWidth={180}
-        minHeight={40}
+        minHeight={typeof block.height === 'number' ? Math.max(40, block.height) : 40}
         dragHandleClassName="text-drag-handle"
         className={`group ${isSelected ? 'z-30' : 'z-10'}`}
         onClick={(e) => {
@@ -574,7 +574,7 @@ function TextBlock({
         }}
       >
         <div 
-          className="relative w-full h-full min-h-[40px] flex flex-col"
+          className="relative w-full h-auto min-h-[40px] flex flex-col"
           onContextMenu={(e) => {
             if (editor && editor.isActive('table')) {
               e.preventDefault();
@@ -629,7 +629,7 @@ function TextBlock({
 
           {/* Content Box - Transparent when unselected, soft subtle container border when selected */}
           <div
-            className={`flex-1 p-2 w-full h-full min-h-[30px] overflow-visible transition-all ${
+            className={`flex-1 p-2 w-full h-auto min-h-[30px] transition-all ${
               isSelected
                 ? 'border border-slate-300 dark:border-zinc-700 rounded-b bg-white/95 dark:bg-zinc-900/95 shadow-sm'
                 : 'border border-transparent group-hover:border-slate-200 dark:group-hover:border-zinc-800 rounded-b bg-transparent'
@@ -637,7 +637,7 @@ function TextBlock({
           >
             <EditorContent
               editor={editor}
-              className="prose dark:prose-invert prose-sm prose-p:my-0.5 prose-p:leading-normal max-w-none focus:outline-none focus:ring-0 focus:border-none [&_*]:outline-none [&_*]:focus:outline-none w-full h-full cursor-text"
+              className="prose dark:prose-invert prose-sm prose-p:my-0.5 prose-p:leading-normal max-w-none focus:outline-none focus:ring-0 focus:border-none [&_*]:outline-none [&_*]:focus:outline-none w-full h-auto min-h-full cursor-text"
             />
           </div>
 
