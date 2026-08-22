@@ -166,17 +166,11 @@ function isBlockEmpty(block: CanvasBlock): boolean {
 function GlobalToolbar({ 
   editor, 
   onOpenAi,
-  selectedBlockId,
-  onBringToFront,
-  onSendToBack,
 }: { 
   editor: Editor | null; 
   onOpenAi?: () => void;
-  selectedBlockId?: string | null;
-  onBringToFront?: () => void;
-  onSendToBack?: () => void;
 }) {
-  if (!editor && !selectedBlockId) {
+  if (!editor) {
     return null;
   }
 
@@ -436,37 +430,6 @@ function GlobalToolbar({
             </>
           )}
         </>
-      )}
-
-      {/* Layer Controls when a block is selected */}
-      {selectedBlockId && (onBringToFront || onSendToBack) && (
-        <div className="ml-auto flex items-center gap-1 pl-2 border-l border-slate-300 dark:border-zinc-700">
-          {onBringToFront && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-slate-600 dark:text-zinc-300 hover:bg-slate-200 dark:hover:bg-zinc-800"
-              onClick={onBringToFront}
-              title="Trazer bloco para a frente"
-            >
-              <ChevronUp size={14} />
-            </Button>
-          )}
-
-          {onSendToBack && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-slate-600 dark:text-zinc-300 hover:bg-slate-200 dark:hover:bg-zinc-800"
-              onClick={onSendToBack}
-              title="Enviar bloco para trás"
-            >
-              <ChevronDown size={14} />
-            </Button>
-          )}
-        </div>
       )}
     </div>
   );
@@ -1872,13 +1835,10 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
         </div>
       )}
 
-      {/* Formatting Toolbar (Active when a text editor is focused or block is selected) */}
+      {/* Formatting Toolbar (Active when a text editor is focused) */}
       <GlobalToolbar 
         editor={activeEditor} 
         onOpenAi={() => handleOpenAiAssistant()} 
-        selectedBlockId={selectedBlockId}
-        onBringToFront={selectedBlockId ? () => bringBlockToFront(selectedBlockId) : undefined}
-        onSendToBack={selectedBlockId ? () => sendBlockToBack(selectedBlockId) : undefined}
       />
 
       {/* Canvas Area */}
