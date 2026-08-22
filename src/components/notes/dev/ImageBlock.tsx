@@ -87,16 +87,16 @@ export function ImageBlock({
         }}
         position={{
           x: block.x,
-          y: block.y,
+          y: Math.max(12, block.y),
         }}
         style={{
-          zIndex: isSelected ? 35 : 12,
+          zIndex: isSelected ? 40 : 12,
         }}
         onDragStart={(_e) => {
           setSelectedId(block.id);
         }}
         onDragStop={(_e, d) => {
-          updateBlock(block.id, { x: d.x, y: d.y });
+          updateBlock(block.id, { x: Math.max(0, d.x), y: Math.max(12, d.y) });
         }}
         enableResizing={{
           top: false,
@@ -117,15 +117,15 @@ export function ImageBlock({
           updateBlock(block.id, {
             width: ref.offsetWidth,
             height: ref.offsetHeight,
-            ...(direction.includes('left') ? { x: position.x } : {}),
-            ...(direction.includes('top') ? { y: position.y } : {}),
+            x: Math.max(0, position.x),
+            y: Math.max(12, position.y),
           });
         }}
         bounds="parent"
         dragHandleClassName="image-drag-handle"
         minWidth={280}
         minHeight={180}
-        className={`z-10 group select-none ${isSelected ? 'z-20' : ''}`}
+        className={`group select-none ${isSelected ? 'z-40' : 'hover:z-30 z-10'}`}
         onClick={(e) => {
           e.stopPropagation();
           setSelectedId(block.id);

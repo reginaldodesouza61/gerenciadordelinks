@@ -247,12 +247,16 @@ export function DrawioBlock({
     <>
       <Rnd
         size={{ width: widthVal, height: heightVal }}
-        position={{ x: block.x, y: block.y }}
+        position={{ x: block.x, y: Math.max(12, block.y) }}
+        style={{
+          zIndex: isSelected ? 40 : 12,
+          touchAction: 'none',
+        }}
         onDragStart={() => {
           setSelectedId?.(block.id);
         }}
         onDragStop={(_e, d) => {
-          updateBlock(block.id, { x: d.x, y: d.y });
+          updateBlock(block.id, { x: Math.max(0, d.x), y: Math.max(12, d.y) });
         }}
         enableResizing={{
           top: false,
@@ -273,8 +277,8 @@ export function DrawioBlock({
           updateBlock(block.id, {
             width: ref.offsetWidth,
             height: ref.offsetHeight,
-            ...(direction.includes('left') ? { x: position.x } : {}),
-            ...(direction.includes('top') ? { y: position.y } : {}),
+            x: Math.max(0, position.x),
+            y: Math.max(12, position.y),
           });
         }}
         dragHandleClassName="drawio-drag-handle"
@@ -285,10 +289,9 @@ export function DrawioBlock({
           e.stopPropagation();
           setSelectedId?.(block.id);
         }}
-        className={`group z-10 transition-shadow ${
-          isSelected ? 'ring-2 ring-amber-500 shadow-xl' : 'hover:shadow-md'
+        className={`group transition-shadow ${
+          isSelected ? 'z-40 ring-2 ring-amber-500 shadow-xl' : 'hover:z-30 z-10 hover:shadow-md'
         }`}
-        style={{ touchAction: 'none' }}
       >
         <div 
           className="w-full h-full flex flex-col rounded-xl bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800 shadow-sm overflow-hidden text-slate-800 dark:text-zinc-100"

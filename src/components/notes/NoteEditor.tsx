@@ -165,267 +165,308 @@ function isBlockEmpty(block: CanvasBlock): boolean {
 
 function GlobalToolbar({ 
   editor, 
-  onOpenAi 
+  onOpenAi,
+  selectedBlockId,
+  onBringToFront,
+  onSendToBack,
 }: { 
   editor: Editor | null; 
   onOpenAi?: () => void;
+  selectedBlockId?: string | null;
+  onBringToFront?: () => void;
+  onSendToBack?: () => void;
 }) {
-  if (!editor) {
+  if (!editor && !selectedBlockId) {
     return null;
   }
 
   // Determine current heading or paragraph
   let textType = 'paragraph';
-  if (editor.isActive('heading', { level: 1 })) textType = 'h1';
-  else if (editor.isActive('heading', { level: 2 })) textType = 'h2';
-  else if (editor.isActive('heading', { level: 3 })) textType = 'h3';
+  if (editor?.isActive('heading', { level: 1 })) textType = 'h1';
+  else if (editor?.isActive('heading', { level: 2 })) textType = 'h2';
+  else if (editor?.isActive('heading', { level: 3 })) textType = 'h3';
 
   return (
-    <div className="flex flex-wrap items-center gap-1 px-2.5 py-1 min-h-9 border-b border-slate-200 dark:border-zinc-800 bg-slate-50/90 dark:bg-zinc-900 text-slate-700 dark:text-zinc-200 shrink-0 select-none text-xs transition-all">
-      {/* Heading / Text Size Selector */}
-      <Select 
-        value={textType}
-        onValueChange={(val) => {
-          if (val === 'paragraph') {
-            editor.chain().focus().setParagraph().run();
-          } else if (val === 'h1') {
-            editor.chain().focus().toggleHeading({ level: 1 }).run();
-          } else if (val === 'h2') {
-            editor.chain().focus().toggleHeading({ level: 2 }).run();
-          } else if (val === 'h3') {
-            editor.chain().focus().toggleHeading({ level: 3 }).run();
-          }
-        }}
-      >
-        <SelectTrigger className="w-[130px] h-7 text-xs bg-white dark:bg-zinc-800 border-slate-200 dark:border-zinc-700">
-          <SelectValue placeholder="Estilo do Texto" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="paragraph">Texto Normal</SelectItem>
-          <SelectItem value="h1"><span className="font-bold text-base">Título 1</span></SelectItem>
-          <SelectItem value="h2"><span className="font-semibold text-sm">Título 2</span></SelectItem>
-          <SelectItem value="h3"><span className="font-medium text-xs">Título 3</span></SelectItem>
-        </SelectContent>
-      </Select>
+    <div className="flex flex-wrap items-center gap-1 px-2.5 py-1 min-h-9 border-b border-slate-200 dark:border-zinc-800 bg-slate-50/95 dark:bg-zinc-900 text-slate-700 dark:text-zinc-200 shrink-0 select-none text-xs transition-all z-20">
+      {editor && (
+        <>
+          {/* Heading / Text Size Selector */}
+          <Select 
+            value={textType}
+            onValueChange={(val) => {
+              if (val === 'paragraph') {
+                editor.chain().focus().setParagraph().run();
+              } else if (val === 'h1') {
+                editor.chain().focus().toggleHeading({ level: 1 }).run();
+              } else if (val === 'h2') {
+                editor.chain().focus().toggleHeading({ level: 2 }).run();
+              } else if (val === 'h3') {
+                editor.chain().focus().toggleHeading({ level: 3 }).run();
+              }
+            }}
+          >
+            <SelectTrigger className="w-[130px] h-7 text-xs bg-white dark:bg-zinc-800 border-slate-200 dark:border-zinc-700">
+              <SelectValue placeholder="Estilo do Texto" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="paragraph">Texto Normal</SelectItem>
+              <SelectItem value="h1"><span className="font-bold text-base">Título 1</span></SelectItem>
+              <SelectItem value="h2"><span className="font-semibold text-sm">Título 2</span></SelectItem>
+              <SelectItem value="h3"><span className="font-medium text-xs">Título 3</span></SelectItem>
+            </SelectContent>
+          </Select>
 
-      {/* Font Family Selector */}
-      <Select onValueChange={(val) => editor.chain().focus().setFontFamily(val).run()}>
-        <SelectTrigger className="w-[110px] h-7 text-xs bg-white dark:bg-zinc-800 border-slate-200 dark:border-zinc-700">
-          <SelectValue placeholder="Fonte" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="Inter">Inter</SelectItem>
-          <SelectItem value="Arial">Arial</SelectItem>
-          <SelectItem value="Comic Sans MS, Comic Sans">Comic Sans</SelectItem>
-          <SelectItem value="Georgia, serif">Georgia</SelectItem>
-          <SelectItem value="Courier New, monospace">Monospace</SelectItem>
-        </SelectContent>
-      </Select>
+          {/* Font Family Selector */}
+          <Select onValueChange={(val) => editor.chain().focus().setFontFamily(val).run()}>
+            <SelectTrigger className="w-[110px] h-7 text-xs bg-white dark:bg-zinc-800 border-slate-200 dark:border-zinc-700">
+              <SelectValue placeholder="Fonte" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Inter">Inter</SelectItem>
+              <SelectItem value="Arial">Arial</SelectItem>
+              <SelectItem value="Comic Sans MS, Comic Sans">Comic Sans</SelectItem>
+              <SelectItem value="Georgia, serif">Georgia</SelectItem>
+              <SelectItem value="Courier New, monospace">Monospace</SelectItem>
+            </SelectContent>
+          </Select>
 
-      <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
+          <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
 
-      {/* Text Styles */}
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('bold') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white font-bold' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleBold().run(); }} title="Negrito (Ctrl+B)"><Bold size={14} /></Button>
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('italic') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleItalic().run(); }} title="Itálico (Ctrl+I)"><Italic size={14} /></Button>
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('underline') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleUnderline().run(); }} title="Sublinhado (Ctrl+U)"><UnderlineIcon size={14} /></Button>
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('strike') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleStrike().run(); }} title="Tachado"><Strikethrough size={14} /></Button>
-      
-      <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
+          {/* Text Styles */}
+          <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('bold') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white font-bold' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleBold().run(); }} title="Negrito (Ctrl+B)"><Bold size={14} /></Button>
+          <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('italic') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleItalic().run(); }} title="Itálico (Ctrl+I)"><Italic size={14} /></Button>
+          <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('underline') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleUnderline().run(); }} title="Sublinhado (Ctrl+U)"><UnderlineIcon size={14} /></Button>
+          <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('strike') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleStrike().run(); }} title="Tachado"><Strikethrough size={14} /></Button>
+          
+          <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
 
-      {/* Text Color Picker Popover */}
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button variant="ghost" size="sm" className="h-7 px-1.5 gap-1 text-xs" title="Cor do Texto">
-            <Palette size={14} style={{ color: (editor.getAttributes('textStyle').color as string) || '#0f172a' }} />
-            <span className="w-3 h-3 rounded-full border border-slate-300 dark:border-zinc-600" style={{ backgroundColor: (editor.getAttributes('textStyle').color as string) || '#0f172a' }} />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-48 p-2" align="start">
-          <p className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 mb-1.5">Cor do Texto</p>
-          <div className="grid grid-cols-4 gap-1.5 mb-2">
-            {TEXT_COLORS.map((c) => (
-              <button
-                key={c.value}
-                type="button"
-                className="w-8 h-8 rounded-md border border-slate-200 dark:border-zinc-700 flex items-center justify-center hover:scale-110 transition-transform"
-                style={{ backgroundColor: c.value }}
-                title={c.name}
-                onClick={() => editor.chain().focus().setColor(c.value).run()}
-              />
-            ))}
-          </div>
-          <div className="pt-1.5 border-t border-slate-100 dark:border-zinc-800 flex items-center justify-between">
-            <span className="text-[11px] text-slate-500 dark:text-zinc-400">Personalizado:</span>
-            <input 
-              type="color" 
-              onInput={event => editor.chain().focus().setColor((event.target as HTMLInputElement).value).run()} 
-              value={(editor.getAttributes('textStyle').color as string) || '#000000'}
-              className="h-6 w-6 p-0 rounded cursor-pointer border-none bg-transparent"
-            />
-          </div>
-        </PopoverContent>
-      </Popover>
-
-      {/* Highlight Color Picker Popover */}
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button variant="ghost" size="sm" className="h-7 px-1.5 gap-1 text-xs" title="Cor de Realce (Fundo)">
-            <Highlighter size={14} className="text-amber-500" />
-            <span className="w-3 h-3 rounded-full border border-slate-300 dark:border-zinc-600 bg-amber-200" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-48 p-2" align="start">
-          <p className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 mb-1.5">Cor de Realce</p>
-          <div className="grid grid-cols-4 gap-1.5">
-            {HIGHLIGHT_COLORS.map((c) => (
-              <button
-                key={c.name}
-                type="button"
-                className="w-8 h-8 rounded-md border border-slate-200 dark:border-zinc-700 flex items-center justify-center text-xs hover:scale-110 transition-transform"
-                style={{ backgroundColor: c.value || '#ffffff' }}
-                title={c.name}
-                onClick={() => {
-                  if (c.value) {
-                    editor.chain().focus().setHighlight({ color: c.value }).run();
-                  } else {
-                    editor.chain().focus().unsetHighlight().run();
-                  }
-                }}
-              >
-                {!c.value && '✕'}
-              </button>
-            ))}
-          </div>
-        </PopoverContent>
-      </Popover>
-
-      <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
-      
-      {/* Alignment */}
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive({ textAlign: 'left' }) ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().setTextAlign('left').run(); }} title="Alinhar à Esquerda"><AlignLeft size={14} /></Button>
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive({ textAlign: 'center' }) ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().setTextAlign('center').run(); }} title="Centralizar"><AlignCenter size={14} /></Button>
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive({ textAlign: 'right' }) ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().setTextAlign('right').run(); }} title="Alinhar à Direita"><AlignRight size={14} /></Button>
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive({ textAlign: 'justify' }) ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().setTextAlign('justify').run(); }} title="Justificar"><AlignJustify size={14} /></Button>
-      
-      <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
-      
-      {/* Lists */}
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('bulletList') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleBulletList().run(); }} title="Lista com Marcadores"><List size={14} /></Button>
-      <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('orderedList') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleOrderedList().run(); }} title="Lista Numerada"><ListOrdered size={14} /></Button>
-      
-      <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
-
-      {/* Undo / Redo */}
-      <Button 
-        variant="ghost" 
-        size="icon" 
-        className="h-7 w-7 text-slate-600 dark:text-zinc-300 hover:text-slate-900" 
-        onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().undo().run(); }} 
-        title="Desfazer (Ctrl+Z)"
-      >
-        <Undo2 size={14} />
-      </Button>
-      <Button 
-        variant="ghost" 
-        size="icon" 
-        className="h-7 w-7 text-slate-600 dark:text-zinc-300 hover:text-slate-900" 
-        onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().redo().run(); }} 
-        title="Refazer (Ctrl+Y)"
-      >
-        <Redo2 size={14} />
-      </Button>
-
-      <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
-
-      {/* Table Insert & Color Options */}
-      <TablePicker onSelect={(rows, cols) => editor.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run()} />
-
-      {/* Table Background Color Picker Popover */}
-      {editor.isActive('table') && (
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 px-2 text-xs gap-1.5 bg-indigo-50/90 dark:bg-indigo-950/70 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100"
-              title="Cor de Fundo da Tabela / Células"
-            >
-              <TableProperties size={14} className="text-indigo-600 dark:text-indigo-400" />
-              <span className="font-medium text-[11px]">Cor da Tabela</span>
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-56 p-2.5" align="start">
-            <p className="text-[11px] font-semibold text-slate-600 dark:text-zinc-300 mb-1.5 flex items-center justify-between">
-              <span>Cor de Fundo</span>
-              <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-normal">Células</span>
-            </p>
-            <div className="grid grid-cols-5 gap-1.5 mb-2.5">
-              {TABLE_BG_COLORS.map((c) => (
-                <button
-                  key={c.name}
-                  type="button"
-                  className="w-7 h-7 rounded-md border border-slate-200 dark:border-zinc-700 flex items-center justify-center text-[10px] hover:scale-110 transition-transform shadow-2xs"
-                  style={{ backgroundColor: c.value || 'transparent' }}
-                  title={c.name}
-                  onClick={() => {
-                    if (c.value) {
-                      editor.chain().focus().setCellAttribute('backgroundColor', c.value).run();
-                    } else {
-                      editor.chain().focus().setCellAttribute('backgroundColor', null).run();
-                    }
-                  }}
-                >
-                  {!c.value && '✕'}
-                </button>
-              ))}
-            </div>
-
-            <div className="pt-2 border-t border-slate-100 dark:border-zinc-800 flex flex-col gap-1.5">
-              <div className="flex items-center justify-between">
+          {/* Text Color Picker Popover */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-7 px-1.5 gap-1 text-xs" title="Cor do Texto">
+                <Palette size={14} style={{ color: (editor.getAttributes('textStyle').color as string) || '#0f172a' }} />
+                <span className="w-3 h-3 rounded-full border border-slate-300 dark:border-zinc-600" style={{ backgroundColor: (editor.getAttributes('textStyle').color as string) || '#0f172a' }} />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-48 p-2" align="start">
+              <p className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 mb-1.5">Cor do Texto</p>
+              <div className="grid grid-cols-4 gap-1.5 mb-2">
+                {TEXT_COLORS.map((c) => (
+                  <button
+                    key={c.value}
+                    type="button"
+                    className="w-8 h-8 rounded-md border border-slate-200 dark:border-zinc-700 flex items-center justify-center hover:scale-110 transition-transform"
+                    style={{ backgroundColor: c.value }}
+                    title={c.name}
+                    onClick={() => editor.chain().focus().setColor(c.value).run()}
+                  />
+                ))}
+              </div>
+              <div className="pt-1.5 border-t border-slate-100 dark:border-zinc-800 flex items-center justify-between">
                 <span className="text-[11px] text-slate-500 dark:text-zinc-400">Personalizado:</span>
-                <input
-                  type="color"
-                  onInput={(e) => {
-                    const color = (e.target as HTMLInputElement).value;
-                    editor.chain().focus().setCellAttribute('backgroundColor', color).run();
-                  }}
+                <input 
+                  type="color" 
+                  onInput={event => editor.chain().focus().setColor((event.target as HTMLInputElement).value).run()} 
+                  value={(editor.getAttributes('textStyle').color as string) || '#000000'}
                   className="h-6 w-6 p-0 rounded cursor-pointer border-none bg-transparent"
-                  title="Escolher cor personalizada"
                 />
               </div>
+            </PopoverContent>
+          </Popover>
 
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="w-full h-7 text-[11px] mt-1 gap-1"
-                onClick={() => {
-                  const currentColor = (editor.getAttributes('tableCell').backgroundColor as string) || '#f1f5f9';
-                  setEntireTableBackgroundColor(editor, currentColor);
-                }}
-              >
-                Aplicar cor na tabela inteira
+          {/* Highlight Color Picker Popover */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-7 px-1.5 gap-1 text-xs" title="Cor de Realce (Fundo)">
+                <Highlighter size={14} className="text-amber-500" />
+                <span className="w-3 h-3 rounded-full border border-slate-300 dark:border-zinc-600 bg-amber-200" />
               </Button>
-            </div>
-          </PopoverContent>
-        </Popover>
+            </PopoverTrigger>
+            <PopoverContent className="w-48 p-2" align="start">
+              <p className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 mb-1.5">Cor de Realce</p>
+              <div className="grid grid-cols-4 gap-1.5">
+                {HIGHLIGHT_COLORS.map((c) => (
+                  <button
+                    key={c.name}
+                    type="button"
+                    className="w-8 h-8 rounded-md border border-slate-200 dark:border-zinc-700 flex items-center justify-center text-xs hover:scale-110 transition-transform"
+                    style={{ backgroundColor: c.value || '#ffffff' }}
+                    title={c.name}
+                    onClick={() => {
+                      if (c.value) {
+                        editor.chain().focus().setHighlight({ color: c.value }).run();
+                      } else {
+                        editor.chain().focus().unsetHighlight().run();
+                      }
+                    }}
+                  >
+                    {!c.value && '✕'}
+                  </button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
+          
+          {/* Alignment */}
+          <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive({ textAlign: 'left' }) ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().setTextAlign('left').run(); }} title="Alinhar à Esquerda"><AlignLeft size={14} /></Button>
+          <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive({ textAlign: 'center' }) ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().setTextAlign('center').run(); }} title="Centralizar"><AlignCenter size={14} /></Button>
+          <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive({ textAlign: 'right' }) ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().setTextAlign('right').run(); }} title="Alinhar à Direita"><AlignRight size={14} /></Button>
+          <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive({ textAlign: 'justify' }) ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().setTextAlign('justify').run(); }} title="Justificar"><AlignJustify size={14} /></Button>
+          
+          <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
+          
+          {/* Lists */}
+          <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('bulletList') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleBulletList().run(); }} title="Lista com Marcadores"><List size={14} /></Button>
+          <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('orderedList') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleOrderedList().run(); }} title="Lista Numerada"><ListOrdered size={14} /></Button>
+          
+          <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
+
+          {/* Undo / Redo */}
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="h-7 w-7 text-slate-600 dark:text-zinc-300 hover:text-slate-900" 
+            onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().undo().run(); }} 
+            title="Desfazer (Ctrl+Z)"
+          >
+            <Undo2 size={14} />
+          </Button>
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="h-7 w-7 text-slate-600 dark:text-zinc-300 hover:text-slate-900" 
+            onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().redo().run(); }} 
+            title="Refazer (Ctrl+Y)"
+          >
+            <Redo2 size={14} />
+          </Button>
+
+          <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
+
+          {/* Table Insert & Color Options */}
+          <TablePicker onSelect={(rows, cols) => editor.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run()} />
+
+          {/* Table Background Color Picker Popover */}
+          {editor.isActive('table') && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-xs gap-1.5 bg-indigo-50/90 dark:bg-indigo-950/70 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100"
+                  title="Cor de Fundo da Tabela / Células"
+                >
+                  <TableProperties size={14} className="text-indigo-600 dark:text-indigo-400" />
+                  <span className="font-medium text-[11px]">Cor da Tabela</span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-56 p-2.5" align="start">
+                <p className="text-[11px] font-semibold text-slate-600 dark:text-zinc-300 mb-1.5 flex items-center justify-between">
+                  <span>Cor de Fundo</span>
+                  <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-normal">Células</span>
+                </p>
+                <div className="grid grid-cols-5 gap-1.5 mb-2.5">
+                  {TABLE_BG_COLORS.map((c) => (
+                    <button
+                      key={c.name}
+                      type="button"
+                      className="w-7 h-7 rounded-md border border-slate-200 dark:border-zinc-700 flex items-center justify-center text-[10px] hover:scale-110 transition-transform shadow-2xs"
+                      style={{ backgroundColor: c.value || 'transparent' }}
+                      title={c.name}
+                      onClick={() => {
+                        if (c.value) {
+                          editor.chain().focus().setCellAttribute('backgroundColor', c.value).run();
+                        } else {
+                          editor.chain().focus().setCellAttribute('backgroundColor', null).run();
+                        }
+                      }}
+                    >
+                      {!c.value && '✕'}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="pt-2 border-t border-slate-100 dark:border-zinc-800 flex flex-col gap-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400">Personalizado:</span>
+                    <input
+                      type="color"
+                      onInput={(e) => {
+                        const color = (e.target as HTMLInputElement).value;
+                        editor.chain().focus().setCellAttribute('backgroundColor', color).run();
+                      }}
+                      className="h-6 w-6 p-0 rounded cursor-pointer border-none bg-transparent"
+                      title="Escolher cor personalizada"
+                    />
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="w-full h-7 text-[11px] mt-1 gap-1"
+                    onClick={() => {
+                      const currentColor = (editor.getAttributes('tableCell').backgroundColor as string) || '#f1f5f9';
+                      setEntireTableBackgroundColor(editor, currentColor);
+                    }}
+                  >
+                    Aplicar cor na tabela inteira
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
+
+          {/* Gemini AI Assistant Button */}
+          {onOpenAi && (
+            <>
+              <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onOpenAi}
+                className="h-7 text-xs px-2.5 gap-1.5 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 font-semibold shadow-2xs transition-colors"
+                title="Assistente Gemini IA (Melhorar texto, requisitos, fluxos e casos de uso)"
+              >
+                <Sparkles size={13} className="text-indigo-600 dark:text-indigo-400 group-hover:text-white" />
+                <span>IA Gemini</span>
+              </Button>
+            </>
+          )}
+        </>
       )}
 
-      {/* Gemini AI Assistant Button */}
-      {onOpenAi && (
-        <>
-          <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onOpenAi}
-            className="h-7 text-xs px-2.5 gap-1.5 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-600 hover:text-white dark:hover:bg-indigo-600 font-semibold shadow-2xs transition-colors ml-auto sm:ml-0"
-            title="Assistente Gemini IA (Melhorar texto, requisitos, fluxos e casos de uso)"
-          >
-            <Sparkles size={13} className="text-indigo-600 dark:text-indigo-400 group-hover:text-white" />
-            <span>IA Gemini</span>
-          </Button>
-        </>
+      {/* Layer Controls when a block is selected */}
+      {selectedBlockId && (onBringToFront || onSendToBack) && (
+        <div className="ml-auto flex items-center gap-1 pl-2 border-l border-slate-300 dark:border-zinc-700">
+          {onBringToFront && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-slate-600 dark:text-zinc-300 hover:bg-slate-200 dark:hover:bg-zinc-800"
+              onClick={onBringToFront}
+              title="Trazer bloco para a frente"
+            >
+              <ChevronUp size={14} />
+            </Button>
+          )}
+
+          {onSendToBack && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-slate-600 dark:text-zinc-300 hover:bg-slate-200 dark:hover:bg-zinc-800"
+              onClick={onSendToBack}
+              title="Enviar bloco para trás"
+            >
+              <ChevronDown size={14} />
+            </Button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -529,14 +570,14 @@ function TextBlock({
           width: typeof block.width === 'number' ? block.width : parseInt(String(block.width), 10) || 400, 
           height: 'auto',
         }}
-        position={{ x: block.x, y: block.y }}
+        position={{ x: block.x, y: Math.max(12, block.y) }}
         style={{
-          zIndex: isSelected ? 30 : 10,
+          zIndex: isSelected ? 40 : 10,
         }}
         onDragStart={() => {
           setSelectedId(block.id);
         }}
-        onDragStop={(_, d) => updateBlock(block.id, { x: d.x, y: d.y })}
+        onDragStop={(_, d) => updateBlock(block.id, { x: Math.max(0, d.x), y: Math.max(12, d.y) })}
         enableResizing={{
           top: false,
           right: true,
@@ -558,15 +599,15 @@ function TextBlock({
           updateBlock(block.id, {
             width: w,
             height: h,
-            ...(direction.includes('left') ? { x: position.x } : {}),
-            ...(direction.includes('top') ? { y: position.y } : {}),
+            x: Math.max(0, position.x),
+            y: Math.max(12, position.y),
           });
         }}
         bounds="parent"
         minWidth={180}
         minHeight={typeof block.height === 'number' ? Math.max(40, block.height) : 40}
         dragHandleClassName="text-drag-handle"
-        className={`group ${isSelected ? 'z-30' : 'z-10'}`}
+        className={`group ${isSelected ? 'z-40' : 'hover:z-30 z-10'}`}
         onClick={(e) => {
           e.stopPropagation();
           setSelectedId(block.id);
@@ -587,21 +628,23 @@ function TextBlock({
         >
           {/* Top Handle Bar - OneNote style: entire bar is a grab handle */}
           <div
-            className={`h-5 bg-slate-100/95 dark:bg-zinc-800/95 border border-slate-300 dark:border-zinc-700 border-b-0 rounded-t flex items-center justify-between px-1.5 transition-opacity text-drag-handle cursor-grab active:cursor-grabbing select-none ${
-              isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            className={`h-6 bg-slate-100 dark:bg-zinc-800 border border-slate-300 dark:border-zinc-700 border-b-0 rounded-t flex items-center justify-between px-2 transition-all text-drag-handle cursor-grab active:cursor-grabbing select-none ${
+              isSelected ? 'opacity-100 bg-indigo-50/90 dark:bg-zinc-800 border-indigo-300 dark:border-indigo-700' : 'opacity-70 group-hover:opacity-100'
             }`}
           >
-            <div className="flex items-center gap-1.5 text-slate-400 dark:text-zinc-400 pointer-events-none">
-              <GripHorizontal size={13} />
-              <span className="text-[10px] font-medium tracking-tight">Texto</span>
+            <div className="flex items-center gap-1.5 text-slate-500 dark:text-zinc-400 pointer-events-none">
+              <GripHorizontal size={14} className="text-slate-500 dark:text-zinc-400" />
+              <span className="text-[11px] font-semibold tracking-tight text-slate-600 dark:text-zinc-300">
+                Arrastar para mover
+              </span>
             </div>
 
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5">
               {/* AI Assistant Button directly on the box */}
               {onOpenAiAssistant && (
                 <button
                   type="button"
-                  className="text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 p-0.5 px-1 rounded hover:bg-indigo-50 dark:hover:bg-indigo-950/60 flex items-center gap-1 text-[10px] font-semibold transition-colors cursor-pointer"
+                  className="text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 p-0.5 px-1.5 rounded hover:bg-indigo-100 dark:hover:bg-indigo-950/80 flex items-center gap-1 text-[10px] font-semibold transition-colors cursor-pointer"
                   onClick={(e) => {
                     e.stopPropagation();
                     onOpenAiAssistant(block.id, editor);
@@ -609,20 +652,20 @@ function TextBlock({
                   title="Assistente Gemini IA: Melhorar texto, estruturar requisitos, fluxos e casos de uso"
                 >
                   <Sparkles size={11} className="text-indigo-600 dark:text-indigo-400" />
-                  <span className="hidden xs:inline">IA</span>
+                  <span>IA</span>
                 </button>
               )}
 
               <button
                 type="button"
-                className="text-slate-400 hover:text-red-500 p-0.5 rounded hover:bg-slate-200 dark:hover:bg-zinc-700 cursor-pointer"
+                className="text-slate-400 hover:text-red-500 p-1 rounded hover:bg-slate-200 dark:hover:bg-zinc-700 cursor-pointer transition-colors"
                 onClick={(e) => {
                   e.stopPropagation();
                   removeBlock(block.id);
                 }}
-                title="Excluir caixa"
+                title="Excluir este bloco"
               >
-                <Trash2 size={12} />
+                <Trash2 size={13} />
               </button>
             </div>
           </div>
@@ -1165,6 +1208,29 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     });
     setSelectedBlockId((curr) => (curr === id ? null : curr));
     setActiveEditor(null);
+  }, [pageId, updatePage]);
+
+  // Duplicate a block
+  const duplicateBlock = useCallback((id: string) => {
+    setBlocks((prev) => {
+      const target = prev.find((b) => b.id === id);
+      if (!target) return prev;
+      const newBlock: CanvasBlock = {
+        ...target,
+        id: `block_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        x: target.x + 30,
+        y: target.y + 30,
+      };
+      const updated = [...prev, newBlock];
+      const json = JSON.stringify(updated);
+      lastSavedContentRef.current = json;
+      Promise.resolve().then(() => {
+        updatePage(pageId, { conteudo: json });
+      });
+      setSelectedBlockId(newBlock.id);
+      return updated;
+    });
+    toast.success('Bloco duplicado!');
   }, [pageId, updatePage]);
 
   // Helper to calculate spawn position avoiding overlapping on top of existing notes
@@ -1806,11 +1872,17 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
         </div>
       )}
 
-      {/* Formatting Toolbar (Active when a text editor is focused) */}
-      <GlobalToolbar editor={activeEditor} onOpenAi={() => handleOpenAiAssistant()} />
+      {/* Formatting Toolbar (Active when a text editor is focused or block is selected) */}
+      <GlobalToolbar 
+        editor={activeEditor} 
+        onOpenAi={() => handleOpenAiAssistant()} 
+        selectedBlockId={selectedBlockId}
+        onBringToFront={selectedBlockId ? () => bringBlockToFront(selectedBlockId) : undefined}
+        onSendToBack={selectedBlockId ? () => sendBlockToBack(selectedBlockId) : undefined}
+      />
 
       {/* Canvas Area */}
-      <div className="flex-1 overflow-auto bg-[#ffffff] dark:bg-zinc-950 relative w-full h-full">
+      <div className="flex-1 overflow-auto bg-[#ffffff] dark:bg-zinc-950 relative w-full h-full p-4 pt-6">
         <div
           ref={canvasRef}
           className="relative cursor-text"

@@ -585,14 +585,14 @@ export function SecretVaultBlock({
           width: typeof block.width === 'number' ? block.width : parseInt(String(block.width), 10) || 540, 
           height: typeof block.height === 'number' ? block.height : parseInt(String(block.height), 10) || 380 
         }}
-        position={{ x: block.x || 40, y: block.y || 40 }}
+        position={{ x: block.x || 40, y: Math.max(12, block.y || 40) }}
         style={{
-          zIndex: isSelected ? 35 : 12,
+          zIndex: isSelected ? 40 : 12,
         }}
         onDragStart={() => {
           setSelectedId(block.id);
         }}
-        onDragStop={(_, d) => updateBlock(block.id, { x: d.x, y: d.y })}
+        onDragStop={(_, d) => updateBlock(block.id, { x: Math.max(0, d.x), y: Math.max(12, d.y) })}
         enableResizing={{
           top: false,
           right: true,
@@ -612,15 +612,15 @@ export function SecretVaultBlock({
           updateBlock(block.id, {
             width: ref.offsetWidth,
             height: ref.offsetHeight,
-            ...(direction.includes('left') ? { x: position.x } : {}),
-            ...(direction.includes('top') ? { y: position.y } : {}),
+            x: Math.max(0, position.x),
+            y: Math.max(12, position.y),
           });
         }}
         bounds="parent"
         minWidth={340}
         minHeight={220}
         dragHandleClassName="vault-drag-handle"
-        className={`group ${isSelected ? 'z-20' : 'z-10'}`}
+        className={`group ${isSelected ? 'z-40' : 'hover:z-30 z-10'}`}
         onClick={(e) => {
           e.stopPropagation();
           setSelectedId(block.id);

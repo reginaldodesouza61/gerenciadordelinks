@@ -1391,7 +1391,7 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
           width: typeof block.width === 'number' ? block.width : parseInt(String(block.width), 10) || 960, 
           height: typeof block.height === 'number' ? block.height : parseInt(String(block.height), 10) || 600 
         }}
-        position={{ x: block.x, y: block.y }}
+        position={{ x: block.x, y: Math.max(12, block.y) }}
         style={{
           zIndex: isSelected ? 40 : 15,
         }}
@@ -1400,7 +1400,7 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
           bringToFront?.(block.id);
         }}
         onDragStop={(_e, d) => {
-          updateBlock(block.id, { x: d.x, y: d.y });
+          updateBlock(block.id, { x: Math.max(0, d.x), y: Math.max(12, d.y) });
         }}
         enableResizing={{
           top: false,
@@ -1421,8 +1421,8 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
           updateBlock(block.id, {
             width: ref.offsetWidth,
             height: ref.offsetHeight,
-            ...(direction.includes('left') ? { x: position.x } : {}),
-            ...(direction.includes('top') ? { y: position.y } : {}),
+            x: Math.max(0, position.x),
+            y: Math.max(12, position.y),
           });
         }}
         bounds="parent"
@@ -1438,8 +1438,8 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
         }}
         className={`group bg-white dark:bg-zinc-900 border rounded-xl transition-all overflow-hidden flex flex-col ${
           isSelected 
-            ? 'ring-2 ring-indigo-500 border-indigo-400 shadow-xl' 
-            : 'border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 shadow-sm'
+            ? 'z-40 ring-2 ring-indigo-500 border-indigo-400 shadow-xl' 
+            : 'hover:z-30 z-10 border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 shadow-sm'
         }`}
       >
         {/* Card Header & Move Handle */}
