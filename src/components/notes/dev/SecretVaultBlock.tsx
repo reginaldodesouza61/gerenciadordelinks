@@ -114,8 +114,18 @@ export function SecretVaultBlock({
       if (block.secrets && Array.isArray(block.secrets)) {
         try {
           const decrypted = await Promise.all(block.secrets.map(s => decryptSecretItem(s)));
+          // Automatically sanitize credentials to remove autofilled usernames from bank accounts, cards and tokens
+          const sanitized = decrypted.map(s => {
+            if (s.type === 'bank' || s.type === 'credit_card' || s.type === 'api_token' || s.type === 'jwt_secret' || s.type === 'webhook_secret' || s.type === 'env_var' || s.type === 'azure_graph' || s.type === 'oauth_api') {
+              if (s.username) {
+                const { username: _unused, ...rest } = s;
+                return rest as SecretItem;
+              }
+            }
+            return s;
+          });
           if (isMounted) {
-            setDecryptedSecrets(decrypted);
+            setDecryptedSecrets(sanitized);
           }
         } catch {
           if (isMounted) {
@@ -176,7 +186,12 @@ export function SecretVaultBlock({
     ];
 
     if (item.url) lines.push(`🌐 Link / URL: ${item.url}`);
-    if (item.username) lines.push(`👤 Usuário / Login: ${item.username}`);
+    
+    // Only output username for credentials where login is applicable (not banks, cards, tokens)
+    if (item.type !== 'bank' && item.type !== 'credit_card' && item.type !== 'api_token' && item.type !== 'jwt_secret' && item.type !== 'webhook_secret' && item.type !== 'env_var' && item.username) {
+      lines.push(`👤 Usuário / Login: ${item.username}`);
+    }
+    
     if (item.value) lines.push(`🔑 Senha / Valor: ${item.value}`);
 
     // Azure / OAuth fields
@@ -398,7 +413,8 @@ export function SecretVaultBlock({
     e?.stopPropagation();
     setEditingItem(item);
     setFormKey(cleanMasked(item.key) || (item.type === 'bank' ? 'Conta Bancária & PIX' : ''));
-    setFormUsername(cleanMasked(item.username));
+    const isUserType = item.type === 'password' || item.type === 'ssh_key' || item.type === 'custom';
+    setFormUsername(isUserType ? cleanMasked(item.username) : '');
     setFormValue(cleanMasked(item.value));
     setFormUrl(cleanMasked(item.url));
     setFormType(item.type || 'password');
@@ -497,9 +513,12 @@ export function SecretVaultBlock({
 
     let updatedSecrets: SecretItem[];
 
+    const isUserType = formType === 'password' || formType === 'ssh_key' || formType === 'custom';
+    const cleanUsername = isUserType && formUsername.trim() ? formUsername.trim() : undefined;
+
     const itemData: Omit<SecretItem, 'id'> = {
       key: formKey.trim(),
-      username: (formType === 'db_connection' ? (formDbUser.trim() || formUsername.trim()) : formUsername.trim()) || undefined,
+      username: cleanUsername,
       value: primarySecretValue,
       url: cleanUrl || undefined,
       type: formType,
@@ -513,7 +532,7 @@ export function SecretVaultBlock({
       dbHost: formDbHost.trim() || undefined,
       dbPort: formDbPort.trim() || undefined,
       dbName: formDbName.trim() || undefined,
-      dbUser: formDbUser.trim() || undefined,
+      dbUser: formType === 'db_connection' ? (formDbUser.trim() || undefined) : undefined,
       bankName: formBankName.trim() || undefined,
       bankAgency: formBankAgency.trim() || undefined,
       bankAccount: formBankAccount.trim() || undefined,
@@ -1212,8 +1231,8 @@ export function SecretVaultBlock({
                       </div>
                     )}
 
-                    {/* Username / Login (if provided for standard login / ssh / db) */}
-                    {(item.username || item.dbUser) && (
+                    {/* Username / Login (ONLY for standard login / ssh / db / custom where applicable) */}
+                    {item.type !== 'bank' && item.type !== 'credit_card' && item.type !== 'api_token' && item.type !== 'jwt_secret' && item.type !== 'webhook_secret' && item.type !== 'env_var' && item.type !== 'azure_graph' && item.type !== 'oauth_api' && (item.username || item.dbUser) && (
                       <div className="flex items-center justify-between gap-2 px-2.5 py-1 rounded bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800 text-[11px]">
                         <div className="flex items-center gap-1.5 min-w-0 text-slate-700 dark:text-zinc-200 truncate">
                           <User size={12} className="text-indigo-500 shrink-0" />
@@ -1356,7 +1375,7 @@ export function SecretVaultBlock({
             </DialogTitle>
           </DialogHeader>
 
-          <form onSubmit={handleSaveItem} className="flex-1 overflow-y-auto p-4 space-y-3.5">
+          <form onSubmit={handleSaveItem} autoComplete="off" data-lpignore="true" data-form-type="other" className="flex-1 overflow-y-auto p-4 space-y-3.5">
             
             {/* Tipo de Credencial & Ambiente */}
             <div className="grid grid-cols-2 gap-2.5 p-2.5 rounded-lg bg-slate-50 dark:bg-zinc-950 border border-slate-100 dark:border-zinc-800">
@@ -1416,6 +1435,8 @@ export function SecretVaultBlock({
                 onChange={(e) => setFormKey(e.target.value)}
                 className="text-xs h-8"
                 autoFocus
+                autoComplete="off"
+                data-lpignore="true"
                 required
               />
             </div>
@@ -1433,6 +1454,8 @@ export function SecretVaultBlock({
                   value={formUrl}
                   onChange={(e) => setFormUrl(e.target.value)}
                   className="text-xs h-8"
+                  autoComplete="off"
+                  data-lpignore="true"
                 />
               </div>
             )}
@@ -1443,13 +1466,15 @@ export function SecretVaultBlock({
                 <div>
                   <label className="text-xs font-semibold text-slate-700 dark:text-zinc-200 flex items-center gap-1.5 mb-1">
                     <User size={13} className="text-indigo-500" />
-                    <span>Nome de Usuário / E-mail / Login</span>
+                    <span>Nome de Usuário / E-mail / Login (Opcional)</span>
                   </label>
                   <Input
                     placeholder="Ex: admin@empresa.com, dev_user, root"
                     value={formUsername}
                     onChange={(e) => setFormUsername(e.target.value)}
                     className="text-xs h-8"
+                    autoComplete="off"
+                    data-lpignore="true"
                   />
                 </div>
 
@@ -1484,6 +1509,8 @@ export function SecretVaultBlock({
                     value={formValue}
                     onChange={(e) => setFormValue(e.target.value)}
                     className="font-mono text-xs h-8"
+                    autoComplete="new-password"
+                    data-lpignore="true"
                     required
                   />
                 </div>
@@ -1783,6 +1810,8 @@ export function SecretVaultBlock({
                       value={formBankName}
                       onChange={(e) => setFormBankName(e.target.value)}
                       className="text-xs h-8"
+                      autoComplete="off"
+                      data-lpignore="true"
                     />
                   </div>
                   <div>
@@ -1794,6 +1823,8 @@ export function SecretVaultBlock({
                       value={formBankAccountType}
                       onChange={(e) => setFormBankAccountType(e.target.value)}
                       className="text-xs h-8"
+                      autoComplete="off"
+                      data-lpignore="true"
                     />
                   </div>
                 </div>
@@ -1808,6 +1839,8 @@ export function SecretVaultBlock({
                       value={formBankAgency}
                       onChange={(e) => setFormBankAgency(e.target.value)}
                       className="font-mono text-xs h-8"
+                      autoComplete="off"
+                      data-lpignore="true"
                     />
                   </div>
                   <div>
@@ -1819,6 +1852,8 @@ export function SecretVaultBlock({
                       value={formBankAccount}
                       onChange={(e) => setFormBankAccount(e.target.value)}
                       className="font-mono text-xs h-8"
+                      autoComplete="off"
+                      data-lpignore="true"
                     />
                   </div>
                 </div>
@@ -1832,6 +1867,8 @@ export function SecretVaultBlock({
                     value={formPixKey}
                     onChange={(e) => setFormPixKey(e.target.value)}
                     className="font-mono text-xs h-8"
+                    autoComplete="off"
+                    data-lpignore="true"
                   />
                 </div>
 
@@ -1845,6 +1882,8 @@ export function SecretVaultBlock({
                     value={formTransactionPassword}
                     onChange={(e) => setFormTransactionPassword(e.target.value)}
                     className="font-mono text-xs h-8"
+                    autoComplete="new-password"
+                    data-lpignore="true"
                   />
                 </div>
 
@@ -1868,6 +1907,8 @@ export function SecretVaultBlock({
                     value={formValue}
                     onChange={(e) => setFormValue(e.target.value)}
                     className="font-mono text-xs h-8"
+                    autoComplete="new-password"
+                    data-lpignore="true"
                     required
                   />
                 </div>
