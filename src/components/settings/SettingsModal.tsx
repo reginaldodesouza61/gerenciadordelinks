@@ -8,7 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { 
   Sparkles, Key, CheckCircle2, AlertCircle, Eye, EyeOff, 
-  ExternalLink, User, Info, RefreshCw, Trash2, Cpu, ShieldCheck, Check
+  User, Info, RefreshCw, Cpu, ShieldCheck, Check,
+  Lock, Fingerprint, Database, KeyRound, Shield, ExternalLink, Trash2
 } from 'lucide-react';
 import { 
   getGeminiApiKey, setGeminiApiKey, removeGeminiApiKey, testGeminiApiKey, 
@@ -99,7 +100,7 @@ export function SettingsModal({ open, onOpenChange, defaultTab = 'gemini' }: Set
           </div>
         </DialogHeader>
 
-        <div className="p-6">
+        <div className="p-6 max-h-[75vh] overflow-y-auto">
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'gemini' | 'developer' | 'system')} className="w-full">
             <TabsList className="grid grid-cols-3 bg-slate-100 dark:bg-zinc-800/80 p-1 rounded-xl mb-6">
               <TabsTrigger value="gemini" className="rounded-lg text-xs gap-1.5 font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-900 data-[state=active]:shadow-xs">
@@ -272,9 +273,10 @@ export function SettingsModal({ open, onOpenChange, defaultTab = 'gemini' }: Set
               </div>
             </TabsContent>
 
-            {/* TAB 3: SYSTEM INFO */}
+            {/* TAB 3: SYSTEM INFO & CRYPTOGRAPHY */}
             <TabsContent value="system" className="space-y-4 focus-visible:outline-none">
-              <div className="p-4 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-800/40 space-y-2">
+              {/* App Meta Card */}
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-850 space-y-2 shadow-2xs">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-base font-bold text-slate-900 dark:text-white">{SYSTEM_INFO.name}</span>
@@ -291,6 +293,67 @@ export function SettingsModal({ open, onOpenChange, defaultTab = 'gemini' }: Set
                 </p>
               </div>
 
+              {/* Security & Cryptography Card */}
+              <div className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/40 dark:bg-emerald-950/20 space-y-3 shadow-2xs">
+                <div className="flex items-center gap-2 text-emerald-900 dark:text-emerald-200">
+                  <ShieldCheck size={18} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <h4 className="text-xs font-bold uppercase tracking-wider">
+                    Criptografia & Proteção de Dados (Zero-Knowledge)
+                  </h4>
+                </div>
+
+                <p className="text-xs text-slate-700 dark:text-zinc-300 leading-relaxed">
+                  O MeuHub implementa uma arquitetura de segurança de padrão militar com criptografia cliente ponta a ponta (Web Crypto API). Todas as credenciais, segredos, senhas e chaves privadas são cifradas no navegador antes de qualquer gravação ou persistência.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  {/* Algoritmo de Cifra */}
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 space-y-1">
+                    <div className="flex items-center gap-1.5 text-slate-800 dark:text-zinc-200 font-semibold text-xs">
+                      <Lock size={13} className="text-emerald-500 shrink-0" />
+                      <span>AES-256-GCM (Padrão Militar)</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-tight">
+                      Cifra simétrica autenticada com chaves de 256 bits, garantindo confidencialidade absoluta e validação de integridade contra adulteração.
+                    </p>
+                  </div>
+
+                  {/* Derivação de Chave PBKDF2 */}
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 space-y-1">
+                    <div className="flex items-center gap-1.5 text-slate-800 dark:text-zinc-200 font-semibold text-xs">
+                      <KeyRound size={13} className="text-blue-500 shrink-0" />
+                      <span>PBKDF2 com 100.000 iterações</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-tight">
+                      Derivação de chaves reforçada com HMAC-SHA-256 e 100 mil ciclos de hashing para imunidade contra ataques de dicionário ou força bruta.
+                    </p>
+                  </div>
+
+                  {/* Vetor de Inicialização & Salt */}
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 space-y-1">
+                    <div className="flex items-center gap-1.5 text-slate-800 dark:text-zinc-200 font-semibold text-xs">
+                      <Fingerprint size={13} className="text-purple-500 shrink-0" />
+                      <span>Salt 128-bit & IV 96-bit Dinâmicos</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-tight">
+                      Entropia criptográfica por registro gerada via <code className="text-[10px] bg-slate-100 dark:bg-zinc-800 px-1 py-0.5 rounded font-mono">crypto.getRandomValues</code> nativo do navegador.
+                    </p>
+                  </div>
+
+                  {/* Isolamento Zero-Knowledge */}
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 space-y-1">
+                    <div className="flex items-center gap-1.5 text-slate-800 dark:text-zinc-200 font-semibold text-xs">
+                      <Shield size={13} className="text-amber-500 shrink-0" />
+                      <span>Arquitetura Zero-Knowledge</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-tight">
+                      Segredos em texto puro nunca trafegam em rede desprotegidos. O armazenamento recebe exclusivamente envelopes cifrados.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Módulos e Recursos */}
               <div className="space-y-2">
                 <h4 className="text-xs font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider">
                   Módulos & Recursos Integrados
