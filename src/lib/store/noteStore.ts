@@ -44,7 +44,7 @@ const DEFAULT_SECTIONS: NoteSection[] = [
 const DEFAULT_PAGES: NotePage[] = [
   {
     id: DEFAULT_PAGE_ID,
-    titulo: 'Bem-vindo ao MeuHub',
+    titulo: 'Bem-vindo ao Atlas Workspace',
     conteudo: JSON.stringify([
       {
         id: 'block_welcome_header',
@@ -53,7 +53,7 @@ const DEFAULT_PAGES: NotePage[] = [
         width: 650,
         height: 'auto',
         type: 'text',
-        content: '<h1>🚀 Bem-vindo ao MeuHub</h1><p>Seu workspace centralizado para links, anotações interativas, blocos de código e cofre seguro de credenciais.</p><p>Use a barra lateral para criar novas seções, páginas e subpáginas organizadas.</p>'
+        content: '<h1>🚀 Bem-vindo ao Atlas Workspace</h1><p>Seu workspace centralizado para links, anotações interativas, blocos de código e cofre seguro de credenciais.</p><p>Use a barra lateral para criar novas seções, páginas e subpáginas organizadas.</p>'
       }
     ]),
     section_id: DEFAULT_SECTION_ID,

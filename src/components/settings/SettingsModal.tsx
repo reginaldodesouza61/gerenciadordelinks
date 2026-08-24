@@ -91,7 +91,7 @@ export function SettingsModal({ open, onOpenChange, defaultTab = 'gemini' }: Set
             </div>
             <div>
               <DialogTitle className="text-xl font-bold text-slate-900 dark:text-white">
-                Configurações do MeuHub
+                Configurações do Atlas Workspace
               </DialogTitle>
               <DialogDescription className="text-xs text-slate-500 dark:text-zinc-400">
                 Gerencie a integração de Inteligência Artificial, informações do autor e detalhes do sistema.
@@ -303,7 +303,7 @@ export function SettingsModal({ open, onOpenChange, defaultTab = 'gemini' }: Set
                 </div>
 
                 <p className="text-xs text-slate-700 dark:text-zinc-300 leading-relaxed">
-                  O MeuHub implementa uma arquitetura de segurança de padrão militar com criptografia cliente ponta a ponta (Web Crypto API). Todas as credenciais, segredos, senhas e chaves privadas são cifradas no navegador antes de qualquer gravação ou persistência.
+                  O Atlas Workspace implementa uma arquitetura de segurança de padrão militar com criptografia cliente ponta a ponta (Web Crypto API). Todas as credenciais, segredos, senhas e chaves privadas são cifradas no navegador antes de qualquer gravação ou persistência.
                 </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">

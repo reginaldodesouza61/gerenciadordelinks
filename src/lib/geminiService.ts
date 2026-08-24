@@ -12,11 +12,11 @@ export interface DeveloperInfo {
 export const DEFAULT_DEVELOPER_INFO: DeveloperInfo = {
   name: 'Reginaldo de Souza',
   role: 'Desenvolvedor Full Stack & Arquiteto de Soluções',
-  bio: 'Criador do MeuHub, focado em construir ferramentas modernas e intuitivas de produtividade, organização de recursos e desenvolvimento de software.',
+  bio: 'Criador do Atlas Workspace, focado em construir ferramentas modernas e intuitivas de produtividade, organização de recursos e desenvolvimento de software.',
 };
 
 export const SYSTEM_INFO = {
-  name: 'MeuHub',
+  name: 'Atlas Workspace',
   version: '1.2.0',
   releaseDate: '2025/2026',
   description: 'Workspace integrado para desenvolvedores e profissionais gerenciarem links, cadernos de anotações interativos, documentação de requisitos, scripts com sintaxe colorida e cofre de senhas seguras.',
@@ -106,7 +106,7 @@ export async function runGeminiAssistant(request: AiPromptRequest): Promise<stri
 
   const ai = new GoogleGenAI({ apiKey });
 
-  const systemInstruction = `Você é o assistente inteligente do MeuHub, um workspace para desenvolvedores e analistas de sistemas.
+  const systemInstruction = `Você é o assistente inteligente do Atlas Workspace, um workspace para desenvolvedores e analistas de sistemas.
 Sua missão é gerar conteúdo em HTML limpo e bem formatado pronto para ser inserido em um editor de notas (Tiptap).
 REGRAS OBRIGATÓRIAS:
 - Retorne EXCLUSIVAMENTE código HTML válido. Não use blocos de Markdown (\`\`\`html ou \`\`\`).
@@ -217,7 +217,7 @@ export async function generateDiagramWithAi(
 
   const ai = new GoogleGenAI({ apiKey });
 
-  const systemInstruction = `Você é um Arquiteto de Software e Designer de Diagramas visuais do MeuHub.
+  const systemInstruction = `Você é um Arquiteto de Software e Designer de Diagramas visuais do Atlas Workspace.
 Sua missão é converter a descrição do usuário em um diagrama ou fluxograma visual estruturado com elementos perfeitamente posicionados em uma grade (canvas 2D).
 Retorne ESTRITAMENTE um JSON válido com o seguinte formato, sem formatação Markdown (\`\`\`json ou \`\`\`):
 {

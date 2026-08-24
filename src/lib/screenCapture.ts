@@ -1,5 +1,5 @@
 /**
- * Screen capture and image handling helpers for MeuHub Notes
+ * Screen capture and image handling helpers for Atlas Workspace Notes
  */
 
 export async function captureScreen(): Promise<{ dataUrl: string; width: number; height: number }> {

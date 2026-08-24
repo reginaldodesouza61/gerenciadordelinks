@@ -38,7 +38,7 @@ export function RegisterForm({ onToggleForm }: RegisterFormProps) {
       <CardHeader>
         <CardTitle>Cadastrar</CardTitle>
         <CardDescription>
-          Crie uma conta para acessar seu workspace no MeuHub
+          Crie uma conta para acessar seu workspace no Atlas Workspace
         </CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit}>

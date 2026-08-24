@@ -3,7 +3,7 @@ import { useAuthStore } from '@/lib/store/authStore';
 import { useLinkStore } from '@/lib/store/linkStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Search, List, Grid, Menu, X, User, Sun, Moon, LogOut, Link as LinkIcon, FileText, Settings, Sparkles } from 'lucide-react';
+import { Search, List, Grid, Menu, X, User, Sun, Moon, LogOut, Link as LinkIcon, FileText, Settings, Sparkles, Globe } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { APP_VERSION } from '@/lib/version';
 import { cn } from '@/lib/utils';
@@ -84,11 +84,11 @@ export function Header({ activeTab = 'links', setActiveTab }: HeaderProps) {
         <div className="flex items-center justify-between">
           {/* Logo */}
           <div className="flex items-center space-x-2 min-w-0 md:flex-none">
-            <div className="h-8 w-8 bg-primary rounded-lg flex items-center justify-center shadow-lg shadow-primary/20">
-              <Grid className="text-white h-5 w-5" />
+            <div className="h-8 w-8 bg-gradient-to-br from-indigo-600 to-violet-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/25">
+              <Globe className="text-white h-5 w-5" />
             </div>
             <h1 className="text-xl font-bold tracking-tight text-gradient truncate">
-              <span>MeuHub</span>
+              <span>Atlas Workspace</span>
             </h1>
           </div>
           
