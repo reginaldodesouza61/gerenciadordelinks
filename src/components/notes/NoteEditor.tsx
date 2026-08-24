@@ -31,12 +31,15 @@ import { LinkCardBlock } from './dev/LinkCardBlock';
 import { ImageBlock } from './dev/ImageBlock';
 import { WhiteboardBlock } from './dev/WhiteboardBlock';
 import { DrawioBlock } from './dev/DrawioBlock';
+import { BlockActionMenu } from './dev/BlockActionMenu';
+import { MoveOrCopyBlockModal } from './dev/MoveOrCopyBlockModal';
 import { InsertLinkModal } from './dev/InsertLinkModal';
 import { RelatedLinksDrawer } from './dev/RelatedLinksDrawer';
 import { AiAssistantModal } from './AiAssistantModal';
 import { ScreenCropModal } from './ScreenCropModal';
 import { SettingsModal } from '@/components/settings/SettingsModal';
 import { captureScreen, fileToDataUrl } from '@/lib/screenCapture';
+import { copyBlockToClipboard, getBlockFromClipboard, getBlockSummary } from '@/lib/utils/blockClipboard';
 import { toast } from 'sonner';
 
 import { EditorContent, useEditor, Editor } from '@tiptap/react';
@@ -443,6 +446,9 @@ function TextBlock({
   isSelected,
   setSelectedId,
   onOpenAiAssistant,
+  onMoveOrCopy,
+  onDuplicate,
+  onCopyClipboard,
 }: {
   block: CanvasBlock;
   updateBlock: (id: string, updates: Partial<CanvasBlock>) => void;
@@ -451,6 +457,9 @@ function TextBlock({
   isSelected: boolean;
   setSelectedId: (id: string | null) => void;
   onOpenAiAssistant?: (blockId: string, editor: Editor | null) => void;
+  onMoveOrCopy?: (block: CanvasBlock, action?: 'move' | 'copy') => void;
+  onDuplicate?: (blockId: string) => void;
+  onCopyClipboard?: (block: CanvasBlock) => void;
 }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
@@ -602,7 +611,7 @@ function TextBlock({
               </span>
             </div>
 
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1">
               {/* AI Assistant Button directly on the box */}
               {onOpenAiAssistant && (
                 <button
@@ -618,6 +627,16 @@ function TextBlock({
                   <span>IA</span>
                 </button>
               )}
+
+              {/* Move / Copy / Duplicate / Remove Action Menu */}
+              <BlockActionMenu
+                block={block}
+                onMoveOrCopy={onMoveOrCopy}
+                onDuplicate={onDuplicate}
+                onCopyClipboard={onCopyClipboard}
+                onRemove={removeBlock}
+                showMoveButtonDirectly={false}
+              />
 
               <button
                 type="button"
@@ -916,6 +935,17 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
   const [isCropModalOpen, setIsCropModalOpen] = useState(false);
   const [capturedRawImage, setCapturedRawImage] = useState<{ dataUrl: string; width: number; height: number } | null>(null);
 
+  // Move or Copy Block Modal State
+  const [transferModalState, setTransferModalState] = useState<{
+    isOpen: boolean;
+    block: CanvasBlock | null;
+    initialAction?: 'move' | 'copy';
+  }>({
+    isOpen: false,
+    block: null,
+    initialAction: 'move',
+  });
+
   const canvasRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastLoadedPageIdRef = useRef<string | null>(null);
@@ -1195,6 +1225,50 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     });
     toast.success('Bloco duplicado!');
   }, [pageId, updatePage]);
+
+  // Open modal to move or copy block to another page or section
+  const handleOpenTransferModal = useCallback((block: CanvasBlock, action: 'move' | 'copy' = 'move') => {
+    setTransferModalState({
+      isOpen: true,
+      block,
+      initialAction: action,
+    });
+  }, []);
+
+  // Copy block to clipboard (localStorage + window clipboard)
+  const handleCopyBlockToClipboard = useCallback((block: CanvasBlock) => {
+    copyBlockToClipboard(block);
+  }, []);
+
+  // Paste block from clipboard into current page canvas
+  const handlePasteBlockFromClipboard = useCallback(() => {
+    const copiedBlock = getBlockFromClipboard();
+    if (!copiedBlock) {
+      toast.error('Nenhum bloco copiado na área de transferência.');
+      return;
+    }
+    const pos = getSpawnPosition(
+      typeof copiedBlock.width === 'number' ? copiedBlock.width : 440,
+      typeof copiedBlock.height === 'number' ? copiedBlock.height : 220
+    );
+    const newBlock: CanvasBlock = {
+      ...copiedBlock,
+      id: `${copiedBlock.type || 'block'}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      x: pos.x,
+      y: pos.y,
+    };
+    setBlocks((prev) => {
+      const updated = [...prev, newBlock];
+      const json = JSON.stringify(updated);
+      lastSavedContentRef.current = json;
+      Promise.resolve().then(() => {
+        updatePage(pageId, { conteudo: json });
+      });
+      return updated;
+    });
+    setSelectedBlockId(newBlock.id);
+    toast.success(`Bloco "${getBlockSummary(newBlock)}" colado na página!`);
+  }, [pageId, updatePage, blocks]);
 
   // Helper to calculate spawn position avoiding overlapping on top of existing notes
   const getSpawnPosition = (blockWidth = 440, blockHeight = 220) => {
@@ -1709,6 +1783,14 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   <LinkIcon size={14} className="text-indigo-500" />
                   <span>Inserir Link Cadastrado</span>
                 </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={handlePasteBlockFromClipboard}
+                  className="text-xs cursor-pointer gap-2 py-1.5 font-medium text-indigo-600 dark:text-indigo-400"
+                >
+                  <Copy size={14} />
+                  <span>Colar Bloco Copiado</span>
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
 
@@ -1819,6 +1901,11 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   <Network size={14} className="text-amber-600" />
                   <span>Draw.io</span>
                 </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handlePasteBlockFromClipboard} className="text-xs cursor-pointer gap-2 py-1.5 font-medium text-indigo-600 dark:text-indigo-400">
+                  <Copy size={14} />
+                  <span>Colar Bloco Copiado</span>
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
 
@@ -1866,6 +1953,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   removeBlock={removeBlock}
                   isSelected={selectedBlockId === block.id}
                   setSelectedId={setSelectedBlockId}
+                  onMoveOrCopy={handleOpenTransferModal}
+                  onDuplicate={duplicateBlock}
+                  onCopyClipboard={handleCopyBlockToClipboard}
                 />
               );
             }
@@ -1879,6 +1969,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   removeBlock={removeBlock}
                   isSelected={selectedBlockId === block.id}
                   setSelectedId={setSelectedBlockId}
+                  onMoveOrCopy={handleOpenTransferModal}
+                  onDuplicate={duplicateBlock}
+                  onCopyClipboard={handleCopyBlockToClipboard}
                 />
               );
             }
@@ -1892,6 +1985,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   removeBlock={removeBlock}
                   isSelected={selectedBlockId === block.id}
                   setSelectedId={setSelectedBlockId}
+                  onMoveOrCopy={handleOpenTransferModal}
+                  onDuplicate={duplicateBlock}
+                  onCopyClipboard={handleCopyBlockToClipboard}
                 />
               );
             }
@@ -1905,6 +2001,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   removeBlock={removeBlock}
                   isSelected={selectedBlockId === block.id}
                   setSelectedId={setSelectedBlockId}
+                  onMoveOrCopy={handleOpenTransferModal}
+                  onDuplicate={duplicateBlock}
+                  onCopyClipboard={handleCopyBlockToClipboard}
                 />
               );
             }
@@ -1920,6 +2019,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   setSelectedId={setSelectedBlockId}
                   bringToFront={bringBlockToFront}
                   sendToBack={sendBlockToBack}
+                  onMoveOrCopy={handleOpenTransferModal}
+                  onDuplicate={duplicateBlock}
+                  onCopyClipboard={handleCopyBlockToClipboard}
                 />
               );
             }
@@ -1935,6 +2037,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   setSelectedId={setSelectedBlockId}
                   bringToFront={bringBlockToFront}
                   sendToBack={sendBlockToBack}
+                  onMoveOrCopy={handleOpenTransferModal}
+                  onDuplicate={duplicateBlock}
+                  onCopyClipboard={handleCopyBlockToClipboard}
                 />
               );
             }
@@ -1950,6 +2055,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                 isSelected={selectedBlockId === block.id}
                 setSelectedId={setSelectedBlockId}
                 onOpenAiAssistant={handleOpenAiAssistant}
+                onMoveOrCopy={handleOpenTransferModal}
+                onDuplicate={duplicateBlock}
+                onCopyClipboard={handleCopyBlockToClipboard}
               />
             );
           })}
@@ -2018,6 +2126,22 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
         open={isSettingsModalOpen}
         onOpenChange={setIsSettingsModalOpen}
       />
+
+      {/* Move / Copy Block Modal (Mover ou copiar bloco para outra página/seção) */}
+      {transferModalState.block && (
+        <MoveOrCopyBlockModal
+          isOpen={transferModalState.isOpen}
+          onClose={() => setTransferModalState({ isOpen: false, block: null, initialAction: 'move' })}
+          sourcePageId={page.id}
+          sourceSectionId={page.secao_id}
+          block={transferModalState.block}
+          initialAction={transferModalState.initialAction}
+          onBlockMoved={(blockId) => {
+            // Remove block locally if moved
+            removeBlock(blockId);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import {
   Save, Sparkles, CheckCircle2, RefreshCw, Info, ChevronDown, ChevronUp,
   Tag, Compass
 } from 'lucide-react';
+import { BlockActionMenu } from '@/components/notes/dev/BlockActionMenu';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   DropdownMenu,
@@ -86,6 +87,9 @@ interface ScriptBlockProps {
   removeBlock: (id: string) => void;
   isSelected: boolean;
   setSelectedId: (id: string | null) => void;
+  onMoveOrCopy?: (block: CanvasBlock, action?: 'move' | 'copy') => void;
+  onDuplicate?: (blockId: string) => void;
+  onCopyClipboard?: (block: CanvasBlock) => void;
 }
 
 export function ScriptBlock({
@@ -94,6 +98,9 @@ export function ScriptBlock({
   removeBlock,
   isSelected,
   setSelectedId,
+  onMoveOrCopy,
+  onDuplicate,
+  onCopyClipboard,
 }: ScriptBlockProps) {
   const [localCode, setLocalCode] = useState<string>(block.code || '');
   const [localTitle, setLocalTitle] = useState<string>(block.title || '');
@@ -559,6 +566,19 @@ export function ScriptBlock({
             >
               <Download size={13} />
             </button>
+
+            {/* Move / Copy / Duplicate / Remove Block Action Menu */}
+            <BlockActionMenu
+              block={block}
+              onMoveOrCopy={onMoveOrCopy}
+              onDuplicate={onDuplicate}
+              onCopyClipboard={onCopyClipboard}
+              onRemove={removeBlock}
+              showMoveButtonDirectly={false}
+              triggerClassName={`p-1 rounded transition-colors ${
+                isDark ? 'text-slate-400 hover:bg-slate-800 hover:text-slate-200' : 'text-slate-600 hover:bg-slate-200'
+              }`}
+            />
 
             {/* Delete Button */}
             <button

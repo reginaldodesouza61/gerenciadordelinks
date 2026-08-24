@@ -16,6 +16,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { toast } from 'sonner';
 import { generatePassword } from '@/lib/utils/passwordUtils';
 import { isFieldEncrypted, decryptSecretItem, cleanSecretDisplay } from '@/lib/encryption';
+import { BlockActionMenu } from '@/components/notes/dev/BlockActionMenu';
 
 const SECRET_TYPES: { id: SecretType; label: string; icon: React.ElementType; color: string }[] = [
   { id: 'password', label: 'Senha (Usuário & Senha)', icon: Lock, color: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800' },
@@ -46,6 +47,9 @@ interface SecretVaultBlockProps {
   removeBlock: (id: string) => void;
   isSelected: boolean;
   setSelectedId: (id: string | null) => void;
+  onMoveOrCopy?: (block: CanvasBlock, action?: 'move' | 'copy') => void;
+  onDuplicate?: (blockId: string) => void;
+  onCopyClipboard?: (block: CanvasBlock) => void;
 }
 
 export function SecretVaultBlock({
@@ -54,6 +58,9 @@ export function SecretVaultBlock({
   removeBlock,
   isSelected,
   setSelectedId,
+  onMoveOrCopy,
+  onDuplicate,
+  onCopyClipboard,
 }: SecretVaultBlockProps) {
   const [revealedIds, setRevealedIds] = useState<Record<string, boolean>>({});
   const [copiedActionMap, setCopiedActionMap] = useState<Record<string, string>>({});
@@ -737,6 +744,16 @@ export function SecretVaultBlock({
                 <Plus size={12} />
                 <span>Adicionar</span>
               </Button>
+
+              {/* Move / Copy / Duplicate / Remove Block Action Menu */}
+              <BlockActionMenu
+                block={block}
+                onMoveOrCopy={onMoveOrCopy}
+                onDuplicate={onDuplicate}
+                onCopyClipboard={onCopyClipboard}
+                onRemove={removeBlock}
+                showMoveButtonDirectly={true}
+              />
 
               {/* Remove Block Button */}
               <button

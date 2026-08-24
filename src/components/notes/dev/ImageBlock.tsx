@@ -5,6 +5,7 @@ import {
   GripHorizontal, Trash2, Maximize2, Download, Copy, 
   Camera, Check, ZoomIn, X
 } from 'lucide-react';
+import { BlockActionMenu } from '@/components/notes/dev/BlockActionMenu';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
@@ -15,6 +16,9 @@ interface ImageBlockProps {
   removeBlock: (id: string) => void;
   isSelected: boolean;
   setSelectedId: (id: string | null) => void;
+  onMoveOrCopy?: (block: CanvasBlock, action?: 'move' | 'copy') => void;
+  onDuplicate?: (blockId: string) => void;
+  onCopyClipboard?: (block: CanvasBlock) => void;
 }
 
 export function ImageBlock({
@@ -23,6 +27,9 @@ export function ImageBlock({
   removeBlock,
   isSelected,
   setSelectedId,
+  onMoveOrCopy,
+  onDuplicate,
+  onCopyClipboard,
 }: ImageBlockProps) {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -194,6 +201,16 @@ export function ImageBlock({
               >
                 <Download size={12} />
               </button>
+
+              {/* Move / Copy / Duplicate / Remove Block Action Menu */}
+              <BlockActionMenu
+                block={block}
+                onMoveOrCopy={onMoveOrCopy}
+                onDuplicate={onDuplicate}
+                onCopyClipboard={onCopyClipboard}
+                onRemove={removeBlock}
+                showMoveButtonDirectly={false}
+              />
 
               <button
                 type="button"

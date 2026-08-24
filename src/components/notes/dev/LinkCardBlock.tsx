@@ -6,6 +6,7 @@ import {
   Link as LinkIcon, ExternalLink, Copy, Check, Trash2, GripHorizontal, 
   Globe, Key, Shield, Folder
 } from 'lucide-react';
+import { BlockActionMenu } from '@/components/notes/dev/BlockActionMenu';
 import { toast } from 'sonner';
 
 interface LinkCardBlockProps {
@@ -14,6 +15,9 @@ interface LinkCardBlockProps {
   removeBlock: (id: string) => void;
   isSelected: boolean;
   setSelectedId: (id: string | null) => void;
+  onMoveOrCopy?: (block: CanvasBlock, action?: 'move' | 'copy') => void;
+  onDuplicate?: (blockId: string) => void;
+  onCopyClipboard?: (block: CanvasBlock) => void;
 }
 
 export function LinkCardBlock({
@@ -22,6 +26,9 @@ export function LinkCardBlock({
   removeBlock,
   isSelected,
   setSelectedId,
+  onMoveOrCopy,
+  onDuplicate,
+  onCopyClipboard,
 }: LinkCardBlockProps) {
   const { links, categorias, subcategorias, getCredencialByLinkId } = useLinkStore();
   const [copied, setCopied] = useState(false);
@@ -164,6 +171,16 @@ export function LinkCardBlock({
             >
               <ExternalLink size={13} />
             </a>
+
+            {/* Move / Copy / Duplicate / Remove Block Action Menu */}
+            <BlockActionMenu
+              block={block}
+              onMoveOrCopy={onMoveOrCopy}
+              onDuplicate={onDuplicate}
+              onCopyClipboard={onCopyClipboard}
+              onRemove={removeBlock}
+              showMoveButtonDirectly={false}
+            />
 
             <button
               type="button"

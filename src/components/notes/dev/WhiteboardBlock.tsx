@@ -37,6 +37,7 @@ import {
   ArrowUpToLine,
   ArrowDownToLine
 } from 'lucide-react';
+import { BlockActionMenu } from '@/components/notes/dev/BlockActionMenu';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -52,6 +53,9 @@ interface WhiteboardBlockProps {
   setSelectedId?: (id: string | null) => void;
   bringToFront?: (id: string) => void;
   sendToBack?: (id: string) => void;
+  onMoveOrCopy?: (block: CanvasBlock, action?: 'move' | 'copy') => void;
+  onDuplicate?: (blockId: string) => void;
+  onCopyClipboard?: (block: CanvasBlock) => void;
 }
 
 type ToolType = 
@@ -134,6 +138,9 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
   setSelectedId,
   bringToFront,
   sendToBack,
+  onMoveOrCopy,
+  onDuplicate,
+  onCopyClipboard,
 }) => {
   const elements = block.elements || [];
   const title = block.drawingTitle || 'Quadro de Diagramas & Fluxos';
@@ -1491,6 +1498,18 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
             >
               <Maximize2 size={13} />
             </Button>
+
+            {/* Move / Copy / Duplicate / Remove Block Action Menu */}
+            <BlockActionMenu
+              block={block}
+              onMoveOrCopy={onMoveOrCopy}
+              onDuplicate={onDuplicate}
+              onCopyClipboard={onCopyClipboard}
+              onRemove={removeBlock}
+              showMoveButtonDirectly={false}
+              triggerClassName="h-6 w-6 p-0 flex items-center justify-center text-slate-500 hover:text-slate-800 dark:text-zinc-400 rounded hover:bg-slate-200/60 dark:hover:bg-zinc-700"
+            />
+
             <Button
               size="icon"
               variant="ghost"

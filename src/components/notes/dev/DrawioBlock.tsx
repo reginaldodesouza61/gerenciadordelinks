@@ -26,6 +26,7 @@ import {
   Check,
   Eye
 } from 'lucide-react';
+import { BlockActionMenu } from '@/components/notes/dev/BlockActionMenu';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -39,6 +40,9 @@ interface DrawioBlockProps {
   setSelectedId?: (id: string | null) => void;
   bringToFront?: (id: string) => void;
   sendToBack?: (id: string) => void;
+  onMoveOrCopy?: (block: CanvasBlock, action?: 'move' | 'copy') => void;
+  onDuplicate?: (blockId: string) => void;
+  onCopyClipboard?: (block: CanvasBlock) => void;
 }
 
 // Starter Diagram Templates in Draw.io mxGraph XML format
@@ -79,6 +83,9 @@ export function DrawioBlock({
   setSelectedId,
   bringToFront,
   sendToBack,
+  onMoveOrCopy,
+  onDuplicate,
+  onCopyClipboard,
 }: DrawioBlockProps) {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -485,6 +492,17 @@ export function DrawioBlock({
                 <Edit3 size={12} />
                 <span>Editar</span>
               </Button>
+
+              {/* Move / Copy / Duplicate / Remove Block Action Menu */}
+              <BlockActionMenu
+                block={block}
+                onMoveOrCopy={onMoveOrCopy}
+                onDuplicate={onDuplicate}
+                onCopyClipboard={onCopyClipboard}
+                onRemove={removeBlock}
+                showMoveButtonDirectly={false}
+                triggerClassName="h-7 w-7 p-0 flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 rounded hover:bg-slate-200/60 dark:hover:bg-zinc-700"
+              />
 
               {/* Remove Block */}
               <Button
