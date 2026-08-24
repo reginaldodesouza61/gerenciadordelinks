@@ -37,6 +37,7 @@ import { InsertLinkModal } from './dev/InsertLinkModal';
 import { RelatedLinksDrawer } from './dev/RelatedLinksDrawer';
 import { AiAssistantModal } from './AiAssistantModal';
 import { ScreenCropModal } from './ScreenCropModal';
+import { InsertImageToTextBlockModal } from './dev/InsertImageToTextBlockModal';
 import { SettingsModal } from '@/components/settings/SettingsModal';
 import { captureScreen, fileToDataUrl } from '@/lib/screenCapture';
 import { copyBlockToClipboard, getBlockFromClipboard, getBlockSummary } from '@/lib/utils/blockClipboard';
@@ -44,6 +45,7 @@ import { toast } from 'sonner';
 
 import { EditorContent, useEditor, Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
+import Image from '@tiptap/extension-image';
 import { TextStyle } from '@tiptap/extension-text-style';
 import { Color } from '@tiptap/extension-color';
 import { FontFamily } from '@tiptap/extension-font-family';
@@ -169,9 +171,13 @@ function isBlockEmpty(block: CanvasBlock): boolean {
 function GlobalToolbar({ 
   editor, 
   onOpenAi,
+  onCaptureScreen,
+  onUploadImage,
 }: { 
   editor: Editor | null; 
   onOpenAi?: () => void;
+  onCaptureScreen?: () => void;
+  onUploadImage?: () => void;
 }) {
   if (!editor) {
     return null;
@@ -416,6 +422,61 @@ function GlobalToolbar({
             </Popover>
           )}
 
+          <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
+
+          {/* Insert Image directly inside active editor */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 gap-1 text-xs text-slate-700 dark:text-zinc-300 hover:text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-950/40"
+                title="Inserir imagem ou print dentro do bloco de anotações"
+              >
+                <ImageIcon size={14} className="text-sky-500" />
+                <span className="hidden sm:inline text-[11px] font-medium">Inserir Imagem</span>
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-52 p-1 bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 shadow-xl" align="start">
+              <div className="space-y-0.5">
+                {onCaptureScreen && (
+                  <button
+                    type="button"
+                    onClick={() => onCaptureScreen()}
+                    className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center gap-2 text-slate-700 dark:text-zinc-200 transition-colors"
+                  >
+                    <Camera size={14} className="text-sky-500 shrink-0" />
+                    <span>Capturar Print de Tela</span>
+                  </button>
+                )}
+                {onUploadImage && (
+                  <button
+                    type="button"
+                    onClick={() => onUploadImage()}
+                    className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center gap-2 text-slate-700 dark:text-zinc-200 transition-colors"
+                  >
+                    <ImageIcon size={14} className="text-emerald-500 shrink-0" />
+                    <span>Carregar Arquivo do PC</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = prompt('Digite o link da imagem (URL):');
+                    if (url) {
+                      editor.chain().focus().setImage({ src: url }).run();
+                      toast.success('Imagem inserida no bloco!');
+                    }
+                  }}
+                  className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center gap-2 text-slate-700 dark:text-zinc-200 transition-colors"
+                >
+                  <LinkIcon size={14} className="text-indigo-500 shrink-0" />
+                  <span>Inserir por Link (URL)</span>
+                </button>
+              </div>
+            </PopoverContent>
+          </Popover>
+
           {/* Gemini AI Assistant Button */}
           {onOpenAi && (
             <>
@@ -462,6 +523,7 @@ function TextBlock({
   onCopyClipboard?: (block: CanvasBlock) => void;
 }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const inlineFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const handleCloseMenu = () => setContextMenu(null);
@@ -476,6 +538,13 @@ function TextBlock({
   const editor = useEditor({
     extensions: [
       StarterKit,
+      Image.configure({
+        inline: false,
+        allowBase64: true,
+        HTMLAttributes: {
+          class: 'rounded-lg max-w-full my-2 border border-slate-200 dark:border-zinc-700 shadow-sm',
+        },
+      }),
       TextStyle,
       Color,
       FontFamily,
@@ -503,6 +572,40 @@ function TextBlock({
         }
         return false;
       },
+      handlePaste: (_view, event) => {
+        const items = event.clipboardData?.items;
+        if (!items) return false;
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].type.startsWith('image/')) {
+            const file = items[i].getAsFile();
+            if (file) {
+              event.preventDefault();
+              fileToDataUrl(file).then(({ dataUrl }) => {
+                editor?.chain().focus().setImage({ src: dataUrl, alt: 'Imagem colada' }).run();
+                toast.success('Imagem inserida no bloco de anotações!');
+              });
+              return true;
+            }
+          }
+        }
+        return false;
+      },
+      handleDrop: (_view, event) => {
+        const files = event.dataTransfer?.files;
+        if (!files || files.length === 0) return false;
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          if (file.type.startsWith('image/')) {
+            event.preventDefault();
+            fileToDataUrl(file).then(({ dataUrl }) => {
+              editor?.chain().focus().setImage({ src: dataUrl, alt: file.name }).run();
+              toast.success('Imagem adicionada ao bloco de anotações!');
+            });
+            return true;
+          }
+        }
+        return false;
+      },
     },
     content: block.content,
     onUpdate: ({ editor: ed }) => {
@@ -513,6 +616,19 @@ function TextBlock({
       setSelectedId(block.id);
     },
   });
+
+  const handleInlineImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const { dataUrl } = await fileToDataUrl(file);
+      editor?.chain().focus().setImage({ src: dataUrl, alt: file.name }).run();
+      toast.success('Imagem inserida no bloco de anotações!');
+    } catch {
+      toast.error('Erro ao carregar imagem.');
+    }
+    if (e.target) e.target.value = '';
+  };
 
   useEffect(() => {
     if (isSelected && editor && !editor.isFocused) {
@@ -612,6 +728,27 @@ function TextBlock({
             </div>
 
             <div className="flex items-center gap-1">
+              {/* Insert Image directly inside this text block */}
+              <button
+                type="button"
+                className="text-slate-500 hover:text-sky-600 dark:text-zinc-400 dark:hover:text-sky-400 p-0.5 px-1.5 rounded hover:bg-slate-200 dark:hover:bg-zinc-700 flex items-center gap-1 text-[10px] font-medium transition-colors cursor-pointer"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  inlineFileInputRef.current?.click();
+                }}
+                title="Inserir imagem do PC neste bloco de anotações"
+              >
+                <ImageIcon size={11} className="text-sky-500" />
+                <span className="hidden sm:inline">Imagem</span>
+              </button>
+              <input
+                ref={inlineFileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleInlineImageFileChange}
+              />
+
               {/* AI Assistant Button directly on the box */}
               {onOpenAiAssistant && (
                 <button
@@ -944,6 +1081,15 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     isOpen: false,
     block: null,
     initialAction: 'move',
+  });
+
+  // Move or Copy Image into Text Block Modal State
+  const [insertImageToTextBlockModal, setInsertImageToTextBlockModal] = useState<{
+    isOpen: boolean;
+    imageBlock: CanvasBlock | null;
+  }>({
+    isOpen: false,
+    imageBlock: null,
   });
 
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -1519,6 +1665,110 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     updatePage(pageId, { conteudo: json });
   }, [blocks, pageId, purgeAndSave, updatePage]);
 
+  // Convert standalone ImageBlock into a rich TextBlock with the image embedded + editable text
+  const handleConvertImageBlockToTextBlock = useCallback((imageBlockId: string) => {
+    setBlocks((prev) => {
+      const updated = prev.map((b) => {
+        if (b.id === imageBlockId && b.type === 'image') {
+          const title = b.imageTitle || 'Captura de Tela';
+          const url = b.imageUrl || '';
+          const caption = b.imageCaption || '';
+          const notes = b.imageNotes || '';
+
+          let html = `<p><strong>${title}</strong></p><p><img src="${url}" alt="${title.replace(/"/g, '&quot;')}" class="rounded-lg max-w-full my-2" /></p>`;
+          if (caption) {
+            html += `<p><em>${caption}</em></p>`;
+          }
+          if (notes) {
+            html += `<p>${notes.replace(/\n/g, '<br/>')}</p>`;
+          } else {
+            html += `<p>✍️ <em>Adicione seus comentários e anotações aqui...</em></p>`;
+          }
+
+          return {
+            ...b,
+            type: 'text' as const,
+            content: html,
+            width: Math.max(typeof b.width === 'number' ? b.width : 480, 500),
+            height: 'auto',
+          };
+        }
+        return b;
+      });
+
+      const json = JSON.stringify(updated);
+      lastSavedContentRef.current = json;
+      updatePage(pageId, { conteudo: json });
+      return updated;
+    });
+    setSelectedBlockId(imageBlockId);
+    toast.success('Imagem convertida para bloco de anotações com texto!');
+  }, [pageId, updatePage]);
+
+  // Insert image HTML into an existing TextBlock on canvas (start or end)
+  const handleInsertImageIntoExistingTextBlock = useCallback((
+    targetBlockId: string,
+    imageHtml: string,
+    position: 'start' | 'end',
+    removeOriginalImageBlock: boolean
+  ) => {
+    setBlocks((prev) => {
+      let updated = prev.map((b) => {
+        if (b.id === targetBlockId) {
+          const currentContent = b.content || '<p></p>';
+          const newContent = position === 'start'
+            ? `${imageHtml}${currentContent}`
+            : `${currentContent}${imageHtml}`;
+          return {
+            ...b,
+            content: newContent,
+            width: Math.max(typeof b.width === 'number' ? b.width : 440, 500),
+          };
+        }
+        return b;
+      });
+
+      if (removeOriginalImageBlock && insertImageToTextBlockModal.imageBlock) {
+        updated = updated.filter((b) => b.id !== insertImageToTextBlockModal.imageBlock!.id);
+      }
+
+      const json = JSON.stringify(updated);
+      lastSavedContentRef.current = json;
+      updatePage(pageId, { conteudo: json });
+      return updated;
+    });
+    setSelectedBlockId(targetBlockId);
+  }, [insertImageToTextBlockModal.imageBlock, pageId, updatePage]);
+
+  // Create a new TextBlock with the image HTML embedded
+  const handleCreateNewTextBlockWithImage = useCallback((
+    imageHtml: string,
+    removeOriginalImageBlock: boolean
+  ) => {
+    const pos = getSpawnPosition(520, 260);
+    const newBlock: CanvasBlock = {
+      id: `text_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      x: pos.x,
+      y: pos.y,
+      width: 520,
+      height: 'auto',
+      type: 'text',
+      content: `${imageHtml}<p>✍️ <em>Adicione comentários...</em></p>`,
+    };
+
+    setBlocks((prev) => {
+      let updated = [...prev, newBlock];
+      if (removeOriginalImageBlock && insertImageToTextBlockModal.imageBlock) {
+        updated = updated.filter((b) => b.id !== insertImageToTextBlockModal.imageBlock!.id);
+      }
+      const json = JSON.stringify(updated);
+      lastSavedContentRef.current = json;
+      updatePage(pageId, { conteudo: json });
+      return updated;
+    });
+    setSelectedBlockId(newBlock.id);
+  }, [getSpawnPosition, insertImageToTextBlockModal.imageBlock, pageId, updatePage]);
+
   // Handle direct screen capture
   const handleCaptureScreen = async () => {
     try {
@@ -1542,6 +1792,12 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     if (!file) return;
     try {
       const { dataUrl, width, height } = await fileToDataUrl(file);
+      // If an active text editor is focused, insert directly into that editor
+      if (activeEditor && activeEditor.isFocused) {
+        activeEditor.chain().focus().setImage({ src: dataUrl, alt: file.name }).run();
+        toast.success('Imagem inserida no bloco de anotações!');
+        return;
+      }
       const cleanName = file.name.replace(/\.[^/.]+$/, '');
       insertImageBlock(dataUrl, width, height, cleanName);
       toast.success('Imagem carregada na anotação!');
@@ -1580,7 +1836,12 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
   // Global paste handler to detect pasted images (Ctrl+V / PrintScreen paste)
   useEffect(() => {
     const handlePaste = async (e: ClipboardEvent) => {
-      // Check if clipboard has image items
+      // Check if target is inside an input or textarea
+      const target = e.target as HTMLElement | null;
+      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA') {
+        return;
+      }
+
       const items = e.clipboardData?.items;
       if (!items) return;
 
@@ -1591,6 +1852,36 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
             e.preventDefault();
             try {
               const { dataUrl, width, height } = await fileToDataUrl(file);
+              
+              // If active editor is focused, insert into editor
+              if (activeEditor && activeEditor.isFocused) {
+                activeEditor.chain().focus().setImage({ src: dataUrl, alt: 'Print Colado' }).run();
+                toast.success('Imagem colada no bloco de anotações!');
+                return;
+              }
+
+              // If a text block is selected, insert image directly into that text block
+              if (selectedBlockId) {
+                const selBlock = blocks.find((b) => b.id === selectedBlockId);
+                if (selBlock && (!selBlock.type || selBlock.type === 'text')) {
+                  const imgHtml = `<p><img src="${dataUrl}" alt="Print Colado" class="rounded-lg max-w-full my-2" /></p><p></p>`;
+                  setBlocks((prev) => {
+                    const updated = prev.map((b) => {
+                      if (b.id === selectedBlockId) {
+                        return { ...b, content: `${b.content || '<p></p>'}${imgHtml}` };
+                      }
+                      return b;
+                    });
+                    const json = JSON.stringify(updated);
+                    lastSavedContentRef.current = json;
+                    updatePage(pageId, { conteudo: json });
+                    return updated;
+                  });
+                  toast.success('Imagem colada no bloco de anotações!');
+                  return;
+                }
+              }
+
               insertImageBlock(dataUrl, width, height, 'Print Colado');
               toast.success('Print de tela colado na anotação!');
             } catch (err) {
@@ -1605,7 +1896,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
 
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [insertImageBlock]);
+  }, [activeEditor, blocks, insertImageBlock, pageId, selectedBlockId, updatePage]);
 
   const handleCanvasClick = (e: React.MouseEvent) => {
     if (e.target === canvasRef.current) {
@@ -1926,6 +2217,8 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
       <GlobalToolbar 
         editor={activeEditor} 
         onOpenAi={() => handleOpenAiAssistant()} 
+        onCaptureScreen={handleCaptureScreen}
+        onUploadImage={() => fileInputRef.current?.click()}
       />
 
       {/* Canvas Area */}
@@ -2004,6 +2297,8 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   onMoveOrCopy={handleOpenTransferModal}
                   onDuplicate={duplicateBlock}
                   onCopyClipboard={handleCopyBlockToClipboard}
+                  onConvertToTextBlock={handleConvertImageBlockToTextBlock}
+                  onOpenInsertToTextBlockModal={(blk) => setInsertImageToTextBlockModal({ isOpen: true, imageBlock: blk })}
                 />
               );
             }
@@ -2116,6 +2411,31 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
         onOpenChange={setIsCropModalOpen}
         rawImageData={capturedRawImage}
         onConfirmCrop={(croppedUrl, width, height) => {
+          if (activeEditor && activeEditor.isFocused) {
+            activeEditor.chain().focus().setImage({ src: croppedUrl, alt: 'Recorte de Tela' }).run();
+            toast.success('Recorte inserido no bloco de anotações!');
+            return;
+          }
+          if (selectedBlockId) {
+            const selBlock = blocks.find((b) => b.id === selectedBlockId);
+            if (selBlock && (!selBlock.type || selBlock.type === 'text')) {
+              const imgHtml = `<p><img src="${croppedUrl}" alt="Recorte de Tela" class="rounded-lg max-w-full my-2" /></p><p></p>`;
+              setBlocks((prev) => {
+                const updated = prev.map((b) => {
+                  if (b.id === selectedBlockId) {
+                    return { ...b, content: `${b.content || '<p></p>'}${imgHtml}` };
+                  }
+                  return b;
+                });
+                const json = JSON.stringify(updated);
+                lastSavedContentRef.current = json;
+                updatePage(pageId, { conteudo: json });
+                return updated;
+              });
+              toast.success('Recorte adicionado ao bloco de anotações selecionado!');
+              return;
+            }
+          }
           insertImageBlock(croppedUrl, width, height, 'Recorte de Tela');
           toast.success('Recorte de tela adicionado à anotação!');
         }}
@@ -2140,6 +2460,19 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
             // Remove block locally if moved
             removeBlock(blockId);
           }}
+        />
+      )}
+
+      {/* Insert / Merge Image into Text Block Modal */}
+      {insertImageToTextBlockModal.imageBlock && (
+        <InsertImageToTextBlockModal
+          isOpen={insertImageToTextBlockModal.isOpen}
+          onClose={() => setInsertImageToTextBlockModal({ isOpen: false, imageBlock: null })}
+          imageBlock={insertImageToTextBlockModal.imageBlock}
+          blocks={blocks}
+          onConvertToTextBlock={handleConvertImageBlockToTextBlock}
+          onInsertIntoExistingTextBlock={handleInsertImageIntoExistingTextBlock}
+          onCreateNewTextBlockWithImage={handleCreateNewTextBlockWithImage}
         />
       )}
     </div>

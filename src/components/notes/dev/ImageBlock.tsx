@@ -3,7 +3,8 @@ import { Rnd } from 'react-rnd';
 import { CanvasBlock } from '@/types/notes';
 import { 
   GripHorizontal, Trash2, Maximize2, Download, Copy, 
-  Camera, Check, ZoomIn, X
+  Camera, Check, ZoomIn, Type, MessageSquare, 
+  ChevronDown, ChevronUp, Sparkles, ArrowRightLeft, Plus
 } from 'lucide-react';
 import { BlockActionMenu } from '@/components/notes/dev/BlockActionMenu';
 import { Button } from '@/components/ui/button';
@@ -19,6 +20,8 @@ interface ImageBlockProps {
   onMoveOrCopy?: (block: CanvasBlock, action?: 'move' | 'copy') => void;
   onDuplicate?: (blockId: string) => void;
   onCopyClipboard?: (block: CanvasBlock) => void;
+  onConvertToTextBlock?: (blockId: string) => void;
+  onOpenInsertToTextBlockModal?: (block: CanvasBlock) => void;
 }
 
 export function ImageBlock({
@@ -30,13 +33,17 @@ export function ImageBlock({
   onMoveOrCopy,
   onDuplicate,
   onCopyClipboard,
+  onConvertToTextBlock,
+  onOpenInsertToTextBlockModal,
 }: ImageBlockProps) {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showNotesPanel, setShowNotesPanel] = useState(!!block.imageNotes);
 
   const title = block.imageTitle || 'Captura de Tela';
   const imageUrl = block.imageUrl || '';
   const dateStr = block.capturedAt || '';
+  const notes = block.imageNotes || '';
 
   const handleCopyImage = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -85,12 +92,35 @@ export function ImageBlock({
     }
   };
 
+  const handleDirectConvertToTextBlock = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onConvertToTextBlock) {
+      onConvertToTextBlock(block.id);
+    } else {
+      let html = `<p><strong>${title}</strong></p><p><img src="${imageUrl}" alt="${title}" class="rounded-lg max-w-full my-2" /></p>`;
+      if (block.imageCaption) {
+        html += `<p><em>${block.imageCaption}</em></p>`;
+      }
+      if (notes) {
+        html += `<p>${notes.replace(/\n/g, '<br/>')}</p>`;
+      } else {
+        html += `<p>✍️ <em>Adicione seus comentários e anotações aqui...</em></p>`;
+      }
+      updateBlock(block.id, {
+        type: 'text',
+        content: html,
+        width: Math.max(typeof block.width === 'number' ? block.width : 480, 500),
+      });
+      toast.success('Convertido para bloco de anotações com texto!');
+    }
+  };
+
   return (
     <>
       <Rnd
         size={{
           width: typeof block.width === 'number' ? block.width : parseInt(String(block.width), 10) || 480,
-          height: typeof block.height === 'number' ? block.height : parseInt(String(block.height), 10) || 320,
+          height: typeof block.height === 'number' ? block.height : parseInt(String(block.height), 10) || 340,
         }}
         position={{
           x: block.x,
@@ -168,12 +198,43 @@ export function ImageBlock({
             </div>
 
             {/* Action buttons */}
-            <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-              {dateStr && (
-                <span className="hidden sm:inline text-[10px] text-slate-400 dark:text-zinc-500 mr-1.5">
-                  {dateStr}
-                </span>
+            <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+              {/* Quick convert to rich text block button */}
+              <button
+                type="button"
+                onClick={handleDirectConvertToTextBlock}
+                className="px-1.5 py-0.5 rounded text-[11px] font-medium bg-indigo-50 hover:bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:hover:bg-indigo-900 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800 flex items-center gap-1 transition-colors"
+                title="Transformar em Bloco de Anotações com Texto (Permite escrever comentários, tabelas e notas)"
+              >
+                <Type size={12} className="text-indigo-600 dark:text-indigo-400" />
+                <span className="hidden sm:inline">Virar Anotação</span>
+              </button>
+
+              {/* Move or merge into existing text block */}
+              {onOpenInsertToTextBlockModal && (
+                <button
+                  type="button"
+                  onClick={() => onOpenInsertToTextBlockModal(block)}
+                  className="p-1 rounded text-slate-500 hover:text-indigo-600 dark:text-zinc-400 dark:hover:text-indigo-400 hover:bg-slate-200/70 dark:hover:bg-zinc-700 transition-colors"
+                  title="Inserir / Mover imagem para dentro de outro bloco de texto..."
+                >
+                  <ArrowRightLeft size={12} />
+                </button>
               )}
+
+              {/* Toggle Notes / Comments */}
+              <button
+                type="button"
+                onClick={() => setShowNotesPanel((prev) => !prev)}
+                className={`p-1 rounded transition-colors ${
+                  showNotesPanel || notes
+                    ? 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60'
+                    : 'text-slate-500 hover:text-indigo-600 dark:text-zinc-400 hover:bg-slate-200/70 dark:hover:bg-zinc-700'
+                }`}
+                title={showNotesPanel ? 'Ocultar comentários' : 'Adicionar / ver comentários e anotações'}
+              >
+                <MessageSquare size={12} />
+              </button>
 
               <button
                 type="button"
@@ -225,7 +286,7 @@ export function ImageBlock({
 
           {/* Image Display Body */}
           <div 
-            className="flex-1 w-full h-full relative overflow-hidden bg-slate-950/5 dark:bg-black/40 flex items-center justify-center cursor-pointer group/img"
+            className="flex-1 w-full min-h-[120px] relative overflow-hidden bg-slate-950/5 dark:bg-black/40 flex items-center justify-center cursor-pointer group/img"
             onClick={() => setIsPreviewOpen(true)}
           >
             {imageUrl ? (
@@ -253,17 +314,60 @@ export function ImageBlock({
             )}
           </div>
 
+          {/* Inline Multi-Line Comments & Notes Section (if toggled or has notes) */}
+          {showNotesPanel && (
+            <div
+              className="p-2 bg-slate-50/95 dark:bg-zinc-800/90 border-t border-slate-200 dark:border-zinc-700/80 shrink-0 space-y-1.5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400 flex items-center gap-1">
+                  <MessageSquare size={11} className="text-indigo-500" />
+                  <span>Comentários & Anotações</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleDirectConvertToTextBlock}
+                  className="text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline font-semibold flex items-center gap-0.5"
+                  title="Converter para editor de texto com suporte a tabelas, negrito, listas e IA"
+                >
+                  <Sparkles size={10} />
+                  <span>Editor Completo</span>
+                </button>
+              </div>
+
+              <textarea
+                className="w-full text-xs text-slate-800 dark:text-zinc-200 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-md p-1.5 outline-none resize-none focus:border-indigo-400 placeholder-slate-400"
+                rows={2}
+                value={notes}
+                onChange={(e) => updateBlock(block.id, { imageNotes: e.target.value })}
+                placeholder="Escreva anotações, instruções, contexto ou observações deste print..."
+              />
+            </div>
+          )}
+
           {/* Bottom optional caption input */}
           <div 
-            className="px-2.5 py-1 bg-white dark:bg-zinc-900 border-t border-slate-100 dark:border-zinc-800/80 shrink-0"
+            className="px-2.5 py-1 bg-white dark:bg-zinc-900 border-t border-slate-100 dark:border-zinc-800/80 shrink-0 flex items-center justify-between gap-2"
             onClick={(e) => e.stopPropagation()}
           >
             <input
               className="w-full text-[11px] text-slate-500 dark:text-zinc-400 bg-transparent border-none outline-none placeholder-slate-300 dark:placeholder-zinc-600 focus:text-slate-800 dark:focus:text-zinc-200"
               value={block.imageCaption || ''}
               onChange={(e) => updateBlock(block.id, { imageCaption: e.target.value })}
-              placeholder="Adicionar nota ou legenda para este print..."
+              placeholder="Adicionar legenda rápida..."
             />
+
+            {!showNotesPanel && !notes && (
+              <button
+                type="button"
+                onClick={() => setShowNotesPanel(true)}
+                className="text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline shrink-0 font-medium flex items-center gap-0.5"
+              >
+                <Plus size={11} />
+                <span>Comentar</span>
+              </button>
+            )}
           </div>
         </div>
       </Rnd>
@@ -285,6 +389,16 @@ export function ImageBlock({
             </div>
 
             <div className="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleDirectConvertToTextBlock}
+                className="h-7 px-2 text-xs bg-indigo-600/80 hover:bg-indigo-600 text-white gap-1.5"
+              >
+                <Type size={13} />
+                <span>Converter em Bloco de Texto</span>
+              </Button>
+
               <Button
                 size="sm"
                 variant="ghost"
@@ -317,10 +431,20 @@ export function ImageBlock({
             )}
           </div>
 
-          {block.imageCaption && (
-            <div className="px-4 py-2.5 bg-zinc-950/80 border-t border-zinc-800/80 text-xs text-zinc-300">
-              <span className="font-semibold text-zinc-400 mr-1.5">Legenda:</span>
-              {block.imageCaption}
+          {(block.imageCaption || notes) && (
+            <div className="px-4 py-2.5 bg-zinc-950/80 border-t border-zinc-800/80 text-xs text-zinc-300 space-y-1">
+              {block.imageCaption && (
+                <div>
+                  <span className="font-semibold text-zinc-400 mr-1.5">Legenda:</span>
+                  {block.imageCaption}
+                </div>
+              )}
+              {notes && (
+                <div>
+                  <span className="font-semibold text-zinc-400 mr-1.5">Comentários:</span>
+                  {notes}
+                </div>
+              )}
             </div>
           )}
         </DialogContent>
@@ -328,3 +452,4 @@ export function ImageBlock({
     </>
   );
 }
+

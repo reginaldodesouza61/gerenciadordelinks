@@ -181,6 +181,7 @@ export interface CanvasBlock {
   imageUrl?: string;
   imageTitle?: string;
   imageCaption?: string;
+  imageNotes?: string;
   capturedAt?: string;
 
   // For 'whiteboard' block (Excalidraw-like drawing canvas & process diagrams)
