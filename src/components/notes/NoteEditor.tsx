@@ -12,7 +12,7 @@ import {
   Highlighter, Palette, TableProperties, Plus, ChevronRight, Combine,
   Code2, ShieldCheck, Link as LinkIcon, Type, Terminal, KeyRound, Sparkles, Wand2,
   Camera, Image as ImageIcon, Upload, Download, Copy, ChevronDown, Undo2, Redo2, PanelLeftOpen,
-  Shapes, Pencil, Search, Network, Workflow, Maximize2, Minimize2, ChevronUp, PlusCircle, Layers, Clock
+  Shapes, Pencil, Search, Network, Workflow, Maximize2, Minimize2, ChevronUp, PlusCircle, Layers, Clock, Globe
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -46,6 +46,7 @@ import { toast } from 'sonner';
 import { EditorContent, useEditor, Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
+import TiptapLink from '@tiptap/extension-link';
 import { TextStyle } from '@tiptap/extension-text-style';
 import { Color } from '@tiptap/extension-color';
 import { FontFamily } from '@tiptap/extension-font-family';
@@ -168,16 +169,192 @@ function isBlockEmpty(block: CanvasBlock): boolean {
   return text.length === 0;
 }
 
+function LinkToolbarPopover({ 
+  editor, 
+  onOpenInsertLinkModal 
+}: { 
+  editor: Editor; 
+  onOpenInsertLinkModal?: (tab?: 'registered' | 'custom') => void;
+}) {
+  const [url, setUrl] = useState('');
+  const [text, setText] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+
+  const isLinkActive = editor.isActive('link');
+  const currentHref = (editor.getAttributes('link').href as string) || '';
+
+  useEffect(() => {
+    if (isOpen) {
+      if (isLinkActive) {
+        setUrl(currentHref);
+      } else {
+        setUrl('');
+      }
+      const { from, to } = editor.state.selection;
+      const selectedText = editor.state.doc.textBetween(from, to, ' ');
+      setText(selectedText);
+    }
+  }, [isOpen, isLinkActive, currentHref, editor]);
+
+  const handleApplyLink = () => {
+    if (!url.trim()) {
+      editor.chain().focus().unsetLink().run();
+      setIsOpen(false);
+      return;
+    }
+
+    let href = url.trim();
+    if (!/^https?:\/\//i.test(href) && !href.startsWith('mailto:') && !href.startsWith('tel:')) {
+      href = 'https://' + href;
+    }
+
+    const { from, to } = editor.state.selection;
+    if (from === to && text.trim()) {
+      // No text was selected, insert formatted anchor
+      editor.chain().focus().insertContent(`<a href="${href}" target="_blank" rel="noopener noreferrer">${text.trim()}</a> `).run();
+    } else {
+      // Text was selected, set link on it
+      editor.chain().focus().extendMarkRange('link').setLink({ href }).run();
+    }
+
+    toast.success('Link aplicado no texto!');
+    setIsOpen(false);
+  };
+
+  const handleRemoveLink = () => {
+    editor.chain().focus().unsetLink().run();
+    toast.success('Link removido do texto.');
+    setIsOpen(false);
+  };
+
+  return (
+    <Popover open={isOpen} onOpenChange={setIsOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={`h-7 px-2 gap-1 text-xs transition-colors ${
+            isLinkActive 
+              ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 font-semibold border border-indigo-200 dark:border-indigo-800' 
+              : 'text-slate-700 dark:text-zinc-300 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40'
+          }`}
+          title="Inserir ou editar hiperlink (URL avulsa ou externa) no texto"
+        >
+          <LinkIcon size={14} className={isLinkActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500'} />
+          <span className="hidden sm:inline text-[11px] font-medium">{isLinkActive ? 'Editar Link' : 'Link'}</span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-3 bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 shadow-xl space-y-2.5" align="start">
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-1.5">
+          <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
+            <LinkIcon size={13} className="text-indigo-600 dark:text-indigo-400" />
+            {isLinkActive ? 'Editar Link' : 'Inserir Link no Texto'}
+          </span>
+          {isLinkActive && (
+            <a
+              href={currentHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 font-medium"
+              title="Testar e abrir link em nova aba"
+            >
+              <ExternalLink size={12} />
+              Abrir
+            </a>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <div>
+            <label className="text-[11px] font-semibold text-slate-600 dark:text-zinc-300">
+              Endereço URL (link avulso ou externo):
+            </label>
+            <input
+              type="text"
+              placeholder="https://exemplo.com.br"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleApplyLink();
+                }
+              }}
+              className="mt-0.5 w-full text-xs font-mono px-2 py-1 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded outline-none focus:ring-1 focus:ring-indigo-500"
+              autoFocus
+            />
+          </div>
+
+          {!isLinkActive && (
+            <div>
+              <label className="text-[11px] font-semibold text-slate-600 dark:text-zinc-300">
+                Texto de exibição (opcional):
+              </label>
+              <input
+                type="text"
+                placeholder="Clique aqui para acessar"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleApplyLink();
+                  }
+                }}
+                className="mt-0.5 w-full text-xs px-2 py-1 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="pt-1.5 flex items-center justify-between gap-1 border-t border-slate-100 dark:border-zinc-800">
+          {isLinkActive ? (
+            <button
+              type="button"
+              onClick={handleRemoveLink}
+              className="text-[11px] text-rose-600 hover:text-rose-700 dark:text-rose-400 font-medium px-1.5 py-0.5 rounded hover:bg-rose-50 dark:hover:bg-rose-950/50"
+            >
+              Remover Link
+            </button>
+          ) : onOpenInsertLinkModal ? (
+            <button
+              type="button"
+              onClick={() => {
+                setIsOpen(false);
+                onOpenInsertLinkModal('registered');
+              }}
+              className="text-[11px] text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 font-medium flex items-center gap-1 hover:underline"
+            >
+              <Globe size={12} />
+              Buscar Cadastrados
+            </button>
+          ) : <div />}
+
+          <Button
+            size="sm"
+            onClick={handleApplyLink}
+            className="h-6 text-xs px-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium ml-auto"
+          >
+            {isLinkActive ? 'Salvar' : 'Inserir'}
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function GlobalToolbar({ 
   editor, 
   onOpenAi,
   onCaptureScreen,
   onUploadImage,
+  onOpenInsertLinkModal,
 }: { 
   editor: Editor | null; 
   onOpenAi?: () => void;
   onCaptureScreen?: () => void;
   onUploadImage?: () => void;
+  onOpenInsertLinkModal?: (tab?: 'registered' | 'custom') => void;
 }) {
   if (!editor) {
     return null;
@@ -241,6 +418,9 @@ function GlobalToolbar({
           <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('underline') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleUnderline().run(); }} title="Sublinhado (Ctrl+U)"><UnderlineIcon size={14} /></Button>
           <Button variant="ghost" size="icon" className={`h-7 w-7 ${editor.isActive('strike') ? 'bg-slate-200 dark:bg-zinc-700 text-slate-900 dark:text-white' : ''}`} onPointerDown={(e) => { e.preventDefault(); editor.chain().focus().toggleStrike().run(); }} title="Tachado"><Strikethrough size={14} /></Button>
           
+          {/* Insert or Edit Hyperlink */}
+          <LinkToolbarPopover editor={editor} onOpenInsertLinkModal={onOpenInsertLinkModal} />
+
           <div className="w-px h-5 bg-slate-300 dark:bg-zinc-700 mx-0.5" />
 
           {/* Text Color Picker Popover */}
@@ -507,6 +687,7 @@ function TextBlock({
   isSelected,
   setSelectedId,
   onOpenAiAssistant,
+  onOpenInsertLink,
   onMoveOrCopy,
   onDuplicate,
   onCopyClipboard,
@@ -518,6 +699,7 @@ function TextBlock({
   isSelected: boolean;
   setSelectedId: (id: string | null) => void;
   onOpenAiAssistant?: (blockId: string, editor: Editor | null) => void;
+  onOpenInsertLink?: (blockId: string) => void;
   onMoveOrCopy?: (block: CanvasBlock, action?: 'move' | 'copy') => void;
   onDuplicate?: (blockId: string) => void;
   onCopyClipboard?: (block: CanvasBlock) => void;
@@ -543,6 +725,16 @@ function TextBlock({
         allowBase64: true,
         HTMLAttributes: {
           class: 'rounded-lg max-w-full my-2 border border-slate-200 dark:border-zinc-700 shadow-sm',
+        },
+      }),
+      TiptapLink.configure({
+        openOnClick: true,
+        autolink: true,
+        defaultProtocol: 'https',
+        HTMLAttributes: {
+          target: '_blank',
+          rel: 'noopener noreferrer',
+          class: 'text-indigo-600 dark:text-indigo-400 underline font-medium hover:text-indigo-800 dark:hover:text-indigo-300 transition-colors cursor-pointer',
         },
       }),
       TextStyle,
@@ -728,6 +920,22 @@ function TextBlock({
             </div>
 
             <div className="flex items-center gap-1">
+              {/* Insert Link button */}
+              {onOpenInsertLink && (
+                <button
+                  type="button"
+                  className="text-slate-500 hover:text-indigo-600 dark:text-zinc-400 dark:hover:text-indigo-400 p-0.5 px-1.5 rounded hover:bg-slate-200 dark:hover:bg-zinc-700 flex items-center gap-1 text-[10px] font-medium transition-colors cursor-pointer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenInsertLink(block.id);
+                  }}
+                  title="Inserir link (cadastrado ou avulso) neste bloco de anotações"
+                >
+                  <LinkIcon size={11} className="text-indigo-500" />
+                  <span className="hidden sm:inline">Link</span>
+                </button>
+              )}
+
               {/* Insert Image directly inside this text block */}
               <button
                 type="button"
@@ -1058,6 +1266,8 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
   const [activeEditor, setActiveEditor] = useState<Editor | null>(null);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [isInsertLinkOpen, setIsInsertLinkOpen] = useState(false);
+  const [insertLinkTab, setInsertLinkTab] = useState<'registered' | 'custom'>('registered');
+  const [insertLinkTargetBlockId, setInsertLinkTargetBlockId] = useState<string | null>(null);
   const [isRelatedLinksOpen, setIsRelatedLinksOpen] = useState(false);
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
 
@@ -1605,8 +1815,15 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     toast.success('Bloco de diagrama Draw.io adicionado!');
   }, [blocks, purgeAndSave, pageId, updatePage]);
 
-  // Add an existing link card block
-  const handleInsertLinkCard = useCallback((link: Link) => {
+  // Open insert link modal targeting custom tab or block
+  const handleOpenInsertLink = useCallback((tab: 'registered' | 'custom' = 'registered', targetBlockId?: string) => {
+    setInsertLinkTab(tab);
+    setInsertLinkTargetBlockId(targetBlockId || selectedBlockId || null);
+    setIsInsertLinkOpen(true);
+  }, [selectedBlockId]);
+
+  // Add a link card block (registered or custom/unregistered)
+  const handleInsertLinkCard = useCallback((link: Link | { id?: string; titulo: string; url: string; descricao?: string; categoria?: string }) => {
     const cleaned = purgeAndSave(blocks, null);
     const pos = getSpawnPosition();
     const newBlock: CanvasBlock = {
@@ -1620,6 +1837,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
       linkTitle: link.titulo,
       linkUrl: link.url,
       linkDescription: link.descricao,
+      linkCategory: 'categoria' in link ? link.categoria : undefined,
     };
     const nextBlocks = [...cleaned, newBlock];
     setBlocks(nextBlocks);
@@ -1627,7 +1845,98 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     const json = JSON.stringify(nextBlocks);
     lastSavedContentRef.current = json;
     updatePage(pageId, { conteudo: json });
-  }, [blocks, purgeAndSave, pageId, updatePage]);
+    toast.success('Card de link adicionado ao quadro!');
+  }, [blocks, purgeAndSave, pageId, updatePage, getSpawnPosition]);
+
+  // Insert an inline link into a text block or new block
+  const handleInsertInlineLink = useCallback((url: string, title?: string, targetBlockId?: string) => {
+    const displayTitle = title || url;
+    let safeUrl = url.trim();
+    if (!/^https?:\/\//i.test(safeUrl) && !safeUrl.startsWith('mailto:') && !safeUrl.startsWith('tel:')) {
+      safeUrl = 'https://' + safeUrl;
+    }
+    const linkHtml = `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${displayTitle}</a> `;
+
+    // If new block requested
+    if (targetBlockId === 'new_block') {
+      const pos = getSpawnPosition(460, 200);
+      const newBlock: CanvasBlock = {
+        id: `text_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        x: pos.x,
+        y: pos.y,
+        width: 480,
+        height: 'auto',
+        type: 'text',
+        content: `<p>🔗 ${linkHtml}</p><p></p>`,
+      };
+      setBlocks((prev) => {
+        const updated = [...prev, newBlock];
+        const json = JSON.stringify(updated);
+        lastSavedContentRef.current = json;
+        updatePage(pageId, { conteudo: json });
+        return updated;
+      });
+      setSelectedBlockId(newBlock.id);
+      toast.success('Novo bloco de anotação com o link criado!');
+      return;
+    }
+
+    // If active editor is focused and target matches
+    if (activeEditor && activeEditor.isFocused && (!targetBlockId || targetBlockId === selectedBlockId)) {
+      const { from, to } = activeEditor.state.selection;
+      if (from !== to) {
+        activeEditor.chain().focus().extendMarkRange('link').setLink({ href: safeUrl }).run();
+      } else {
+        activeEditor.chain().focus().insertContent(linkHtml).run();
+      }
+      toast.success('Link inserido no texto!');
+      return;
+    }
+
+    // Target specific block ID or selected block ID
+    const targetId = targetBlockId || selectedBlockId;
+    if (targetId) {
+      setBlocks((prev) => {
+        const updated = prev.map((b) => {
+          if (b.id === targetId) {
+            const prevContent = b.content || '<p></p>';
+            return {
+              ...b,
+              content: `${prevContent}<p>🔗 ${linkHtml}</p>`,
+            };
+          }
+          return b;
+        });
+        const json = JSON.stringify(updated);
+        lastSavedContentRef.current = json;
+        updatePage(pageId, { conteudo: json });
+        return updated;
+      });
+      setSelectedBlockId(targetId);
+      toast.success('Link inserido no bloco de anotações selecionado!');
+    } else {
+      // Create new text block
+      const pos = getSpawnPosition(460, 200);
+      const newBlock: CanvasBlock = {
+        id: `text_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        x: pos.x,
+        y: pos.y,
+        width: 480,
+        height: 'auto',
+        type: 'text',
+        content: `<p>🔗 ${linkHtml}</p><p></p>`,
+      };
+      setBlocks((prev) => {
+        const updated = [...prev, newBlock];
+        const json = JSON.stringify(updated);
+        lastSavedContentRef.current = json;
+        updatePage(pageId, { conteudo: json });
+        return updated;
+      });
+      setSelectedBlockId(newBlock.id);
+      toast.success('Novo bloco de anotações com o link criado!');
+    }
+  }, [activeEditor, getSpawnPosition, pageId, selectedBlockId, updatePage]);
 
   // Insert Image / Screenshot Block helper
   const insertImageBlock = useCallback((
@@ -2068,11 +2377,18 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  onClick={() => setIsInsertLinkOpen(true)}
+                  onClick={() => handleOpenInsertLink('registered')}
                   className="text-xs cursor-pointer gap-2 py-1.5 font-medium"
                 >
                   <LinkIcon size={14} className="text-indigo-500" />
                   <span>Inserir Link Cadastrado</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => handleOpenInsertLink('custom')}
+                  className="text-xs cursor-pointer gap-2 py-1.5 font-medium"
+                >
+                  <Globe size={14} className="text-sky-500" />
+                  <span>Inserir Link Avulso / URL</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -2193,6 +2509,15 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   <span>Draw.io</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => handleOpenInsertLink('registered')} className="text-xs cursor-pointer gap-2 py-1.5 font-medium">
+                  <LinkIcon size={14} className="text-indigo-500" />
+                  <span>Link Cadastrado</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleOpenInsertLink('custom')} className="text-xs cursor-pointer gap-2 py-1.5 font-medium">
+                  <Globe size={14} className="text-sky-500" />
+                  <span>Link Avulso / URL</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handlePasteBlockFromClipboard} className="text-xs cursor-pointer gap-2 py-1.5 font-medium text-indigo-600 dark:text-indigo-400">
                   <Copy size={14} />
                   <span>Colar Bloco Copiado</span>
@@ -2219,6 +2544,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
         onOpenAi={() => handleOpenAiAssistant()} 
         onCaptureScreen={handleCaptureScreen}
         onUploadImage={() => fileInputRef.current?.click()}
+        onOpenInsertLinkModal={handleOpenInsertLink}
       />
 
       {/* Canvas Area */}
@@ -2350,6 +2676,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                 isSelected={selectedBlockId === block.id}
                 setSelectedId={setSelectedBlockId}
                 onOpenAiAssistant={handleOpenAiAssistant}
+                onOpenInsertLink={(bId) => handleOpenInsertLink('registered', bId)}
                 onMoveOrCopy={handleOpenTransferModal}
                 onDuplicate={duplicateBlock}
                 onCopyClipboard={handleCopyBlockToClipboard}
@@ -2369,12 +2696,16 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
         </div>
       </div>
 
-      {/* Insert Link Modal */}
+      {/* Insert Link Modal (Supports both registered library and custom/unregistered URLs) */}
       <InsertLinkModal
         isOpen={isInsertLinkOpen}
         onClose={() => setIsInsertLinkOpen(false)}
         pageId={page.id}
+        initialTab={insertLinkTab}
+        targetTextBlockId={insertLinkTargetBlockId}
+        allBlocks={blocks}
         onInsertCardBlock={handleInsertLinkCard}
+        onInsertInlineLink={handleInsertInlineLink}
       />
 
       {/* Related Links Drawer / Manager */}

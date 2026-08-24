@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { Rnd } from 'react-rnd';
 import { CanvasBlock } from '@/types/notes';
 import { useLinkStore } from '@/lib/store/linkStore';
+import { useAuthStore } from '@/lib/store/authStore';
 import { 
   Link as LinkIcon, ExternalLink, Copy, Check, Trash2, GripHorizontal, 
-  Globe, Key, Shield, Folder
+  Globe, Key, Folder, BookmarkPlus, Sparkles
 } from 'lucide-react';
 import { BlockActionMenu } from '@/components/notes/dev/BlockActionMenu';
 import { toast } from 'sonner';
@@ -30,13 +31,16 @@ export function LinkCardBlock({
   onDuplicate,
   onCopyClipboard,
 }: LinkCardBlockProps) {
-  const { links, categorias, subcategorias, getCredencialByLinkId } = useLinkStore();
+  const { user } = useAuthStore();
+  const { links, categorias, subcategorias, getCredencialByLinkId, addLink } = useLinkStore();
   const [copied, setCopied] = useState(false);
   const [copiedCred, setCopiedCred] = useState<'user' | 'pass' | null>(null);
+  const [isSavingToStore, setIsSavingToStore] = useState(false);
 
   // Match link from store if linkId is present, or use snapshot data
   const linkId = block.linkId;
   const storeLink = linkId ? links.find(l => l.id === linkId) : null;
+  const isCustomAvulso = !storeLink;
 
   const title = storeLink?.titulo || block.linkTitle || 'Link Relacionado';
   const url = storeLink?.url || block.linkUrl || 'https://';
@@ -48,13 +52,6 @@ export function LinkCardBlock({
   const subcategoryName = subcategoryId ? subcategorias.find(s => s.id === subcategoryId)?.nome : block.linkSubcategory;
 
   const credential = linkId ? getCredencialByLinkId(linkId) : undefined;
-
-  let hostname = '';
-  try {
-    hostname = new URL(url).hostname;
-  } catch {
-    hostname = url;
-  }
 
   const handleCopyUrl = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -77,6 +74,35 @@ export function LinkCardBlock({
       setTimeout(() => setCopiedCred(null), 2000);
     } catch {
       toast.error('Erro ao copiar credencial');
+    }
+  };
+
+  // Promote custom link to persistent link library
+  const handlePromoteToLibrary = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!user) {
+      toast.error('Faça login para salvar no gerenciador.');
+      return;
+    }
+    setIsSavingToStore(true);
+    try {
+      const newId = await addLink({
+        titulo: title,
+        url: url,
+        descricao: description || null,
+        categoria_id: null,
+        subcategoria_id: null,
+        user_id: user.id,
+        ordem: 0,
+        icone: null,
+      });
+      updateBlock(block.id, { linkId: newId });
+      toast.success(`Link "${title}" cadastrado no gerenciador de links!`);
+    } catch (err) {
+      console.error(err);
+      toast.error('Erro ao cadastrar link no gerenciador.');
+    } finally {
+      setIsSavingToStore(false);
     }
   };
 
@@ -140,18 +166,37 @@ export function LinkCardBlock({
               <GripHorizontal size={13} className="text-slate-400 dark:text-zinc-500" />
             </div>
 
-            {/* Category / Subcategory badge */}
-            {categoryName && (
+            {/* Category / Subcategory badge or Avulso badge */}
+            {categoryName ? (
               <span className="flex items-center gap-1 text-[10px] font-medium bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 px-1.5 py-0.2 rounded truncate">
                 <Folder size={10} />
                 {categoryName}
                 {subcategoryName && ` / ${subcategoryName}`}
               </span>
-            )}
+            ) : isCustomAvulso ? (
+              <span className="flex items-center gap-1 text-[10px] font-medium bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 px-1.5 py-0.2 rounded">
+                <Globe size={10} />
+                Link Avulso
+              </span>
+            ) : null}
           </div>
 
           {/* Action buttons */}
           <div className="flex items-center gap-1">
+            {/* Quick promote button if custom link */}
+            {isCustomAvulso && (
+              <button
+                type="button"
+                onClick={handlePromoteToLibrary}
+                disabled={isSavingToStore}
+                className="px-1.5 py-0.5 rounded text-[10px] font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 flex items-center gap-1 transition-colors border border-indigo-200 dark:border-indigo-800"
+                title="Cadastrar este link no gerenciador permanente de links"
+              >
+                <BookmarkPlus size={11} />
+                <span className="hidden sm:inline">Salvar Link</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={handleCopyUrl}
