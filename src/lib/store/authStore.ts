@@ -59,18 +59,15 @@ export const useAuthStore = create<AuthState>((set) => ({
           session,
         });
       } else {
-        // If not authenticated in preview, automatically enable workspace guest mode
-        const guest = createGuestUser();
-        localStorage.setItem(GUEST_STORAGE_KEY, 'true');
+        // Do not automatically sign in as guest; keep user as null so they can log in
         set({
-          user: guest,
+          user: null,
           session: null
         });
       }
     } catch (error) {
       console.error('Error initializing auth:', error);
-      const guest = createGuestUser();
-      set({ user: guest });
+      set({ user: null, session: null });
     } finally {
       set({ loading: false, initialized: true });
     }
@@ -157,6 +154,9 @@ export const useAuthStore = create<AuthState>((set) => ({
       await supabase.auth.signOut();
       set({ user: null, session: null });
       toast.success('Logout realizado com sucesso!');
+      
+      // Force page reload to clear all cached state from stores
+      window.location.href = '/';
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Erro ao fazer logout';
       toast.error(errorMessage);

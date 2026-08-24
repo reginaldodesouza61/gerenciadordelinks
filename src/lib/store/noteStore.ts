@@ -238,24 +238,52 @@ interface NoteState {
   setActivePageId: (id: string | null) => void;
 }
 
-// Initial state loaded synchronously from localStorage
-const initialSections = sortSectionsByStoredOrder(getCached<NoteSection[]>(CACHE_KEYS.SECTIONS, DEFAULT_SECTIONS));
-const initialPages = sortPagesByStoredOrder(getCached<NotePage[]>(CACHE_KEYS.PAGES, DEFAULT_PAGES));
-const initialActivePageId = getStoredActivePageId() || (initialPages.length > 0 ? initialPages[0].id : null);
-const initialActiveSectionId = getStoredActiveSectionId() || (initialSections.length > 0 ? initialSections[0].id : null);
+const getUserCacheKey = (userId: string, baseKey: string) => {
+  return `meuhub_user_${userId}_${baseKey}`;
+};
 
 export const useNoteStore = create<NoteState>((set, get) => ({
-  sections: initialSections,
-  pages: initialPages,
-  relations: getCached<NoteLinkRelation[]>(CACHE_KEYS.RELATIONS, []),
+  sections: DEFAULT_SECTIONS,
+  pages: DEFAULT_PAGES,
+  relations: [],
   deletedItems: getStoredTrash(),
-  activeSectionId: initialActiveSectionId,
-  activePageId: initialActivePageId,
+  activeSectionId: DEFAULT_SECTION_ID,
+  activePageId: DEFAULT_PAGE_ID,
   isLoading: false,
 
   fetchNotes: async (userId?: string) => {
     const targetUserId = userId || DEFAULT_USER_ID;
-    set({ isLoading: true });
+    
+    // Instantly load specific user cached pages/sections/relations
+    const sectionsKey = getUserCacheKey(targetUserId, 'note_sections');
+    const pagesKey = getUserCacheKey(targetUserId, 'note_pages');
+    const relationsKey = getUserCacheKey(targetUserId, 'note_relations');
+    
+    const cachedSections = getCached<NoteSection[]>(sectionsKey, targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : []);
+    const cachedPages = getCached<NotePage[]>(pagesKey, targetUserId === DEFAULT_USER_ID ? DEFAULT_PAGES : []);
+    const cachedRelations = getCached<NoteLinkRelation[]>(relationsKey, []);
+    
+    // Determine active page & section
+    const storedPageId = getStoredActivePageId();
+    const storedSectionId = getStoredActiveSectionId();
+
+    const targetPageId = storedPageId && cachedPages.some(p => p.id === storedPageId)
+      ? storedPageId
+      : (cachedPages.length > 0 ? cachedPages[0].id : null);
+      
+    const targetSectionId = storedSectionId && cachedSections.some(s => s.id === storedSectionId)
+      ? storedSectionId
+      : (cachedSections.length > 0 ? cachedSections[0].id : null);
+
+    set({
+      sections: cachedSections,
+      pages: cachedPages,
+      relations: cachedRelations,
+      activePageId: targetPageId,
+      activeSectionId: targetSectionId,
+      isLoading: true
+    });
+
     try {
       // Use a timeout race so database queries never hang indefinitely
       const queryPromise = Promise.all([
@@ -282,9 +310,8 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         if (rawSections.length > 0) {
           loadedSections = sortSectionsByStoredOrder(rawSections);
         } else {
-          // If Supabase returned empty, use cached or default sections
-          const cachedSections = getCached<NoteSection[]>(CACHE_KEYS.SECTIONS, DEFAULT_SECTIONS);
-          loadedSections = cachedSections.length > 0 ? cachedSections : DEFAULT_SECTIONS;
+          // If Supabase returned empty and we are guest/official, use cached or defaults
+          loadedSections = targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : [];
         }
 
         if (rawPagesData.length > 0) {
@@ -306,9 +333,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           }));
           loadedPages = sortPagesByStoredOrder(decryptedPages);
         } else {
-          // If Supabase returned empty, use cached or default pages
-          const cachedPages = getCached<NotePage[]>(CACHE_KEYS.PAGES, DEFAULT_PAGES);
-          loadedPages = cachedPages.length > 0 ? cachedPages : DEFAULT_PAGES;
+          loadedPages = targetUserId === DEFAULT_USER_ID ? DEFAULT_PAGES : [];
         }
 
         // Sanitize page section_id and parent_id
@@ -336,50 +361,44 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         });
 
         // Determine active page and section
-        const storedPageId = getStoredActivePageId();
-        const storedSectionId = getStoredActiveSectionId();
+        const storedPageIdCurrent = getStoredActivePageId();
+        const storedSectionIdCurrent = getStoredActiveSectionId();
 
-        let targetPageId: string | null = null;
-        let targetSectionId: string | null = null;
+        let finalPageId: string | null = null;
+        let finalSectionId: string | null = null;
 
-        if (storedPageId && sanitizedPages.some(p => p.id === storedPageId)) {
-          targetPageId = storedPageId;
-          const page = sanitizedPages.find(p => p.id === storedPageId);
-          targetSectionId = page?.section_id || null;
-        } else if (storedSectionId && loadedSections.some(s => s.id === storedSectionId)) {
-          targetSectionId = storedSectionId;
-          const firstPage = sanitizedPages.find(p => p.section_id === targetSectionId);
-          targetPageId = firstPage?.id || (sanitizedPages.length > 0 ? sanitizedPages[0].id : null);
+        if (storedPageIdCurrent && sanitizedPages.some(p => p.id === storedPageIdCurrent)) {
+          finalPageId = storedPageIdCurrent;
+          const page = sanitizedPages.find(p => p.id === storedPageIdCurrent);
+          finalSectionId = page?.section_id || null;
+        } else if (storedSectionIdCurrent && loadedSections.some(s => s.id === storedSectionIdCurrent)) {
+          finalSectionId = storedSectionIdCurrent;
+          const firstPage = sanitizedPages.find(p => p.section_id === finalSectionId);
+          finalPageId = firstPage?.id || (sanitizedPages.length > 0 ? sanitizedPages[0].id : null);
         } else if (loadedSections.length > 0) {
-          targetSectionId = loadedSections[0].id;
-          const firstPage = sanitizedPages.find(p => p.section_id === targetSectionId);
-          targetPageId = firstPage?.id || (sanitizedPages.length > 0 ? sanitizedPages[0].id : null);
+          finalSectionId = loadedSections[0].id;
+          const firstPage = sanitizedPages.find(p => p.section_id === finalSectionId);
+          finalPageId = firstPage?.id || (sanitizedPages.length > 0 ? sanitizedPages[0].id : null);
         }
 
-        if (targetPageId) saveActivePageId(targetPageId);
-        if (targetSectionId) saveActiveSectionId(targetSectionId);
+        if (finalPageId) saveActivePageId(finalPageId);
+        if (finalSectionId) saveActiveSectionId(finalSectionId);
 
-        setCached(CACHE_KEYS.SECTIONS, loadedSections);
-        setCached(CACHE_KEYS.PAGES, sanitizedPages);
-        if (relRes?.data) setCached(CACHE_KEYS.RELATIONS, relRes.data);
+        setCached(sectionsKey, loadedSections);
+        setCached(pagesKey, sanitizedPages);
+        if (relRes?.data) setCached(relationsKey, relRes.data);
 
         set({
           sections: loadedSections,
           pages: sanitizedPages,
           relations: relRes?.data || get().relations,
           deletedItems: getStoredTrash(),
-          activePageId: targetPageId,
-          activeSectionId: targetSectionId,
+          activePageId: finalPageId,
+          activeSectionId: finalSectionId,
         });
       }
     } catch (error) {
-      console.warn('Fetch notes network issue, using cached sections/pages:', error);
-      const cachedSections = getCached<NoteSection[]>(CACHE_KEYS.SECTIONS, DEFAULT_SECTIONS);
-      const cachedPages = getCached<NotePage[]>(CACHE_KEYS.PAGES, DEFAULT_PAGES);
-      set({
-        sections: cachedSections,
-        pages: cachedPages,
-      });
+      console.warn('Fetch notes network issue:', error);
     } finally {
       set({ isLoading: false });
     }
@@ -397,7 +416,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const currentSections = get().sections;
     const updatedSections = [...currentSections, newSection];
     saveSectionOrder(updatedSections.map(s => s.id));
-    setCached(CACHE_KEYS.SECTIONS, updatedSections);
+    setCached(getUserCacheKey(fallbackUserId, 'note_sections'), updatedSections);
 
     set({ sections: updatedSections });
     get().setActiveSectionId(newSection.id);
@@ -413,7 +432,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       if (!error && data) {
         // Update temporary ID with Supabase ID
         const syncedSections = get().sections.map(s => s.id === newSection.id ? data : s);
-        setCached(CACHE_KEYS.SECTIONS, syncedSections);
+        setCached(getUserCacheKey(fallbackUserId, 'note_sections'), syncedSections);
         set({ sections: syncedSections, activeSectionId: data.id });
       }
     } catch (e) {
@@ -422,8 +441,11 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   },
 
   updateSection: async (id, nome) => {
+    const section = get().sections.find(s => s.id === id);
+    const userId = section ? section.user_id : DEFAULT_USER_ID;
+
     const updated = get().sections.map(s => s.id === id ? { ...s, nome } : s);
-    setCached(CACHE_KEYS.SECTIONS, updated);
+    setCached(getUserCacheKey(userId, 'note_sections'), updated);
     set({ sections: updated });
 
     try {
@@ -438,6 +460,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const sectionToDelete = state.sections.find(s => s.id === id);
     if (!sectionToDelete) return;
 
+    const userId = sectionToDelete.user_id;
     const pagesToDelete = state.pages.filter(p => p.section_id === id);
 
     const trashItem: DeletedNoteItem = {
@@ -454,11 +477,11 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
     const remainingSections = state.sections.filter(s => s.id !== id);
     saveSectionOrder(remainingSections.map(s => s.id));
-    setCached(CACHE_KEYS.SECTIONS, remainingSections);
+    setCached(getUserCacheKey(userId, 'note_sections'), remainingSections);
 
     const remainingPages = state.pages.filter(p => p.section_id !== id);
     savePageOrder(remainingPages.map(p => p.id));
-    setCached(CACHE_KEYS.PAGES, remainingPages);
+    setCached(getUserCacheKey(userId, 'note_pages'), remainingPages);
 
     const isCurrentActiveSection = state.activeSectionId === id;
     const isCurrentActivePage = pagesToDelete.some(p => p.id === state.activePageId);
@@ -501,7 +524,8 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   reorderSections: (newSections: NoteSection[]) => {
     const ids = newSections.map(s => s.id);
     saveSectionOrder(ids);
-    setCached(CACHE_KEYS.SECTIONS, newSections);
+    const userId = newSections[0]?.user_id || DEFAULT_USER_ID;
+    setCached(getUserCacheKey(userId, 'note_sections'), newSections);
     set({ sections: newSections });
   },
 
@@ -519,7 +543,8 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
     const ids = newSections.map(s => s.id);
     saveSectionOrder(ids);
-    setCached(CACHE_KEYS.SECTIONS, newSections);
+    const userId = newSections[0]?.user_id || DEFAULT_USER_ID;
+    setCached(getUserCacheKey(userId, 'note_sections'), newSections);
     set({ sections: newSections });
   },
 
@@ -553,7 +578,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const currentPages = get().pages;
     const updatedPages = [...currentPages, newPage];
     savePageOrder(updatedPages.map(p => p.id));
-    setCached(CACHE_KEYS.PAGES, updatedPages);
+    setCached(getUserCacheKey(fallbackUserId, 'note_pages'), updatedPages);
 
     set({ pages: updatedPages, activePageId: newPage.id, activeSectionId: sectionId });
     toast.success('Página criada!');
@@ -567,7 +592,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
       if (!error && data) {
         const syncedPages = get().pages.map(p => p.id === newPage.id ? data : p);
-        setCached(CACHE_KEYS.PAGES, syncedPages);
+        setCached(getUserCacheKey(fallbackUserId, 'note_pages'), syncedPages);
         set({ pages: syncedPages, activePageId: data.id });
         return data;
       }
@@ -579,8 +604,11 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   },
 
   updatePage: async (id, updates) => {
+    const page = get().pages.find(p => p.id === id);
+    const userId = page ? page.user_id : DEFAULT_USER_ID;
+
     const updatedPages = get().pages.map(p => p.id === id ? { ...p, ...updates } : p);
-    setCached(CACHE_KEYS.PAGES, updatedPages);
+    setCached(getUserCacheKey(userId, 'note_pages'), updatedPages);
     set({ pages: updatedPages });
 
     try {
@@ -599,6 +627,8 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const state = get();
     const pageToDelete = state.pages.find(p => p.id === id);
     if (!pageToDelete) return;
+
+    const userId = pageToDelete.user_id;
 
     const getSubpages = (pageId: string): NotePage[] => {
       const children = state.pages.filter(p => p.parent_id === pageId);
@@ -625,7 +655,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
     const remainingPages = state.pages.filter(p => !allPagesToDelete.some(dp => dp.id === p.id));
     savePageOrder(remainingPages.map(p => p.id));
-    setCached(CACHE_KEYS.PAGES, remainingPages);
+    setCached(getUserCacheKey(userId, 'note_pages'), remainingPages);
 
     const isCurrentActivePage = state.activePageId === id || allPagesToDelete.some(dp => dp.id === state.activePageId);
     if (isCurrentActivePage) {

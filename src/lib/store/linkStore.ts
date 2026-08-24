@@ -56,6 +56,10 @@ function setCached<T>(key: string, data: T): void {
   }
 }
 
+const getUserCacheKey = (userId: string, baseKey: string) => {
+  return `meuhub_user_${userId}_${baseKey}`;
+};
+
 interface LinkState {
   links: Link[];
   categorias: Categoria[];
@@ -113,10 +117,10 @@ interface LinkState {
 }
 
 export const useLinkStore = create<LinkState>((set, get) => ({
-  links: getCached<Link[]>(CACHE_KEYS.LINKS, []),
-  categorias: getCached<Categoria[]>(CACHE_KEYS.CATEGORIAS, DEFAULT_CATEGORIES),
-  subcategorias: getCached<Subcategoria[]>(CACHE_KEYS.SUBCATEGORIAS, DEFAULT_SUBCATEGORIES),
-  credenciais: getCached<Record<string, Credencial>>(CACHE_KEYS.CREDENCIAIS, {}),
+  links: [],
+  categorias: DEFAULT_CATEGORIES,
+  subcategorias: DEFAULT_SUBCATEGORIES,
+  credenciais: {},
   loading: false,
   viewMode: (localStorage.getItem('meuhub_link_view_mode') as 'lista' | 'cartoes') || 'lista',
   searchQuery: '',
@@ -128,7 +132,9 @@ export const useLinkStore = create<LinkState>((set, get) => ({
   activeFilter: (localStorage.getItem('meuhub_active_filter') as 'all' | 'favorites' | 'recent') || 'all',
   
   fetchLinks: async (userId: string) => {
-    set({ loading: true });
+    const cacheKey = getUserCacheKey(userId, 'links');
+    const cached = getCached<Link[]>(cacheKey, []);
+    set({ links: cached, loading: true });
     
     try {
       const userIds = userId === 'c72212e7-2b6a-4da7-8745-01eb33414af4'
@@ -197,13 +203,9 @@ export const useLinkStore = create<LinkState>((set, get) => ({
       const uniqueLoadedLinks = Array.from(uniqueLinksMap.values());
 
       set({ links: uniqueLoadedLinks });
-      setCached(CACHE_KEYS.LINKS, uniqueLoadedLinks);
+      setCached(cacheKey, uniqueLoadedLinks);
     } catch (error) {
-      console.warn('Network issue fetching links, using cached/local links:', error);
-      const cached = getCached<Link[]>(CACHE_KEYS.LINKS, []);
-      if (cached.length > 0) {
-        set({ links: cached });
-      }
+      console.warn('Network issue fetching links:', error);
     } finally {
       set({ loading: false });
     }
@@ -277,7 +279,7 @@ export const useLinkStore = create<LinkState>((set, get) => ({
       // Optimistic update
       const updatedLinks = [newLink, ...get().links];
       set({ links: updatedLinks });
-      setCached(CACHE_KEYS.LINKS, updatedLinks);
+      setCached(getUserCacheKey(link.user_id, 'links'), updatedLinks);
       
       try {
         const { error } = await supabase
@@ -310,12 +312,17 @@ export const useLinkStore = create<LinkState>((set, get) => ({
         linkData.imagem_url = await get().getLinkPreview(linkData.url);
       }
       
+      const currentLink = get().links.find(link => link.id === id);
+      const userId = currentLink ? currentLink.user_id : '';
+
       const updatedLinks = get().links.map(link => 
         link.id === id ? { ...link, ...linkData } : link
       );
       
       set({ links: updatedLinks });
-      setCached(CACHE_KEYS.LINKS, updatedLinks);
+      if (userId) {
+        setCached(getUserCacheKey(userId, 'links'), updatedLinks);
+      }
       
       try {
         const dbUpdatePayload: Record<string, unknown> = { ...linkData };
@@ -345,9 +352,14 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     set({ loading: true });
     
     try {
+      const currentLink = get().links.find(link => link.id === id);
+      const userId = currentLink ? currentLink.user_id : '';
+
       const updatedLinks = get().links.filter(link => link.id !== id);
       set({ links: updatedLinks });
-      setCached(CACHE_KEYS.LINKS, updatedLinks);
+      if (userId) {
+        setCached(getUserCacheKey(userId, 'links'), updatedLinks);
+      }
 
       // Clean up favorites and recents
       const { favoriteIds, recentIds, credenciais } = get();
@@ -369,7 +381,9 @@ export const useLinkStore = create<LinkState>((set, get) => ({
         delete newCreds[id];
         delete newCreds[assocCred.id];
         set({ credenciais: newCreds });
-        setCached(CACHE_KEYS.CREDENCIAIS, newCreds);
+        if (userId) {
+          setCached(getUserCacheKey(userId, 'credenciais'), newCreds);
+        }
         
         try {
           await supabase.from('credenciais').delete().eq('link_id', id);
@@ -748,6 +762,10 @@ export const useLinkStore = create<LinkState>((set, get) => ({
   },
   
   fetchCredenciais: async (userId: string) => {
+    const cacheKey = getUserCacheKey(userId, 'credenciais');
+    const cached = getCached<Record<string, Credencial>>(cacheKey, {});
+    set({ credenciais: cached });
+
     try {
       const userIds = userId === 'c72212e7-2b6a-4da7-8745-01eb33414af4'
         ? ['c72212e7-2b6a-4da7-8745-01eb33414af4']
@@ -812,13 +830,9 @@ export const useLinkStore = create<LinkState>((set, get) => ({
       });
       
       set({ credenciais: credsMap });
-      setCached(CACHE_KEYS.CREDENCIAIS, credsMap);
+      setCached(cacheKey, credsMap);
     } catch (error) {
-      console.warn('Network issue fetching credenciais, using local/cached credenciais:', error);
-      const cached = getCached<Record<string, Credencial>>(CACHE_KEYS.CREDENCIAIS, {});
-      if (Object.keys(cached).length > 0) {
-        set({ credenciais: cached });
-      }
+      console.warn('Network issue fetching credenciais:', error);
     }
   },
   
@@ -855,7 +869,7 @@ export const useLinkStore = create<LinkState>((set, get) => ({
       };
       
       set({ credenciais: updatedCreds });
-      setCached(CACHE_KEYS.CREDENCIAIS, updatedCreds);
+      setCached(getUserCacheKey(credencial.user_id, 'credenciais'), updatedCreds);
 
       try {
         const { error } = await supabase
@@ -924,7 +938,7 @@ export const useLinkStore = create<LinkState>((set, get) => ({
       };
       
       set({ credenciais: updatedCreds });
-      setCached(CACHE_KEYS.CREDENCIAIS, updatedCreds);
+      setCached(getUserCacheKey(userId, 'credenciais'), updatedCreds);
 
       try {
         const encryptedData: Record<string, unknown> = {
@@ -970,6 +984,9 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     set({ loading: true });
     
     try {
+      const currentCredential = Object.values(get().credenciais).find(cred => cred.id === id);
+      const userId = currentCredential ? currentCredential.user_id : '';
+
       const newCredentials = { ...get().credenciais };
       Object.keys(newCredentials).forEach(linkId => {
         if (newCredentials[linkId].id === id) {
@@ -978,7 +995,9 @@ export const useLinkStore = create<LinkState>((set, get) => ({
       });
       
       set({ credenciais: newCredentials });
-      setCached(CACHE_KEYS.CREDENCIAIS, newCredentials);
+      if (userId) {
+        setCached(getUserCacheKey(userId, 'credenciais'), newCredentials);
+      }
 
       try {
         await supabase

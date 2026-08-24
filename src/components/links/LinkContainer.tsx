@@ -9,7 +9,7 @@ import { LinkForm } from './LinkForm';
 import { Link } from '@/types/supabase';
 
 export function LinkContainer() {
-  const { user } = useAuthStore();
+  const { user, initialized } = useAuthStore();
   const { 
     links, 
     categorias, 
@@ -53,9 +53,10 @@ export function LinkContainer() {
   }
   
   useEffect(() => {
+    if (!initialized) return;
     const userId = user?.id || 'c72212e7-2b6a-4da7-8745-01eb33414af4';
     fetchLinks(userId);
-  }, [user, fetchLinks]);
+  }, [user, initialized, fetchLinks]);
   
   const handleAddLink = () => {
     setEditingLink(null);

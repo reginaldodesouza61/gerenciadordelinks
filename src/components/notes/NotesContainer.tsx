@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button';
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'meuhub_notes_sidebar_collapsed';
 
 export function NotesContainer() {
-  const { user } = useAuthStore();
+  const { user, initialized } = useAuthStore();
   const { fetchNotes, activePageId, isLoading } = useNoteStore();
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
@@ -49,9 +49,10 @@ export function NotesContainer() {
   };
 
   useEffect(() => {
+    if (!initialized) return;
     const userId = user?.id || 'c72212e7-2b6a-4da7-8745-01eb33414af4';
     fetchNotes(userId);
-  }, [user, fetchNotes]);
+  }, [user, initialized, fetchNotes]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {

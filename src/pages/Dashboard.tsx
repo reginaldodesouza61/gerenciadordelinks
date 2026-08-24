@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils';
 
 export default function Dashboard() {
   const { fetchCategorias, fetchSubcategorias, fetchCredenciais } = useLinkStore();
-  const { user } = useAuthStore();
+  const { user, initialized } = useAuthStore();
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'links' | 'notes'>(() => {
     try {
@@ -34,6 +34,8 @@ export default function Dashboard() {
   };
   
   useEffect(() => {
+    if (!initialized) return;
+
     fetchCategorias();
     fetchSubcategorias();
     
@@ -53,7 +55,7 @@ export default function Dashboard() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [fetchCategorias, fetchSubcategorias, fetchCredenciais, user]);
+  }, [fetchCategorias, fetchSubcategorias, fetchCredenciais, user, initialized]);
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-zinc-950 text-foreground transition-colors duration-200">
