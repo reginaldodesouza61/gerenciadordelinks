@@ -254,12 +254,13 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   isLoading: false,
 
   fetchNotes: async (userId?: string) => {
+    const targetUserId = userId || DEFAULT_USER_ID;
     set({ isLoading: true });
     try {
       // Use a timeout race so database queries never hang indefinitely
       const queryPromise = Promise.all([
-        supabase.from('note_sections').select('*').order('created_at', { ascending: true }),
-        supabase.from('note_pages').select('*').order('created_at', { ascending: true }),
+        supabase.from('note_sections').select('*').eq('user_id', targetUserId).order('created_at', { ascending: true }),
+        supabase.from('note_pages').select('*').eq('user_id', targetUserId).order('created_at', { ascending: true }),
         supabase.from('note_link_relations').select('*')
       ]);
 

@@ -131,7 +131,9 @@ export const useLinkStore = create<LinkState>((set, get) => ({
     set({ loading: true });
     
     try {
-      const userIds = Array.from(new Set([userId, 'c72212e7-2b6a-4da7-8745-01eb33414af4']));
+      const userIds = userId === 'c72212e7-2b6a-4da7-8745-01eb33414af4'
+        ? ['c72212e7-2b6a-4da7-8745-01eb33414af4']
+        : [userId];
       const { data, error } = await supabase
         .from('links')
         .select('*')
@@ -747,7 +749,9 @@ export const useLinkStore = create<LinkState>((set, get) => ({
   
   fetchCredenciais: async (userId: string) => {
     try {
-      const userIds = Array.from(new Set([userId, 'c72212e7-2b6a-4da7-8745-01eb33414af4']));
+      const userIds = userId === 'c72212e7-2b6a-4da7-8745-01eb33414af4'
+        ? ['c72212e7-2b6a-4da7-8745-01eb33414af4']
+        : [userId];
       const { data, error } = await supabase
         .from('credenciais')
         .select('*')
