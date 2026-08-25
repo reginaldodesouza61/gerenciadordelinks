@@ -554,29 +554,20 @@ export function ExcalidrawBlock({
             </div>
           </div>
 
-          {/* Canvas Box Body */}
+          {/* Canvas Box Body - Pure White Canvas Board */}
           <div 
-            className="flex-1 w-full h-full relative overflow-hidden bg-slate-50/50 dark:bg-zinc-950 flex items-center justify-center"
+            className="flex-1 w-full h-full relative overflow-hidden bg-white flex items-center justify-center"
             onDoubleClick={() => setIsEditorOpen(true)}
           >
-            {/* Soft grid dots */}
-            <div 
-              className="absolute inset-0 opacity-30 dark:opacity-15 pointer-events-none"
-              style={{
-                backgroundImage: 'radial-gradient(circle, #6366f1 1px, transparent 1px)',
-                backgroundSize: '20px 20px',
-              }}
-            />
-
-            {/* Case A: SVG Preview is pre-rendered */}
+            {/* Case A: SVG Preview is pre-rendered on solid white board */}
             {previewSvg ? (
               <div 
-                className="w-full h-full p-4 flex items-center justify-center overflow-auto relative select-none"
+                className="w-full h-full p-4 flex items-center justify-center overflow-auto relative select-none bg-white"
                 style={{ cursor: 'pointer' }}
                 title="Clique duplo para desenhar no Excalidraw"
               >
                 <div 
-                  className="transition-transform duration-150 origin-center flex items-center justify-center"
+                  className="transition-transform duration-150 origin-center flex items-center justify-center bg-white"
                   style={{ transform: `scale(${zoomLevel})` }}
                   dangerouslySetInnerHTML={{ __html: previewSvg }}
                 />
@@ -590,14 +581,14 @@ export function ExcalidrawBlock({
               </div>
             ) : elementsJson && elementsJson !== '[]' ? (
               /* Case B: Has elements, but no SVG preview yet */
-              <div className="flex flex-col items-center justify-center p-6 text-center z-10">
-                <div className="w-12 h-12 rounded-2xl bg-indigo-100 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-3 shadow-inner">
+              <div className="flex flex-col items-center justify-center p-6 text-center z-10 bg-white">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-3 shadow-inner">
                   <Shapes size={24} />
                 </div>
-                <h4 className="text-sm font-semibold text-slate-800 dark:text-zinc-100 mb-1">
+                <h4 className="text-sm font-semibold text-slate-800 mb-1">
                   Quadro Excalidraw pronto para renderizar
                 </h4>
-                <p className="text-xs text-slate-500 dark:text-zinc-400 max-w-xs mb-4">
+                <p className="text-xs text-slate-500 max-w-xs mb-4">
                   Seus elementos estão guardados. Clique no botão de editar para abrir a tela cheia.
                 </p>
                 <Button
@@ -611,15 +602,15 @@ export function ExcalidrawBlock({
               </div>
             ) : (
               /* Case C: Totally blank new canvas block */
-              <div className="flex flex-col items-center justify-center p-6 text-center z-10 max-w-md">
-                <div className="w-12 h-12 rounded-2xl bg-indigo-100 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-3 shadow-inner">
+              <div className="flex flex-col items-center justify-center p-6 text-center z-10 max-w-md bg-white">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-3 shadow-inner">
                   <Shapes size={24} />
                 </div>
-                <h4 className="text-sm font-bold text-slate-800 dark:text-zinc-100 mb-1">
+                <h4 className="text-sm font-bold text-slate-800 mb-1">
                   Desenho com Excalidraw
                 </h4>
-                <p className="text-xs text-slate-500 dark:text-zinc-400 mb-4 leading-relaxed">
-                  Crie wireframes, diagramas estruturados, ideias de interfaces e croquis com a renomada lousa virtual do Excalidraw integrada no seu Hub.
+                <p className="text-xs text-slate-500 mb-4 leading-relaxed">
+                  Crie wireframes, diagramas estruturados, ideias de interfaces e croquis com a lousa virtual do Excalidraw em um quadro inteiramente branco.
                 </p>
 
                 <div className="flex flex-wrap items-center justify-center gap-2 mb-4">
@@ -633,7 +624,7 @@ export function ExcalidrawBlock({
                   </Button>
                 </div>
 
-                <div className="pt-3 border-t border-slate-200 dark:border-zinc-800 w-full">
+                <div className="pt-3 border-t border-slate-200 w-full">
                   <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-2">
                     Ou inicie com um modelo corporativo:
                   </span>
