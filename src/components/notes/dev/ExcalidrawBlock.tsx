@@ -55,11 +55,11 @@ const STARTER_TEMPLATES = {
     description: 'Processo lógico corporativo com raias, decisões e fluxos.',
     elements: [
       { id: 'el1', type: 'rectangle', x: 250, y: 100, width: 140, height: 50, strokeColor: '#1e3a8a', backgroundColor: '#dbeafe', strokeWidth: 2, roughness: 1, roundness: { type: 3 }, strokeStyle: 'solid', fillStyle: 'solid', text: 'Iniciar Processo' },
-      { id: 'el2', type: 'arrow', x: 320, y: 150, width: 0, height: 60, strokeColor: '#1e3a8a', strokeWidth: 2, roughness: 1, strokeStyle: 'solid' },
+      { id: 'el2', type: 'arrow', x: 320, y: 150, width: 0, height: 60, strokeColor: '#1e3a8a', strokeWidth: 2, roughness: 1, strokeStyle: 'solid', points: [[0, 0], [0, 60]] },
       { id: 'el3', type: 'diamond', x: 230, y: 210, width: 180, height: 100, strokeColor: '#b45309', backgroundColor: '#fef3c7', strokeWidth: 2, roughness: 1, strokeStyle: 'solid', fillStyle: 'solid', text: 'Token Ativo?' },
-      { id: 'el4', type: 'arrow', x: 410, y: 260, width: 80, height: 0, strokeColor: '#b45309', strokeWidth: 2, roughness: 1, strokeStyle: 'solid' },
+      { id: 'el4', type: 'arrow', x: 410, y: 260, width: 80, height: 0, strokeColor: '#b45309', strokeWidth: 2, roughness: 1, strokeStyle: 'solid', points: [[0, 0], [80, 0]] },
       { id: 'el5', type: 'rectangle', x: 490, y: 235, width: 150, height: 50, strokeColor: '#9f1239', backgroundColor: '#ffe4e6', strokeWidth: 2, roughness: 1, strokeStyle: 'solid', fillStyle: 'solid', text: 'Retornar 401\n(Acesso Negado)' },
-      { id: 'el6', type: 'arrow', x: 320, y: 310, width: 0, height: 60, strokeColor: '#1e3a8a', strokeWidth: 2, roughness: 1, strokeStyle: 'solid' },
+      { id: 'el6', type: 'arrow', x: 320, y: 310, width: 0, height: 60, strokeColor: '#1e3a8a', strokeWidth: 2, roughness: 1, strokeStyle: 'solid', points: [[0, 0], [0, 60]] },
       { id: 'el7', type: 'rectangle', x: 230, y: 370, width: 180, height: 60, strokeColor: '#065f46', backgroundColor: '#d1fae5', strokeWidth: 2, roughness: 1, strokeStyle: 'solid', fillStyle: 'solid', text: 'Processar Requisição\ne Salvar Log' }
     ]
   },
@@ -70,10 +70,10 @@ const STARTER_TEMPLATES = {
     elements: [
       { id: 'arch1', type: 'rectangle', x: 50, y: 150, width: 140, height: 80, strokeColor: '#4f46e5', backgroundColor: '#e0e7ff', strokeWidth: 2, roughness: 1, roundness: { type: 3 }, strokeStyle: 'solid', fillStyle: 'solid', text: 'Web Portal\n(React SPA)' },
       { id: 'arch2', type: 'rectangle', x: 50, y: 270, width: 140, height: 80, strokeColor: '#4f46e5', backgroundColor: '#e0e7ff', strokeWidth: 2, roughness: 1, roundness: { type: 3 }, strokeStyle: 'solid', fillStyle: 'solid', text: 'Mobile App\n(React Native)' },
-      { id: 'arch3', type: 'arrow', x: 190, y: 190, width: 100, height: 50, strokeColor: '#4f46e5', strokeWidth: 2, roughness: 1 },
-      { id: 'arch4', type: 'arrow', x: 190, y: 310, width: 100, height: -70, strokeColor: '#4f46e5', strokeWidth: 2, roughness: 1 },
+      { id: 'arch3', type: 'arrow', x: 190, y: 190, width: 100, height: 50, strokeColor: '#4f46e5', strokeWidth: 2, roughness: 1, points: [[0, 0], [100, 50]] },
+      { id: 'arch4', type: 'arrow', x: 190, y: 310, width: 100, height: -70, strokeColor: '#4f46e5', strokeWidth: 2, roughness: 1, points: [[0, 0], [100, -70]] },
       { id: 'arch5', type: 'rectangle', x: 290, y: 180, width: 160, height: 140, strokeColor: '#0891b2', backgroundColor: '#ecfeff', strokeWidth: 2, roughness: 1, roundness: { type: 3 }, strokeStyle: 'solid', fillStyle: 'solid', text: 'API Gateway / Auth\n(Reverse Proxy & JWT)' },
-      { id: 'arch6', type: 'arrow', x: 450, y: 250, width: 90, height: 0, strokeColor: '#0891b2', strokeWidth: 2, roughness: 1 },
+      { id: 'arch6', type: 'arrow', x: 450, y: 250, width: 90, height: 0, strokeColor: '#0891b2', strokeWidth: 2, roughness: 1, points: [[0, 0], [90, 0]] },
       { id: 'arch7', type: 'rectangle', x: 540, y: 190, width: 150, height: 110, strokeColor: '#16a34a', backgroundColor: '#dcfce7', strokeWidth: 2, roughness: 1, roundness: { type: 3 }, strokeStyle: 'solid', fillStyle: 'solid', text: 'Core backend API\n(Node.js / Express)' }
     ]
   },
@@ -83,10 +83,32 @@ const STARTER_TEMPLATES = {
     description: 'Entidades relacionais com chaves primárias e relacionamentos.',
     elements: [
       { id: 'db1', type: 'rectangle', x: 100, y: 120, width: 180, height: 120, strokeColor: '#0f172a', backgroundColor: '#f1f5f9', strokeWidth: 2, roughness: 1, strokeStyle: 'solid', fillStyle: 'solid', text: 'ORGANIZATIONS\n------------------\n+ id: UUID [PK]\n+ name: VARCHAR\n+ created_at: TIMESTZ' },
-      { id: 'db2', type: 'arrow', x: 280, y: 180, width: 140, height: 0, strokeColor: '#64748b', strokeWidth: 2, roughness: 1, strokeStyle: 'dashed' },
+      { id: 'db2', type: 'arrow', x: 280, y: 180, width: 140, height: 0, strokeColor: '#64748b', strokeWidth: 2, roughness: 1, strokeStyle: 'dashed', points: [[0, 0], [140, 0]] },
       { id: 'db3', type: 'rectangle', x: 420, y: 120, width: 180, height: 120, strokeColor: '#0f172a', backgroundColor: '#f1f5f9', strokeWidth: 2, roughness: 1, strokeStyle: 'solid', fillStyle: 'solid', text: 'USERS (Usuários)\n------------------\n+ id: UUID [PK]\n+ org_id: UUID [FK]\n+ email: VARCHAR [UQ]\n+ role: VARCHAR' }
     ]
   }
+};
+
+const sanitizeExcalidrawElements = (rawEls: any[]): any[] => {
+  if (!Array.isArray(rawEls)) return [];
+  return rawEls
+    .map((el, idx) => {
+      if (!el || typeof el !== 'object') return null;
+      const item = { ...el };
+      if (!item.id) item.id = `el_${Date.now()}_${idx}`;
+      if (!item.type) item.type = 'rectangle';
+      if (
+        (item.type === 'arrow' || item.type === 'line' || item.type === 'freedraw' || item.type === 'draw') &&
+        (!Array.isArray(item.points) || item.points.length === 0)
+      ) {
+        item.points = [
+          [0, 0],
+          [item.width || 50, item.height || 0],
+        ];
+      }
+      return item;
+    })
+    .filter(Boolean);
 };
 
 export function ExcalidrawBlock({
@@ -250,21 +272,22 @@ export function ExcalidrawBlock({
   // Core callback when Excalidraw editor modal is closed or saves state
   const handleSaveAndClose = async (finalElements: any[], finalAppState: any, finalFiles: any) => {
     try {
-      const serializedElements = JSON.stringify(finalElements);
-      const serializedAppState = JSON.stringify(finalAppState);
-      const serializedFiles = JSON.stringify(finalFiles);
+      const sanitizedEls = sanitizeExcalidrawElements(finalElements);
+      const serializedElements = JSON.stringify(sanitizedEls);
+      const serializedAppState = JSON.stringify(finalAppState || {});
+      const serializedFiles = JSON.stringify(finalFiles || {});
 
       let renderedSvgString = '';
 
       // Programmatically pre-render high-quality static SVG using excalidrawExport helper
-      if (excalidrawExport?.exportToSvg && finalElements && finalElements.length > 0) {
+      if (excalidrawExport?.exportToSvg && sanitizedEls && sanitizedEls.length > 0) {
         try {
           const svgElement = await excalidrawExport.exportToSvg({
-            elements: finalElements,
+            elements: sanitizedEls,
             appState: {
               ...finalAppState,
               exportBackground: true,
-              viewBackgroundColor: finalAppState.viewBackgroundColor || '#ffffff',
+              viewBackgroundColor: finalAppState?.viewBackgroundColor || '#ffffff',
             },
             files: finalFiles || {},
           });
@@ -736,7 +759,7 @@ export function ExcalidrawBlock({
                   elements: (() => {
                     try {
                       const els = JSON.parse(elementsJson);
-                      return Array.isArray(els) ? els : [];
+                      return sanitizeExcalidrawElements(Array.isArray(els) ? els : []);
                     } catch {
                       return [];
                     }

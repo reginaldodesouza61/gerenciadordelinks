@@ -51,13 +51,13 @@ export function Sidebar() {
   const [currentSubcategoryId, setCurrentSubcategoryId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (categorias.length === 0) {
+    if ((categorias || []).length === 0) {
       fetchCategorias();
     }
-    if (subcategorias.length === 0) {
+    if ((subcategorias || []).length === 0) {
       fetchSubcategorias();
     }
-  }, [fetchCategorias, fetchSubcategorias, categorias.length, subcategorias.length]);
+  }, [fetchCategorias, fetchSubcategorias, categorias?.length, subcategorias?.length]);
 
   const toggleCategory = (categoryId: string) => {
     setExpandedCategories(prev =>
@@ -72,10 +72,10 @@ export function Sidebar() {
     window.open(url, '_blank');
   };
 
-  const favoriteLinks = links.filter(link => favoriteIds.includes(link.id));
-  const recentLinks = links
-    .filter(link => recentIds.includes(link.id))
-    .sort((a, b) => recentIds.indexOf(a.id) - recentIds.indexOf(b.id));
+  const favoriteLinks = (links || []).filter(link => (favoriteIds || []).includes(link.id));
+  const recentLinks = (links || [])
+    .filter(link => (recentIds || []).includes(link.id))
+    .sort((a, b) => (recentIds || []).indexOf(a.id) - (recentIds || []).indexOf(b.id));
 
   const resetFilters = () => {
     setSelectedCategoryId(null);

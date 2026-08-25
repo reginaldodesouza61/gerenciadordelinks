@@ -10,7 +10,8 @@ interface TrashModalProps {
 }
 
 export function TrashModal({ open, onOpenChange }: TrashModalProps) {
-  const deletedItems = useNoteStore((state) => state.deletedItems);
+  const rawDeletedItems = useNoteStore((state) => state.deletedItems);
+  const deletedItems = Array.isArray(rawDeletedItems) ? rawDeletedItems : [];
   const restoreItem = useNoteStore((state) => state.restoreItem);
   const permanentlyDelete = useNoteStore((state) => state.permanentlyDelete);
   const emptyTrash = useNoteStore((state) => state.emptyTrash);

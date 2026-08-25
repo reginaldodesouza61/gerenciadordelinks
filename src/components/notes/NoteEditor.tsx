@@ -158,12 +158,13 @@ function setEntireTableBackgroundColor(editor: Editor, color: string | null) {
   return false;
 }
 
-function isBlockEmpty(block: CanvasBlock): boolean {
+function isBlockEmpty(block?: CanvasBlock | null): boolean {
+  if (!block) return true;
   if (block.type && block.type !== 'text') {
     return false;
   }
   if (!block.content) return true;
-  const text = block.content
+  const text = (block.content || '')
     .replace(/<[^>]*>/g, '')
     .replace(/&nbsp;/g, ' ')
     .trim();
@@ -1492,8 +1493,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     }
 
     // Filter out unselected empty blocks on load
-    const validBlocks = parsedBlocks.filter((b) => !isBlockEmpty(b));
-    setBlocks(validBlocks.length > 0 ? validBlocks : parsedBlocks);
+    const safeParsed = Array.isArray(parsedBlocks) ? parsedBlocks : [];
+    const validBlocks = safeParsed.filter((b) => b && !isBlockEmpty(b));
+    setBlocks(validBlocks.length > 0 ? validBlocks : safeParsed);
     setActiveEditor(null);
     setSelectedBlockId(null);
   }, [pageId, page?.conteudo]);
@@ -1501,8 +1503,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
   // Clean up empty blocks
   const purgeAndSave = useCallback(
     (currentBlocks: CanvasBlock[], activeId?: string | null) => {
-      const cleaned = currentBlocks.filter(
-        (b) => b.id === activeId || !isBlockEmpty(b)
+      const safeBlocks = Array.isArray(currentBlocks) ? currentBlocks : [];
+      const cleaned = safeBlocks.filter(
+        (b) => b && (b.id === activeId || !isBlockEmpty(b))
       );
       setBlocks(cleaned);
       const json = JSON.stringify(cleaned);
