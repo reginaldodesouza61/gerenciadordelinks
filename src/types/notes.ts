@@ -34,7 +34,7 @@ export interface DeletedNoteItem {
   sectionPages?: NotePage[];
 }
 
-export type BlockType = 'text' | 'script' | 'vault' | 'link' | 'image' | 'whiteboard' | 'drawio';
+export type BlockType = 'text' | 'script' | 'vault' | 'link' | 'image' | 'whiteboard' | 'drawio' | 'excalidraw';
 
 export type DrawingElementType = 
   | 'rectangle'
@@ -195,4 +195,11 @@ export interface CanvasBlock {
   drawioSvg?: string;
   drawioPng?: string;
   drawioLastEdited?: string;
+
+  // For 'excalidraw' block (Excalidraw professional custom handdrawn & clean architecture canvas)
+  excalidrawTitle?: string;
+  excalidrawElements?: string; // Serialized JSON array of elements
+  excalidrawAppState?: string; // Serialized JSON object of app state
+  excalidrawFiles?: string; // Serialized JSON object of files
+  excalidrawLastEdited?: string;
 }

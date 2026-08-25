@@ -36,18 +36,18 @@ export function RelatedLinksDrawer({
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const relatedLinkIds = useMemo(() => {
-    return relations.filter(r => r.note_id === pageId).map(r => r.link_id);
+    return (relations || []).filter(r => r.note_id === pageId).map(r => r.link_id);
   }, [relations, pageId]);
 
   const relatedLinks = useMemo(() => {
-    return links.filter(l => 
+    return (links || []).filter(l => 
       relatedLinkIds.includes(l.id) &&
       (!searchTerm || l.titulo.toLowerCase().includes(searchTerm.toLowerCase()) || l.url.toLowerCase().includes(searchTerm.toLowerCase()))
     );
   }, [links, relatedLinkIds, searchTerm]);
 
   const availableToLink = useMemo(() => {
-    return links.filter(l => 
+    return (links || []).filter(l => 
       !relatedLinkIds.includes(l.id) &&
       (!newLinkSearch || l.titulo.toLowerCase().includes(newLinkSearch.toLowerCase()) || l.url.toLowerCase().includes(newLinkSearch.toLowerCase()))
     );

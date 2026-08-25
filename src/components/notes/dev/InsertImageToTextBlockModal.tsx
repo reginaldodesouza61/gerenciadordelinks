@@ -45,7 +45,7 @@ export function InsertImageToTextBlockModal({
   isOpen,
   onClose,
   imageBlock,
-  allBlocks,
+  allBlocks = [],
   onConvertToTextBlock,
   onInsertIntoExistingTextBlock,
   onCreateNewTextBlockWithImage,
@@ -57,7 +57,8 @@ export function InsertImageToTextBlockModal({
 
   // Filter text blocks on this page
   const textBlocks = useMemo(() => {
-    return allBlocks.filter((b) => !b.type || b.type === 'text');
+    const blocks = Array.isArray(allBlocks) ? allBlocks : [];
+    return blocks.filter((b) => !b.type || b.type === 'text');
   }, [allBlocks]);
 
   // Set default selected text block

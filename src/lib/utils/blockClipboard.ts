@@ -62,6 +62,12 @@ export function getBlockTypeLabel(type?: string): { label: string; color: string
         color: 'text-sky-600 dark:text-sky-400',
         badge: 'bg-sky-100 text-sky-800 border-sky-300 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-800',
       };
+    case 'excalidraw':
+      return {
+        label: 'Desenho Excalidraw',
+        color: 'text-indigo-600 dark:text-indigo-400',
+        badge: 'bg-indigo-100 text-indigo-800 border-indigo-300 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800',
+      };
     case 'whiteboard':
       return {
         label: 'Quadro / Diagrama Fluxo',
@@ -109,6 +115,12 @@ export function getBlockSummary(block: CanvasBlock): { title: string; subtitle: 
       return {
         title: block.imageTitle || 'Imagem / Captura de Tela',
         subtitle: block.capturedAt || 'Imagem salva no quadro',
+      };
+    }
+    case 'excalidraw': {
+      return {
+        title: block.excalidrawTitle || 'Desenho Excalidraw',
+        subtitle: 'Quadro visual Excalidraw',
       };
     }
     case 'whiteboard': {

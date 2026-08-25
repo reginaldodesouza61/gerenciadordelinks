@@ -35,7 +35,8 @@ import {
   Layers,
   GripHorizontal,
   ArrowUpToLine,
-  ArrowDownToLine
+  ArrowDownToLine,
+  Move
 } from 'lucide-react';
 import { BlockActionMenu } from '@/components/notes/dev/BlockActionMenu';
 import { Button } from '@/components/ui/button';
@@ -158,6 +159,11 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [editingTextId, setEditingTextId] = useState<string | null>(null);
   const [editingTextValue, setEditingTextValue] = useState<string>('');
+  const [activeConnectionPort, setActiveConnectionPort] = useState<{
+    direction: 'top' | 'right' | 'bottom' | 'left';
+    x: number;
+    y: number;
+  } | null>(null);
 
   // Undo / Redo History
   const [history, setHistory] = useState<DrawingElement[][]>([elements]);
@@ -209,10 +215,208 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
     }
   }, [block.id, history, historyIndex, updateBlock]);
 
-  // Keyboard shortcuts (Delete, Undo, Redo)
+  // Add shape immediately on click or hotkey
+  const addShape = useCallback((type: ToolType) => {
+    if (type === 'select' || type === 'pen' || type === 'eraser') {
+      setActiveTool(type);
+      return;
+    }
+
+    const offset = (elements.length % 8) * 20;
+    const baseNewX = 220 + offset;
+    const baseNewY = 160 + offset;
+
+    let newElem: DrawingElement;
+
+    if (type === 'text') {
+      newElem = {
+        id: uuidv4(),
+        type: 'text',
+        x: baseNewX,
+        y: baseNewY,
+        width: 140,
+        height: 40,
+        text: 'Clique duas vezes para editar',
+        strokeColor: 'transparent',
+        fillColor: 'transparent',
+        fontSize: currentFontSize,
+        textColor: currentStrokeColor === 'transparent' ? '#0f172a' : currentStrokeColor,
+      };
+    } else if (type === 'arrow' || type === 'line') {
+      newElem = {
+        id: uuidv4(),
+        type: type as DrawingElementType,
+        x: baseNewX,
+        y: baseNewY,
+        width: 120,
+        height: 0,
+        strokeColor: currentStrokeColor,
+        fillColor: currentFillColor,
+        strokeWidth: currentStrokeWidth,
+        strokeStyle: currentStrokeStyle,
+        fontSize: currentFontSize,
+        textColor: currentStrokeColor === 'transparent' ? '#0f172a' : currentStrokeColor,
+        text: type === 'arrow' ? 'Conexão' : '',
+      };
+    } else {
+      newElem = {
+        id: uuidv4(),
+        type: type as DrawingElementType,
+        x: baseNewX,
+        y: baseNewY,
+        width: type === 'card' ? 160 : 140,
+        height: type === 'card' ? 90 : 60,
+        strokeColor: currentStrokeColor,
+        fillColor: currentFillColor,
+        strokeWidth: currentStrokeWidth,
+        strokeStyle: currentStrokeStyle,
+        fontSize: currentFontSize,
+        textColor: currentStrokeColor === 'transparent' ? '#0f172a' : currentStrokeColor,
+        rounded: true,
+        text: type === 'rectangle' ? 'Processo / Ação' : 
+              type === 'diamond' ? 'Decisão?' : 
+              type === 'ellipse' ? 'Início / Fim' : 
+              type === 'cylinder' ? 'Banco de Dados' : 
+              type === 'card' ? 'Nota rápida' : '',
+      };
+    }
+
+    const next = [...elements, newElem];
+    pushHistory(next);
+    setSelectedElementId(newElem.id);
+    setActiveTool('select');
+    toast.success('Forma adicionada ao quadro!');
+  }, [elements, pushHistory, currentStrokeColor, currentFillColor, currentStrokeWidth, currentStrokeStyle, currentFontSize]);
+
+  // Connect new shape automatically from connection handles on selected shape
+  const connectNewShape = useCallback((direction: 'top' | 'right' | 'bottom' | 'left', type: DrawingElementType) => {
+    const selectedEl = elements.find(el => el.id === selectedElementId);
+    if (!selectedEl) return;
+
+    const gap = 80; // distance between shapes
+    const shapeWidth = selectedEl.width || 140;
+    const shapeHeight = selectedEl.height || 60;
+
+    let newX = selectedEl.x;
+    let newY = selectedEl.y;
+    let arrowX = selectedEl.x;
+    let arrowY = selectedEl.y;
+    let arrowW = 0;
+    let arrowH = 0;
+
+    const cx = selectedEl.x + shapeWidth / 2;
+    const cy = selectedEl.y + shapeHeight / 2;
+
+    if (direction === 'right') {
+      newX = selectedEl.x + shapeWidth + gap;
+      newY = selectedEl.y;
+      arrowX = selectedEl.x + shapeWidth;
+      arrowY = cy;
+      arrowW = gap;
+      arrowH = 0;
+    } else if (direction === 'bottom') {
+      newX = selectedEl.x;
+      newY = selectedEl.y + shapeHeight + gap;
+      arrowX = cx;
+      arrowY = selectedEl.y + shapeHeight;
+      arrowW = 0;
+      arrowH = gap;
+    } else if (direction === 'left') {
+      newX = selectedEl.x - shapeWidth - gap;
+      newY = selectedEl.y;
+      arrowX = selectedEl.x;
+      arrowY = cy;
+      arrowW = -gap;
+      arrowH = 0;
+    } else if (direction === 'top') {
+      newX = selectedEl.x;
+      newY = selectedEl.y - shapeHeight - gap;
+      arrowX = cx;
+      arrowY = selectedEl.y;
+      arrowW = 0;
+      arrowH = -gap;
+    }
+
+    // SVG Boundary Constraints (0 to 4000, 0 to 3000)
+    newX = Math.max(20, Math.min(3800, newX));
+    newY = Math.max(20, Math.min(2800, newY));
+
+    // Create connected shape
+    const newShapeId = uuidv4();
+    const newShape: DrawingElement = {
+      id: newShapeId,
+      type: type,
+      x: newX,
+      y: type === 'text' ? newY + 10 : newY,
+      width: type === 'card' ? 160 : type === 'text' ? 140 : 140,
+      height: type === 'card' ? 90 : type === 'text' ? 40 : 60,
+      strokeColor: type === 'text' ? 'transparent' : (selectedEl.strokeColor || currentStrokeColor),
+      fillColor: type === 'text' ? 'transparent' : (selectedEl.fillColor || currentFillColor),
+      strokeWidth: selectedEl.strokeWidth || currentStrokeWidth,
+      strokeStyle: selectedEl.strokeStyle || currentStrokeStyle,
+      fontSize: currentFontSize,
+      textColor: type === 'text' ? (currentStrokeColor === 'transparent' ? '#0f172a' : currentStrokeColor) : (selectedEl.strokeColor || currentStrokeColor || '#0f172a'),
+      rounded: true,
+      text: type === 'rectangle' ? 'Ação / Processo' : 
+            type === 'diamond' ? 'Decisão?' : 
+            type === 'ellipse' ? 'Início / Fim' : 
+            type === 'cylinder' ? 'Banco de Dados' : 
+            type === 'card' ? 'Nota rápida' : 
+            type === 'text' ? 'Novo Texto' : 'Novo Bloco',
+    };
+
+    // Create connecting arrow
+    const arrowId = uuidv4();
+    const newArrow: DrawingElement = {
+      id: arrowId,
+      type: 'arrow',
+      x: arrowX,
+      y: arrowY,
+      width: arrowW,
+      height: arrowH,
+      strokeColor: selectedEl.strokeColor || currentStrokeColor,
+      fillColor: 'transparent',
+      strokeWidth: selectedEl.strokeWidth || currentStrokeWidth,
+      strokeStyle: selectedEl.strokeStyle || currentStrokeStyle,
+      fontSize: currentFontSize,
+      textColor: selectedEl.strokeColor || currentStrokeColor,
+      text: '',
+    };
+
+    const next = [...elements, newArrow, newShape];
+    pushHistory(next);
+    setSelectedElementId(newShapeId); // Auto-select the newly added connected shape
+    setActiveConnectionPort(null); // Close active connection popover
+    toast.success('Novo bloco e conexão criados com sucesso!');
+  }, [elements, selectedElementId, currentStrokeColor, currentFillColor, currentStrokeWidth, currentStrokeStyle, currentFontSize, pushHistory]);
+
+  // Shift all elements on the canvas (Move All)
+  const shiftAllElements = useCallback((dx: number, dy: number) => {
+    if (elements.length === 0) return;
+    const next = elements.map(el => {
+      if (el.type === 'pen' && el.points && el.points.length > 0) {
+        return {
+          ...el,
+          x: el.x + dx,
+          y: el.y + dy,
+          points: el.points.map(p => ({ x: p.x + dx, y: p.y + dy }))
+        };
+      }
+      return {
+        ...el,
+        x: el.x + dx,
+        y: el.y + dy
+      };
+    });
+    pushHistory(next);
+    toast.success(`Todo o quadro foi movido em ${dx !== 0 ? Math.abs(dx) : Math.abs(dy)}px!`);
+  }, [elements, pushHistory]);
+
+  // Keyboard shortcuts (Delete, Undo, Redo, and Quick Add keys)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (editingTextId) return; // Don't intercept when typing in text input
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
       if (!isSelected && !isFullscreen) return;
 
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedElementId) {
@@ -230,12 +434,30 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
       } else if (e.ctrlKey && e.key === 'y') {
         e.preventDefault();
         handleRedo();
+      } else if (e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        addShape('rectangle');
+      } else if (e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        addShape('diamond');
+      } else if (e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        addShape('ellipse');
+      } else if (e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        addShape('arrow');
+      } else if (e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        addShape('text');
+      } else if (e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        addShape('card');
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [editingTextId, isSelected, isFullscreen, selectedElementId, elements, pushHistory, handleUndo, handleRedo]);
+  }, [editingTextId, isSelected, isFullscreen, selectedElementId, elements, pushHistory, handleUndo, handleRedo, addShape]);
 
   // Get pointer coordinates relative to SVG
   const getCanvasCoords = (e: React.PointerEvent<SVGSVGElement>): { x: number; y: number } => {
@@ -283,9 +505,11 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
       if (clicked) {
         setSelectedElementId(clicked.id);
         setDragOffset({ x: coords.x - clicked.x, y: coords.y - clicked.y });
+        setActiveConnectionPort(null);
       } else {
         setSelectedElementId(null);
         setDragOffset(null);
+        setActiveConnectionPort(null);
       }
       return;
     }
@@ -374,7 +598,9 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
     if (activeTool === 'select' && selectedElementId && dragOffset) {
       const newX = Math.max(0, coords.x - dragOffset.x);
       const newY = Math.max(0, coords.y - dragOffset.y);
-      const nextElements = elements.map(el => {
+      
+      // First update the dragged element itself
+      let updatedElements = elements.map(el => {
         if (el.id === selectedElementId) {
           if (el.type === 'pen' && el.points && el.points.length > 0) {
             const dx = newX - el.x;
@@ -390,7 +616,83 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
         }
         return el;
       });
-      updateBlock(block.id, { elements: nextElements });
+
+      // Then update any connecting arrows or lines
+      updatedElements = updatedElements.map(el => {
+        if ((el.type === 'arrow' || el.type === 'line') && (el.fromId || el.toId)) {
+          const fromEl = updatedElements.find(f => f.id === el.fromId);
+          const toEl = updatedElements.find(t => t.id === el.toId);
+
+          if (fromEl && toEl) {
+            const fromW = fromEl.width || 140;
+            const fromH = fromEl.height || 60;
+            const toW = toEl.width || 140;
+            const toH = toEl.height || 60;
+
+            const fromPorts = [
+              { x: fromEl.x + fromW / 2, y: fromEl.y }, // Top
+              { x: fromEl.x + fromW, y: fromEl.y + fromH / 2 }, // Right
+              { x: fromEl.x + fromW / 2, y: fromEl.y + fromH }, // Bottom
+              { x: fromEl.x, y: fromEl.y + fromH / 2 }, // Left
+            ];
+
+            const toPorts = [
+              { x: toEl.x + toW / 2, y: toEl.y }, // Top
+              { x: toEl.x + toW, y: toEl.y + toH / 2 }, // Right
+              { x: toEl.x + toW / 2, y: toEl.y + toH }, // Bottom
+              { x: toEl.x, y: toEl.y + toH / 2 }, // Left
+            ];
+
+            let bestFrom = fromPorts[0];
+            let bestTo = toPorts[0];
+            let minDist = Infinity;
+
+            for (const fp of fromPorts) {
+              for (const tp of toPorts) {
+                const dist = Math.pow(fp.x - tp.x, 2) + Math.pow(fp.y - tp.y, 2);
+                if (dist < minDist) {
+                  minDist = dist;
+                  bestFrom = fp;
+                  bestTo = tp;
+                }
+              }
+            }
+
+            return {
+              ...el,
+              x: bestFrom.x,
+              y: bestFrom.y,
+              width: bestTo.x - bestFrom.x,
+              height: bestTo.y - bestFrom.y,
+            };
+          } else if (fromEl) {
+            const originalFromEl = elements.find(f => f.id === el.fromId);
+            if (originalFromEl) {
+              const dx = fromEl.x - originalFromEl.x;
+              const dy = fromEl.y - originalFromEl.y;
+              return {
+                ...el,
+                x: el.x + dx,
+                y: el.y + dy,
+              };
+            }
+          } else if (toEl) {
+            const originalToEl = elements.find(t => t.id === el.toId);
+            if (originalToEl) {
+              const dx = toEl.x - originalToEl.x;
+              const dy = toEl.y - originalToEl.y;
+              return {
+                ...el,
+                width: el.width + dx,
+                height: el.height + dy,
+              };
+            }
+          }
+        }
+        return el;
+      });
+
+      updateBlock(block.id, { elements: updatedElements });
       return;
     }
 
@@ -428,6 +730,11 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
   // Pointer Up
   const handlePointerUp = () => {
     isMouseDownRef.current = false;
+
+    // If we were dragging/moving elements, commit the final state to history
+    if (dragOffset) {
+      pushHistory(elements);
+    }
     setDragOffset(null);
 
     if (drawingElement) {
@@ -1019,72 +1326,72 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
             <div className="w-px h-4 bg-slate-200 dark:bg-zinc-700 mx-0.5" />
             <Button
               size="icon"
-              variant={activeTool === 'rectangle' ? 'default' : 'ghost'}
-              className={`h-7 w-7 ${activeTool === 'rectangle' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-zinc-300'}`}
-              onClick={() => setActiveTool('rectangle')}
+              variant={selectedElement?.type === 'rectangle' ? 'default' : 'ghost'}
+              className={`h-7 w-7 ${selectedElement?.type === 'rectangle' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-zinc-300'}`}
+              onClick={() => addShape('rectangle')}
               title="Retângulo / Bloco de Ação (R)"
             >
               <Square size={14} />
             </Button>
             <Button
               size="icon"
-              variant={activeTool === 'diamond' ? 'default' : 'ghost'}
-              className={`h-7 w-7 ${activeTool === 'diamond' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-zinc-300'}`}
-              onClick={() => setActiveTool('diamond')}
+              variant={selectedElement?.type === 'diamond' ? 'default' : 'ghost'}
+              className={`h-7 w-7 ${selectedElement?.type === 'diamond' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-zinc-300'}`}
+              onClick={() => addShape('diamond')}
               title="Decisão / Condição Sim-Não (D)"
             >
               <Diamond size={14} />
             </Button>
             <Button
               size="icon"
-              variant={activeTool === 'ellipse' ? 'default' : 'ghost'}
-              className={`h-7 w-7 ${activeTool === 'ellipse' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-zinc-300'}`}
-              onClick={() => setActiveTool('ellipse')}
+              variant={selectedElement?.type === 'ellipse' ? 'default' : 'ghost'}
+              className={`h-7 w-7 ${selectedElement?.type === 'ellipse' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-zinc-300'}`}
+              onClick={() => addShape('ellipse')}
               title="Início / Fim / Círculo (C)"
             >
               <Circle size={14} />
             </Button>
             <Button
               size="icon"
-              variant={activeTool === 'cylinder' ? 'default' : 'ghost'}
-              className={`h-7 w-7 ${activeTool === 'cylinder' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-zinc-300'}`}
-              onClick={() => setActiveTool('cylinder')}
+              variant={selectedElement?.type === 'cylinder' ? 'default' : 'ghost'}
+              className={`h-7 w-7 ${selectedElement?.type === 'cylinder' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-zinc-300'}`}
+              onClick={() => addShape('cylinder')}
               title="Banco de Dados / Armazenamento"
             >
               <Database size={14} />
             </Button>
             <Button
               size="icon"
-              variant={activeTool === 'arrow' ? 'default' : 'ghost'}
-              className={`h-7 w-7 ${activeTool === 'arrow' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-zinc-300'}`}
-              onClick={() => setActiveTool('arrow')}
+              variant={selectedElement?.type === 'arrow' ? 'default' : 'ghost'}
+              className={`h-7 w-7 ${selectedElement?.type === 'arrow' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-zinc-300'}`}
+              onClick={() => addShape('arrow')}
               title="Seta Conectora com Direção (A)"
             >
               <ArrowRight size={14} />
             </Button>
             <Button
               size="icon"
-              variant={activeTool === 'line' ? 'default' : 'ghost'}
-              className={`h-7 w-7 ${activeTool === 'line' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-zinc-300'}`}
-              onClick={() => setActiveTool('line')}
+              variant={selectedElement?.type === 'line' ? 'default' : 'ghost'}
+              className={`h-7 w-7 ${selectedElement?.type === 'line' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-zinc-300'}`}
+              onClick={() => addShape('line')}
               title="Linha (L)"
             >
               <Minus size={14} />
             </Button>
             <Button
               size="icon"
-              variant={activeTool === 'card' ? 'default' : 'ghost'}
-              className={`h-7 w-7 ${activeTool === 'card' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-zinc-300'}`}
-              onClick={() => setActiveTool('card')}
+              variant={selectedElement?.type === 'card' ? 'default' : 'ghost'}
+              className={`h-7 w-7 ${selectedElement?.type === 'card' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-zinc-300'}`}
+              onClick={() => addShape('card')}
               title="Post-it / Nota Adesiva (N)"
             >
               <StickyNote size={14} />
             </Button>
             <Button
               size="icon"
-              variant={activeTool === 'text' ? 'default' : 'ghost'}
-              className={`h-7 w-7 ${activeTool === 'text' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-zinc-300'}`}
-              onClick={() => setActiveTool('text')}
+              variant={selectedElement?.type === 'text' ? 'default' : 'ghost'}
+              className={`h-7 w-7 ${selectedElement?.type === 'text' ? 'bg-indigo-600 text-white' : 'text-slate-600 dark:text-zinc-300'}`}
+              onClick={() => addShape('text')}
               title="Texto (T)"
             >
               <Type size={14} />
@@ -1238,6 +1545,79 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
               </PopoverContent>
             </Popover>
 
+            {/* Shift All Elements Popover */}
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  className="h-7 px-2 text-xs gap-1 text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800"
+                  title="Deslocar todos os elementos juntos para reajustar no quadro"
+                >
+                  <Move size={13} className="text-slate-500" />
+                  <span className="hidden sm:inline">Ajustar Tela</span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-48 p-3 bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 shadow-xl rounded-xl z-50" align="end">
+                <p className="text-xs font-semibold text-slate-700 dark:text-zinc-200 mb-1 flex items-center gap-1.5">
+                  <Move size={12} className="text-indigo-600 dark:text-indigo-400" />
+                  Mover Todo o Quadro
+                </p>
+                <p className="text-[10px] text-slate-500 dark:text-zinc-400 mb-3 leading-snug">
+                  Desloque todos os elementos simultaneamente para reajustar seu espaço.
+                </p>
+                <div className="grid grid-cols-3 gap-1.5 max-w-[120px] mx-auto">
+                  <div />
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    className="h-8 w-8 hover:bg-indigo-50 dark:hover:bg-indigo-950 hover:text-indigo-600 dark:hover:text-indigo-400 border-slate-200 dark:border-zinc-700"
+                    onClick={() => shiftAllElements(0, -50)}
+                    title="Mover tudo para cima (-50px)"
+                  >
+                    <ArrowUpToLine size={14} />
+                  </Button>
+                  <div />
+
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    className="h-8 w-8 hover:bg-indigo-50 dark:hover:bg-indigo-950 hover:text-indigo-600 dark:hover:text-indigo-400 border-slate-200 dark:border-zinc-700"
+                    onClick={() => shiftAllElements(-50, 0)}
+                    title="Mover tudo para esquerda (-50px)"
+                    style={{ transform: 'rotate(-90deg)' }}
+                  >
+                    <ArrowUpToLine size={14} />
+                  </Button>
+                  <div className="flex items-center justify-center text-[10px] font-bold text-indigo-600 dark:text-indigo-400 select-none bg-indigo-50/50 dark:bg-indigo-950/20 rounded h-8">
+                    50px
+                  </div>
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    className="h-8 w-8 hover:bg-indigo-50 dark:hover:bg-indigo-950 hover:text-indigo-600 dark:hover:text-indigo-400 border-slate-200 dark:border-zinc-700"
+                    onClick={() => shiftAllElements(50, 0)}
+                    title="Mover tudo para direita (+50px)"
+                    style={{ transform: 'rotate(90deg)' }}
+                  >
+                    <ArrowUpToLine size={14} />
+                  </Button>
+
+                  <div />
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    className="h-8 w-8 hover:bg-indigo-50 dark:hover:bg-indigo-950 hover:text-indigo-600 dark:hover:text-indigo-400 border-slate-200 dark:border-zinc-700"
+                    onClick={() => shiftAllElements(0, 50)}
+                    title="Mover tudo para baixo (+50px)"
+                  >
+                    <ArrowDownToLine size={14} />
+                  </Button>
+                  <div />
+                </div>
+              </PopoverContent>
+            </Popover>
+
             {/* Undo / Redo */}
             <Button
               size="icon"
@@ -1345,7 +1725,214 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
 
             {/* Selection highlight box */}
             {renderSelectionBox()}
+
+            {/* Connection ports for selected shape */}
+            {selectedElement && ['rectangle', 'diamond', 'ellipse', 'circle', 'cylinder', 'card'].includes(selectedElement.type) && activeTool === 'select' && (
+              <g className="pointer-events-auto">
+                {/* Top port */}
+                <g 
+                  className="cursor-pointer group/port" 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveConnectionPort({
+                      direction: 'top',
+                      x: selectedElement.x + (selectedElement.width || 140) / 2,
+                      y: selectedElement.y - 14
+                    });
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <circle
+                    cx={selectedElement.x + (selectedElement.width || 140) / 2}
+                    cy={selectedElement.y - 14}
+                    r={8}
+                    fill="#3b82f6"
+                    className="opacity-70 group-hover/port:opacity-100 group-hover/port:fill-indigo-600 transition-all cursor-pointer"
+                  />
+                  <path
+                    d={`M ${selectedElement.x + (selectedElement.width || 140) / 2} ${selectedElement.y - 18} l -3 5 h 6 Z`}
+                    fill="white"
+                    className="cursor-pointer"
+                  />
+                  <title>Adicionar bloco conectado acima</title>
+                </g>
+
+                {/* Right port */}
+                <g 
+                  className="cursor-pointer group/port" 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveConnectionPort({
+                      direction: 'right',
+                      x: selectedElement.x + (selectedElement.width || 140) + 14,
+                      y: selectedElement.y + (selectedElement.height || 60) / 2
+                    });
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <circle
+                    cx={selectedElement.x + (selectedElement.width || 140) + 14}
+                    cy={selectedElement.y + (selectedElement.height || 60) / 2}
+                    r={8}
+                    fill="#3b82f6"
+                    className="opacity-70 group-hover/port:opacity-100 group-hover/port:fill-indigo-600 transition-all cursor-pointer"
+                  />
+                  <path
+                    d={`M ${selectedElement.x + (selectedElement.width || 140) + 18} ${selectedElement.y + (selectedElement.height || 60) / 2} l -5 -3 v 6 Z`}
+                    fill="white"
+                    className="cursor-pointer"
+                  />
+                  <title>Adicionar bloco conectado à direita</title>
+                </g>
+
+                {/* Bottom port */}
+                <g 
+                  className="cursor-pointer group/port" 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveConnectionPort({
+                      direction: 'bottom',
+                      x: selectedElement.x + (selectedElement.width || 140) / 2,
+                      y: selectedElement.y + (selectedElement.height || 60) + 14
+                    });
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <circle
+                    cx={selectedElement.x + (selectedElement.width || 140) / 2}
+                    cy={selectedElement.y + (selectedElement.height || 60) + 14}
+                    r={8}
+                    fill="#3b82f6"
+                    className="opacity-70 group-hover/port:opacity-100 group-hover/port:fill-indigo-600 transition-all cursor-pointer"
+                  />
+                  <path
+                    d={`M ${selectedElement.x + (selectedElement.width || 140) / 2} ${selectedElement.y + (selectedElement.height || 60) + 18} l -3 -5 h 6 Z`}
+                    fill="white"
+                    className="cursor-pointer"
+                  />
+                  <title>Adicionar bloco conectado abaixo</title>
+                </g>
+
+                {/* Left port */}
+                <g 
+                  className="cursor-pointer group/port" 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveConnectionPort({
+                      direction: 'left',
+                      x: selectedElement.x - 14,
+                      y: selectedElement.y + (selectedElement.height || 60) / 2
+                    });
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <circle
+                    cx={selectedElement.x - 14}
+                    cy={selectedElement.y + (selectedElement.height || 60) / 2}
+                    r={8}
+                    fill="#3b82f6"
+                    className="opacity-70 group-hover/port:opacity-100 group-hover/port:fill-indigo-600 transition-all cursor-pointer"
+                  />
+                  <path
+                    d={`M ${selectedElement.x - 18} ${selectedElement.y + (selectedElement.height || 60) / 2} l 5 -3 v 6 Z`}
+                    fill="white"
+                    className="cursor-pointer"
+                  />
+                  <title>Adicionar bloco conectado à esquerda</title>
+                </g>
+              </g>
+            )}
           </svg>
+
+          {/* Floating Shape Selector for Connection Ports */}
+          {activeConnectionPort && (
+            <div 
+              className="absolute z-40 bg-white dark:bg-zinc-800 p-1.5 rounded-xl shadow-xl border border-indigo-400 dark:border-zinc-700 flex items-center gap-1.5 transition-all duration-100"
+              style={{
+                left: activeConnectionPort.x,
+                top: activeConnectionPort.y,
+                transform: 'translate(-50%, -50%)',
+              }}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-[10px] uppercase tracking-wider text-slate-400 dark:text-zinc-500 font-bold px-1 select-none">
+                Conectar:
+              </div>
+              
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 hover:bg-slate-100 dark:hover:bg-zinc-700 text-indigo-600 dark:text-indigo-400"
+                onClick={() => connectNewShape(activeConnectionPort.direction, 'rectangle')}
+                title="Conectar novo Retângulo (Processo)"
+              >
+                <Square size={14} />
+              </Button>
+
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 hover:bg-slate-100 dark:hover:bg-zinc-700 text-purple-600 dark:text-purple-400"
+                onClick={() => connectNewShape(activeConnectionPort.direction, 'diamond')}
+                title="Conectar nova Decisão (Losango)"
+              >
+                <Diamond size={14} />
+              </Button>
+
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 hover:bg-slate-100 dark:hover:bg-zinc-700 text-emerald-600 dark:text-emerald-400"
+                onClick={() => connectNewShape(activeConnectionPort.direction, 'ellipse')}
+                title="Conectar novo Círculo (Início/Fim)"
+              >
+                <Circle size={14} />
+              </Button>
+
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 hover:bg-slate-100 dark:hover:bg-zinc-700 text-amber-600 dark:text-amber-400"
+                onClick={() => connectNewShape(activeConnectionPort.direction, 'cylinder')}
+                title="Conectar novo Banco de Dados (Cilindro)"
+              >
+                <Database size={14} />
+              </Button>
+
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 hover:bg-slate-100 dark:hover:bg-zinc-700 text-rose-500 dark:text-rose-400"
+                onClick={() => connectNewShape(activeConnectionPort.direction, 'card')}
+                title="Conectar novo Post-it (Nota)"
+              >
+                <StickyNote size={14} />
+              </Button>
+
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 hover:bg-slate-100 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300"
+                onClick={() => connectNewShape(activeConnectionPort.direction, 'text')}
+                title="Conectar nova Caixa de Texto"
+              >
+                <Type size={14} />
+              </Button>
+
+              <div className="w-px h-5 bg-slate-200 dark:bg-zinc-700 mx-0.5" />
+
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-6 w-6 text-slate-400 hover:text-rose-500 hover:bg-rose-50/50 dark:hover:bg-rose-950/20"
+                onClick={() => setActiveConnectionPort(null)}
+                title="Cancelar conexão"
+              >
+                <X size={12} />
+              </Button>
+            </div>
+          )}
 
           {/* Inline Text Editor Overlay when double-clicked */}
           {editingTextId && (

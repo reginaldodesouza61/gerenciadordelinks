@@ -8,6 +8,7 @@
     "preview": "vite preview --host 0.0.0.0 --port 3000"
   },
   "dependencies": {
+    "@excalidraw/excalidraw": "^0.18.1",
     "@google/genai": "^2.18.0",
     "@hookform/resolvers": "^3.9.0",
     "@radix-ui/react-accordion": "^1.2.0",

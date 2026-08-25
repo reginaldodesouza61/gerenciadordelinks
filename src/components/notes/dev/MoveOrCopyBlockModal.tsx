@@ -118,6 +118,8 @@ export function MoveOrCopyBlockModal({
         return <Code2 size={16} className="text-emerald-500" />;
       case 'image':
         return <ImageIcon size={16} className="text-sky-500" />;
+      case 'excalidraw':
+        return <Shapes size={16} className="text-indigo-500" />;
       case 'whiteboard':
         return <Shapes size={16} className="text-purple-500" />;
       case 'drawio':

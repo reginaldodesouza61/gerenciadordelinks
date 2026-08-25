@@ -350,7 +350,7 @@ export function GlobalNotesSearchModal({
                 }
               }
 
-              // 7. Draw.io Diagram Blocks
+              // 7. Draw.io Diagram Blocks (legacy)
               else if (block.type === 'drawio') {
                 const title = block.drawioTitle || 'Diagrama Draw.io';
                 const xml = block.drawioXml || '';
@@ -369,6 +369,29 @@ export function GlobalNotesSearchModal({
                     pageTitle: page.titulo,
                     blockId: block.id,
                     extraMeta: 'Draw.io',
+                  });
+                }
+              }
+
+              // 8. Excalidraw Custom Blocks
+              else if (block.type === 'excalidraw') {
+                const title = block.excalidrawTitle || 'Desenho Excalidraw';
+                const elementsJson = block.excalidrawElements || '[]';
+                const fullExcalidrawText = `${title} ${elementsJson}`;
+
+                if (term && fullExcalidrawText.toLowerCase().includes(term)) {
+                  list.push({
+                    id: `excalidraw_${block.id || index}`,
+                    type: 'whiteboard',
+                    title: title,
+                    subtitle: `Desenho Excalidraw em "${page.titulo}"`,
+                    snippet: `Quadro visual Excalidraw com formas e diagramas`,
+                    sectionId: page.section_id,
+                    sectionName: sectionName,
+                    pageId: page.id,
+                    pageTitle: page.titulo,
+                    blockId: block.id,
+                    extraMeta: 'Excalidraw',
                   });
                 }
               }

@@ -31,6 +31,7 @@ import { LinkCardBlock } from './dev/LinkCardBlock';
 import { ImageBlock } from './dev/ImageBlock';
 import { WhiteboardBlock } from './dev/WhiteboardBlock';
 import { DrawioBlock } from './dev/DrawioBlock';
+import { ExcalidrawBlock } from './dev/ExcalidrawBlock';
 import { BlockActionMenu } from './dev/BlockActionMenu';
 import { MoveOrCopyBlockModal } from './dev/MoveOrCopyBlockModal';
 import { InsertLinkModal } from './dev/InsertLinkModal';
@@ -1764,21 +1765,23 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     updatePage(pageId, { conteudo: json });
   }, [blocks, purgeAndSave, pageId, updatePage]);
 
-  // Add a new Whiteboard / Flowchart Drawing block (Excalidraw-like)
-  const handleAddWhiteboardBlock = useCallback((e?: React.MouseEvent) => {
+  // Add a new Excalidraw Custom Block
+  const handleAddExcalidrawBlock = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation();
     const cleaned = purgeAndSave(blocks, null);
-    const pos = getSpawnPosition(960, 600);
+    const pos = getSpawnPosition(760, 500);
     const newBlock: CanvasBlock = {
-      id: `draw_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: `excalidraw_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       x: pos.x,
       y: pos.y,
-      width: 960,
-      height: 600,
-      type: 'whiteboard',
-      drawingTitle: 'Quadro de Processos & Diagrama',
-      elements: [],
-      canvasBg: 'grid',
+      width: 760,
+      height: 500,
+      type: 'excalidraw',
+      excalidrawTitle: 'Novo Desenho Excalidraw',
+      excalidrawElements: '[]',
+      excalidrawAppState: '{}',
+      excalidrawFiles: '{}',
+      excalidrawLastEdited: new Date().toISOString(),
     };
     const nextBlocks = [...cleaned, newBlock];
     setBlocks(nextBlocks);
@@ -1786,7 +1789,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     const json = JSON.stringify(nextBlocks);
     lastSavedContentRef.current = json;
     updatePage(pageId, { conteudo: json });
-    toast.success('Quadro de diagramas adicionado!');
+    toast.success('Quadro Excalidraw adicionado!');
   }, [blocks, purgeAndSave, pageId, updatePage]);
 
   // Add a new Draw.io Professional Diagram block
@@ -2347,11 +2350,11 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   <span>Credenciais & Senhas</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={handleAddWhiteboardBlock}
+                  onClick={handleAddExcalidrawBlock}
                   className="text-xs cursor-pointer gap-2 py-1.5 font-medium"
                 >
-                  <Shapes size={14} className="text-purple-500" />
-                  <span>Lousa & Fluxograma</span>
+                  <Shapes size={14} className="text-indigo-500" />
+                  <span>Desenho Excalidraw</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={handleAddDrawioBlock}
@@ -2500,9 +2503,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   <ShieldCheck size={14} className="text-amber-500" />
                   <span>Credenciais</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleAddWhiteboardBlock} className="text-xs cursor-pointer gap-2 py-1.5 font-medium">
-                  <Shapes size={14} className="text-purple-500" />
-                  <span>Lousa & Fluxograma</span>
+                <DropdownMenuItem onClick={handleAddExcalidrawBlock} className="text-xs cursor-pointer gap-2 py-1.5 font-medium">
+                  <Shapes size={14} className="text-indigo-500" />
+                  <span>Excalidraw</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleAddDrawioBlock} className="text-xs cursor-pointer gap-2 py-1.5 font-medium">
                   <Network size={14} className="text-amber-600" />
@@ -2665,6 +2668,24 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
               );
             }
 
+            if (block.type === 'excalidraw') {
+              return (
+                <ExcalidrawBlock
+                  key={block.id}
+                  block={block}
+                  updateBlock={updateBlock}
+                  removeBlock={removeBlock}
+                  isSelected={selectedBlockId === block.id}
+                  setSelectedId={setSelectedBlockId}
+                  bringToFront={bringBlockToFront}
+                  sendToBack={sendBlockToBack}
+                  onMoveOrCopy={handleOpenTransferModal}
+                  onDuplicate={duplicateBlock}
+                  onCopyClipboard={handleCopyBlockToClipboard}
+                />
+              );
+            }
+
             // Default Text Block
             return (
               <TextBlock
@@ -2800,7 +2821,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
           isOpen={insertImageToTextBlockModal.isOpen}
           onClose={() => setInsertImageToTextBlockModal({ isOpen: false, imageBlock: null })}
           imageBlock={insertImageToTextBlockModal.imageBlock}
-          blocks={blocks}
+          allBlocks={blocks}
           onConvertToTextBlock={handleConvertImageBlockToTextBlock}
           onInsertIntoExistingTextBlock={handleInsertImageIntoExistingTextBlock}
           onCreateNewTextBlockWithImage={handleCreateNewTextBlockWithImage}
