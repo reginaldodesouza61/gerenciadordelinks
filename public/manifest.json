@@ -34,5 +34,21 @@
       "type": "image/png",
       "purpose": "any"
     }
+  ],
+  "shortcuts": [
+    {
+      "name": "Anotações",
+      "short_name": "Notas",
+      "description": "Abrir caderno de anotações e documentos",
+      "url": "/?tab=notes",
+      "icons": [{ "src": "/web-app-manifest-192x192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Links & Favoritos",
+      "short_name": "Links",
+      "description": "Acessar seus links e categorias",
+      "url": "/?tab=links",
+      "icons": [{ "src": "/web-app-manifest-192x192.png", "sizes": "192x192" }]
+    }
   ]
 }

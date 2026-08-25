@@ -3,11 +3,13 @@ import { useAuthStore } from '@/lib/store/authStore';
 import { useLinkStore } from '@/lib/store/linkStore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Search, List, Grid, Menu, X, User, Sun, Moon, LogOut, Link as LinkIcon, FileText, Settings, Sparkles, Globe } from 'lucide-react';
+import { Search, List, Grid, Menu, X, User, Sun, Moon, LogOut, Link as LinkIcon, FileText, Settings, Sparkles, Globe, Download, Smartphone } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { APP_VERSION } from '@/lib/version';
 import { cn } from '@/lib/utils';
 import { SettingsModal } from '@/components/settings/SettingsModal';
+import { PwaInstallModal } from '@/components/pwa/PwaInstallModal';
+import { usePwaInstall } from '@/lib/pwa/usePwaInstall';
 import { getGeminiApiKey } from '@/lib/geminiService';
 
 interface HeaderProps {
@@ -27,7 +29,9 @@ export function Header({ activeTab = 'links', setActiveTab }: HeaderProps) {
   
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isPwaModalOpen, setIsPwaModalOpen] = useState(false);
   const [hasGeminiKey, setHasGeminiKey] = useState(false);
+  const { isInstalled, isInstallable, isIOS, installApp } = usePwaInstall();
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
@@ -133,6 +137,20 @@ export function Header({ activeTab = 'links', setActiveTab }: HeaderProps) {
             )}
             
             <div className="flex items-center space-x-1 pl-2 border-l border-border/50">
+              {/* PWA Install Button */}
+              {!isInstalled && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsPwaModalOpen(true)}
+                  title="Instalar Atlas Workspace como Aplicativo (PWA)"
+                  className="h-8 px-2.5 text-xs font-medium gap-1.5 rounded-full border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 bg-indigo-50/60 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors"
+                >
+                  <Download size={13} className="shrink-0" />
+                  <span className="hidden lg:inline">Instalar App</span>
+                </Button>
+              )}
+
               {/* Settings / Configurações & Gemini AI Button */}
               <Button 
                 variant="ghost" 
@@ -278,6 +296,17 @@ export function Header({ activeTab = 'links', setActiveTab }: HeaderProps) {
               )}
               
               <div className="grid grid-cols-2 gap-2">
+                {!isInstalled && (
+                  <Button 
+                    variant="outline" 
+                    className="w-full h-10 text-xs gap-2 rounded-xl border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 bg-indigo-50/50 dark:bg-indigo-950/30 col-span-2"
+                    onClick={() => { setIsPwaModalOpen(true); setIsMenuOpen(false); }}
+                  >
+                    <Download size={14} />
+                    Instalar Aplicativo (PWA)
+                  </Button>
+                )}
+
                 <Button 
                   variant="outline" 
                   className="w-full h-10 text-xs gap-2 rounded-xl"
@@ -320,6 +349,11 @@ export function Header({ activeTab = 'links', setActiveTab }: HeaderProps) {
       <SettingsModal 
         open={isSettingsOpen} 
         onOpenChange={setIsSettingsOpen} 
+      />
+
+      <PwaInstallModal
+        open={isPwaModalOpen}
+        onOpenChange={setIsPwaModalOpen}
       />
     </header>
   );

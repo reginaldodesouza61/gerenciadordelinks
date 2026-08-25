@@ -9,18 +9,20 @@ import { Label } from '@/components/ui/label';
 import { 
   Sparkles, Key, CheckCircle2, AlertCircle, Eye, EyeOff, 
   User, Info, RefreshCw, Cpu, ShieldCheck, Check,
-  Lock, Fingerprint, Database, KeyRound, Shield, ExternalLink, Trash2
+  Lock, Fingerprint, Database, KeyRound, Shield, ExternalLink, Trash2,
+  Download, Smartphone, Laptop, WifiOff, Zap, Share, PlusSquare
 } from 'lucide-react';
 import { 
   getGeminiApiKey, setGeminiApiKey, removeGeminiApiKey, testGeminiApiKey, 
   DEFAULT_DEVELOPER_INFO, SYSTEM_INFO 
 } from '@/lib/geminiService';
+import { usePwaInstall } from '@/lib/pwa/usePwaInstall';
 import { toast } from 'sonner';
 
 interface SettingsModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  defaultTab?: 'gemini' | 'developer' | 'system';
+  defaultTab?: 'gemini' | 'pwa' | 'developer' | 'system';
 }
 
 export function SettingsModal({ open, onOpenChange, defaultTab = 'gemini' }: SettingsModalProps) {
@@ -29,7 +31,9 @@ export function SettingsModal({ open, onOpenChange, defaultTab = 'gemini' }: Set
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [hasStoredKey, setHasStoredKey] = useState(false);
-  const [activeTab, setActiveTab] = useState(defaultTab);
+  const [activeTab, setActiveTab] = useState<'gemini' | 'pwa' | 'developer' | 'system'>(defaultTab);
+
+  const { isInstalled, isInstallable, isIOS, hasPrompt, installApp } = usePwaInstall();
 
   useEffect(() => {
     if (open) {
@@ -101,19 +105,23 @@ export function SettingsModal({ open, onOpenChange, defaultTab = 'gemini' }: Set
         </DialogHeader>
 
         <div className="p-6 max-h-[75vh] overflow-y-auto">
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'gemini' | 'developer' | 'system')} className="w-full">
-            <TabsList className="grid grid-cols-3 bg-slate-100 dark:bg-zinc-800/80 p-1 rounded-xl mb-6">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'gemini' | 'pwa' | 'developer' | 'system')} className="w-full">
+            <TabsList className="grid grid-cols-4 bg-slate-100 dark:bg-zinc-800/80 p-1 rounded-xl mb-6">
               <TabsTrigger value="gemini" className="rounded-lg text-xs gap-1.5 font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-900 data-[state=active]:shadow-xs">
                 <Sparkles size={14} className="text-indigo-500" />
                 <span>IA Gemini</span>
               </TabsTrigger>
+              <TabsTrigger value="pwa" className="rounded-lg text-xs gap-1.5 font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-900 data-[state=active]:shadow-xs">
+                <Download size={14} className="text-indigo-600 dark:text-indigo-400" />
+                <span>Instalar App</span>
+              </TabsTrigger>
               <TabsTrigger value="developer" className="rounded-lg text-xs gap-1.5 font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-900 data-[state=active]:shadow-xs">
                 <User size={14} className="text-blue-500" />
-                <span>Desenvolvedor</span>
+                <span>Autor</span>
               </TabsTrigger>
               <TabsTrigger value="system" className="rounded-lg text-xs gap-1.5 font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-900 data-[state=active]:shadow-xs">
                 <Info size={14} className="text-emerald-500" />
-                <span>Sobre o Sistema</span>
+                <span>Sistema</span>
               </TabsTrigger>
             </TabsList>
 
@@ -248,7 +256,85 @@ export function SettingsModal({ open, onOpenChange, defaultTab = 'gemini' }: Set
               </div>
             </TabsContent>
 
-            {/* TAB 2: DEVELOPER INFO */}
+            {/* TAB 2: PWA / INSTALAÇÃO DO APP */}
+            <TabsContent value="pwa" className="space-y-4 focus-visible:outline-none">
+              <div className="p-4 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/50 space-y-2">
+                <div className="flex items-center gap-2 text-indigo-900 dark:text-indigo-200 font-semibold text-sm">
+                  <Download size={16} className="text-indigo-600 dark:text-indigo-400" />
+                  <span>Aplicativo Progressivo (PWA) & Acesso Offline</span>
+                </div>
+                <p className="text-xs text-indigo-700/90 dark:text-indigo-300 leading-relaxed">
+                  O Atlas Workspace pode ser instalado diretamente no seu computador ou smartphone como um aplicativo nativo independente, com carregamento instantâneo e cache offline.
+                </p>
+              </div>
+
+              {/* Status do PWA */}
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/60 dark:bg-zinc-800/40 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Laptop size={16} className="text-slate-600 dark:text-zinc-300" />
+                    <span className="text-xs font-semibold text-slate-800 dark:text-zinc-200">Status de Instalação:</span>
+                  </div>
+                  {isInstalled ? (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+                      <CheckCircle2 size={12} /> Instalado como App Nativo
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 px-2.5 py-0.5 rounded-full border border-indigo-200 dark:border-indigo-800">
+                      <Download size={12} /> Disponível para Instalação
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 pt-1 text-center">
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800">
+                    <Zap className="h-4 w-4 text-amber-500 mx-auto mb-1" />
+                    <div className="text-[11px] font-bold text-slate-800 dark:text-zinc-200">Aceleração</div>
+                    <div className="text-[9px] text-slate-400">Janela dedicada</div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800">
+                    <WifiOff className="h-4 w-4 text-indigo-500 mx-auto mb-1" />
+                    <div className="text-[11px] font-bold text-slate-800 dark:text-zinc-200">Cache Local</div>
+                    <div className="text-[9px] text-slate-400">Service Worker v1</div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800">
+                    <ShieldCheck className="h-4 w-4 text-emerald-500 mx-auto mb-1" />
+                    <div className="text-[11px] font-bold text-slate-800 dark:text-zinc-200">Segurança</div>
+                    <div className="text-[9px] text-slate-400">HTTPS & Sandbox</div>
+                  </div>
+                </div>
+
+                {!isInstalled && (
+                  <div className="pt-2">
+                    {isIOS ? (
+                      <div className="p-3 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 text-xs text-indigo-900 dark:text-indigo-300 space-y-1">
+                        <p className="font-semibold flex items-center gap-1">
+                          <Smartphone size={13} /> Para instalar no iPhone/iPad:
+                        </p>
+                        <p className="text-[11px] leading-relaxed">
+                          No Safari, toque no ícone <strong className="inline-flex items-center gap-0.5"><Share size={11} /> Compartilhar</strong> e selecione <strong className="inline-flex items-center gap-0.5"><PlusSquare size={11} /> Adicionar à Tela de Início</strong>.
+                        </p>
+                      </div>
+                    ) : (
+                      <Button
+                        onClick={async () => {
+                          const res = await installApp();
+                          if (res === 'unavailable') {
+                            toast.info('Para instalar, você também pode usar o ícone de instalação na barra do navegador (ao lado da URL).');
+                          }
+                        }}
+                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold h-10 rounded-xl gap-2 shadow-md shadow-indigo-500/20"
+                      >
+                        <Download size={15} />
+                        {hasPrompt ? 'Instalar Aplicativo no Dispositivo' : 'Instalar Atlas Workspace (PWA)'}
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </TabsContent>
+
+            {/* TAB 3: DEVELOPER INFO */}
             <TabsContent value="developer" className="space-y-4 focus-visible:outline-none">
               <div className="p-5 rounded-2xl bg-gradient-to-br from-slate-50 to-slate-100/70 dark:from-zinc-800/60 dark:to-zinc-900 border border-slate-200 dark:border-zinc-800 flex flex-col sm:flex-row items-start sm:items-center gap-4">
                 <div className="h-16 w-16 rounded-2xl bg-primary text-primary-foreground flex items-center justify-center text-xl font-bold shadow-md shrink-0">
