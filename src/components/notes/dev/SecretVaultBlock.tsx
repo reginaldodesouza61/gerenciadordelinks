@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, memo } from 'react';
 import { Rnd } from 'react-rnd';
 import { CanvasBlock, SecretItem, SecretType, SecretEnv, SecretItemCustomField } from '@/types/notes';
 import { 
@@ -52,7 +52,7 @@ interface SecretVaultBlockProps {
   onCopyClipboard?: (block: CanvasBlock) => void;
 }
 
-export function SecretVaultBlock({
+export const SecretVaultBlock = memo(function SecretVaultBlock({
   block,
   updateBlock,
   removeBlock,
@@ -2168,4 +2168,14 @@ export function SecretVaultBlock({
       </Dialog>
     </>
   );
-}
+}, (prev, next) => {
+  return (
+    prev.isSelected === next.isSelected &&
+    prev.block.x === next.block.x &&
+    prev.block.y === next.block.y &&
+    prev.block.width === next.block.width &&
+    prev.block.height === next.block.height &&
+    prev.block.vaultTitle === next.block.vaultTitle &&
+    JSON.stringify(prev.block.secrets) === JSON.stringify(next.block.secrets)
+  );
+});

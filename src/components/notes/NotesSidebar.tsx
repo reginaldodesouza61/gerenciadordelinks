@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { 
   Plus, Edit2, Trash, ChevronDown, ChevronRight, FileText, Folder, 
   ChevronLeft, Trash2, RotateCcw, GripVertical, ChevronUp, PanelLeftClose,
-  Search
+  Search, Cloud, CloudOff, RefreshCw, AlertTriangle
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -30,11 +30,14 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
     reorderSections, moveSection,
     addPage, updatePage, deletePage,
     reorderPages, movePage,
-    restoreLastDeleted
+    restoreLastDeleted,
+    pageSyncStatuses,
+    resolveConflict
   } = useNoteStore();
 
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [expandedPages, setExpandedPages] = useState<string[]>([]);
+  const [conflictPageId, setConflictPageId] = useState<string | null>(null);
   
   // Drag and drop state for sections
   const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
@@ -373,7 +376,23 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
               <div className="w-[15px] shrink-0" />
             )}
             <FileText size={13} className={isActive ? "text-indigo-500 shrink-0" : "text-gray-400 dark:text-zinc-500 shrink-0"} />
-            <span className="text-[13px] truncate" title={page.titulo}>{page.titulo}</span>
+            <span className="text-[13px] truncate flex-1" title={page.titulo}>{page.titulo}</span>
+            {pageSyncStatuses[page.id] === 'pending' && (
+              <RefreshCw size={10} className="text-amber-500 animate-spin shrink-0 ml-1" title="Alterações locais pendentes de sincronização" />
+            )}
+            {pageSyncStatuses[page.id] === 'conflict' && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setConflictPageId(page.id);
+                }}
+                className="p-0.5 rounded hover:bg-rose-100 dark:hover:bg-rose-950/40 shrink-0 ml-1"
+                title="Clique para resolver conflito de sincronização corporativo"
+              >
+                <AlertTriangle size={11} className="text-rose-500 animate-pulse shrink-0" />
+              </button>
+            )}
           </div>
 
           <div className="flex items-center shrink-0 gap-0.5 opacity-0 group-hover/page:opacity-100 focus-within:opacity-100 transition-opacity">
@@ -700,6 +719,51 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
           <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>Cancelar</Button>
             <Button variant="destructive" className="bg-red-600 hover:bg-red-700 text-white" onClick={confirmDelete}>Mover para Lixeira</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Conflict Resolution Dialog */}
+      <Dialog open={conflictPageId !== null} onOpenChange={(open) => !open && setConflictPageId(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-rose-600 dark:text-rose-400">
+              <AlertTriangle className="h-5 w-5 animate-pulse" />
+              Conflito de Sincronização
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-3">
+            <p className="text-sm text-slate-600 dark:text-zinc-300">
+              A página <strong>"{pages.find(p => p.id === conflictPageId)?.titulo}"</strong> possui edições locais e modificações mais recentes na nuvem.
+            </p>
+            <p className="text-xs text-slate-500 dark:text-zinc-400">
+              Escolha qual versão manter como definitiva no Atlas Workspace:
+            </p>
+          </div>
+          <DialogFooter className="flex flex-col sm:flex-row gap-2">
+            <Button 
+              variant="outline" 
+              className="w-full sm:w-auto"
+              onClick={async () => {
+                if (conflictPageId) {
+                  await resolveConflict(conflictPageId, 'remote');
+                  setConflictPageId(null);
+                }
+              }}
+            >
+              Manter Versão Nuvem (Cloud)
+            </Button>
+            <Button 
+              className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white"
+              onClick={async () => {
+                if (conflictPageId) {
+                  await resolveConflict(conflictPageId, 'local');
+                  setConflictPageId(null);
+                }
+              }}
+            >
+              Usar Minha Versão Local
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

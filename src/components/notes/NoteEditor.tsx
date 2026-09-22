@@ -1,6 +1,9 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo, memo } from 'react';
 import { useNoteStore } from '@/lib/store/noteStore';
 import { useAuthStore } from '@/lib/store/authStore';
+import { supabase } from '@/lib/supabase';
+import { uploadImageToStorage } from '@/lib/storage/imageStorage';
+import { cleanupOrphanedAssets, deleteAsset } from '@/lib/storage/storageCleanup';
 import { decryptNoteContent, isFieldEncrypted } from '@/lib/encryption';
 import { CanvasBlock } from '@/types/notes';
 import { Link } from '@/types/supabase';
@@ -12,7 +15,8 @@ import {
   Highlighter, Palette, TableProperties, Plus, ChevronRight, Combine,
   Code2, ShieldCheck, Link as LinkIcon, Type, Terminal, KeyRound, Sparkles, Wand2,
   Camera, Image as ImageIcon, Upload, Download, Copy, ChevronDown, Undo2, Redo2, PanelLeftOpen,
-  Shapes, Pencil, Search, Network, Workflow, Maximize2, Minimize2, ChevronUp, PlusCircle, Layers, Clock, Globe, ExternalLink
+  Shapes, Pencil, Search, Network, Workflow, Maximize2, Minimize2, ChevronUp, PlusCircle, Layers, Clock, Globe, ExternalLink,
+  Check, RefreshCw, AlertCircle, Cloud, CloudOff, Database, History, AlertTriangle
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -40,6 +44,7 @@ import { AiAssistantModal } from './AiAssistantModal';
 import { ScreenCropModal } from './ScreenCropModal';
 import { InsertImageToTextBlockModal } from './dev/InsertImageToTextBlockModal';
 import { SettingsModal } from '@/components/settings/SettingsModal';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { captureScreen, fileToDataUrl } from '@/lib/screenCapture';
 import { copyBlockToClipboard, getBlockFromClipboard, getBlockSummary } from '@/lib/utils/blockClipboard';
 import { toast } from 'sonner';
@@ -681,7 +686,7 @@ function GlobalToolbar({
   );
 }
 
-function TextBlock({
+const TextBlock = memo(function TextBlock({
   block,
   updateBlock,
   removeBlock,
@@ -1250,7 +1255,16 @@ function TextBlock({
       )}
     </>
   );
-}
+}, (prev, next) => {
+  return (
+    prev.isSelected === next.isSelected &&
+    prev.block.x === next.block.x &&
+    prev.block.y === next.block.y &&
+    prev.block.width === next.block.width &&
+    prev.block.height === next.block.height &&
+    prev.block.content === next.block.content
+  );
+});
 
 interface NoteEditorProps {
   pageId: string;
@@ -1263,10 +1277,18 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
   const pages = useNoteStore((state) => state.pages);
   const updatePage = useNoteStore((state) => state.updatePage);
   const relations = useNoteStore((state) => state.relations);
+  const getLocalRevisions = useNoteStore((state) => state.getLocalRevisions);
+  const restoreRevision = useNoteStore((state) => state.restoreRevision);
   const page = pages.find((p) => p.id === pageId);
   const [blocks, setBlocks] = useState<CanvasBlock[]>([]);
   const [activeEditor, setActiveEditor] = useState<Editor | null>(null);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+  const selectedBlockIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    selectedBlockIdRef.current = selectedBlockId;
+  }, [selectedBlockId]);
+
   const [isInsertLinkOpen, setIsInsertLinkOpen] = useState(false);
   const [insertLinkTab, setInsertLinkTab] = useState<'registered' | 'custom'>('registered');
   const [insertLinkTargetBlockId, setInsertLinkTargetBlockId] = useState<string | null>(null);
@@ -1304,10 +1326,38 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     imageBlock: null,
   });
 
+  // Local Revisions & Image Audit states
+  const [isRevisionsOpen, setIsRevisionsOpen] = useState(false);
+  const [revisionsList, setRevisionsList] = useState<Record<string, unknown>[]>([]);
+  const [isLoadingRevisions, setIsLoadingRevisions] = useState(false);
+
+  const [isImageAuditOpen, setIsImageAuditOpen] = useState(false);
+  const [detectedBase64Images, setDetectedBase64Images] = useState<{
+    id: string;
+    blockId: string;
+    blockType: string;
+    base64DataUrl: string;
+  }[]>([]);
+  const [isMigratingImages, setIsMigratingImages] = useState(false);
+  const [migrationStatus, setMigrationStatus] = useState('');
+  const [isCleaningOrphans, setIsCleaningOrphans] = useState(false);
+  const [orphanedList, setOrphanedList] = useState<string[]>([]);
+
   const canvasRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastLoadedPageIdRef = useRef<string | null>(null);
   const lastSavedContentRef = useRef<string | null>(null);
+
+  // Sync and Autosave State / Refs
+  const [syncStatus, setSyncStatus] = useState<'saved' | 'saving' | 'dirty' | 'error'>('saved');
+  const autosaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const hasUnsavedChangesRef = useRef<boolean>(false);
+  const blocksRef = useRef<CanvasBlock[]>([]);
+
+  // Keep blocksRef.current updated with the latest blocks state
+  useEffect(() => {
+    blocksRef.current = blocks;
+  }, [blocks]);
 
   // Listen for scroll & highlight target block event from search
   useEffect(() => {
@@ -1338,6 +1388,335 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
   const relatedLinksCount = useMemo(() => {
     return relations.filter((r) => r.note_id === pageId).length;
   }, [relations, pageId]);
+
+  // Local Revisions & Image Audit handlers
+  const handleLoadRevisions = useCallback(async () => {
+    if (!pageId) return;
+    setIsLoadingRevisions(true);
+    try {
+      const list = await getLocalRevisions(pageId);
+      setRevisionsList(list as Record<string, unknown>[]);
+    } catch (err) {
+      console.error('Failed to load local revisions:', err);
+      toast.error('Não foi possível carregar as revisões locais.');
+    } finally {
+      setIsLoadingRevisions(false);
+    }
+  }, [pageId, getLocalRevisions]);
+
+  const handleRestoreRevision = useCallback(async (revisionId: number) => {
+    if (!pageId) return;
+    try {
+      await restoreRevision(pageId, revisionId);
+      toast.success('Revisão local restaurada com sucesso!');
+      setIsRevisionsOpen(false);
+      // Force reload of blocks
+      const updatedPage = useNoteStore.getState().pages.find(p => p.id === pageId);
+      if (updatedPage && updatedPage.conteudo) {
+        try {
+          const parsed = JSON.parse(updatedPage.conteudo) as CanvasBlock[];
+          setBlocks(parsed);
+        } catch {
+          // fallback
+        }
+      }
+    } catch (err) {
+      console.error('Failed to restore revision:', err);
+      toast.error('Erro ao restaurar revisão.');
+    }
+  }, [pageId, restoreRevision]);
+
+  const handleScanBase64Images = useCallback(() => {
+    const detected: { id: string; blockId: string; blockType: string; base64DataUrl: string }[] = [];
+    
+    blocks.forEach((block) => {
+      if (block.type === 'image') {
+        if (block.conteudo && block.conteudo.startsWith('data:image/')) {
+          detected.push({
+            id: crypto.randomUUID(),
+            blockId: block.id,
+            blockType: 'image',
+            base64DataUrl: block.conteudo
+          });
+        }
+      } else if (block.type === 'text') {
+        const regex = /src="(data:image\/[^"]+;base64,[^"]+)"/g;
+        let match;
+        while ((match = regex.exec(block.conteudo)) !== null) {
+          detected.push({
+            id: crypto.randomUUID(),
+            blockId: block.id,
+            blockType: 'text',
+            base64DataUrl: match[1]
+          });
+        }
+      }
+    });
+
+    setDetectedBase64Images(detected);
+    setIsImageAuditOpen(true);
+  }, [blocks]);
+
+  const handleMigrateImages = useCallback(async () => {
+    if (!pageId || detectedBase64Images.length === 0) return;
+    const userState = useAuthStore.getState();
+    const userId = userState.user?.id;
+    if (!userId) {
+      toast.error('Usuário não autenticado.');
+      return;
+    }
+
+    setIsMigratingImages(true);
+    setMigrationStatus('Iniciando upload de imagens para o Supabase Storage...');
+
+    try {
+      const updatedBlocks = JSON.parse(JSON.stringify(blocks)) as CanvasBlock[];
+      let successCount = 0;
+
+      for (let i = 0; i < detectedBase64Images.length; i++) {
+        const item = detectedBase64Images[i];
+        setMigrationStatus(`Fazendo upload da imagem ${i + 1} de ${detectedBase64Images.length}...`);
+
+        try {
+          const publicUrl = await uploadImageToStorage(item.base64DataUrl, pageId, userId);
+
+          const block = updatedBlocks.find(b => b.id === item.blockId);
+          if (block) {
+            if (block.type === 'image') {
+              block.imageUrl = publicUrl;
+              block.conteudo = publicUrl;
+              successCount++;
+            } else if (block.type === 'text') {
+              if (block.conteudo) {
+                block.conteudo = block.conteudo.replace(item.base64DataUrl, publicUrl);
+              }
+              if (block.content) {
+                block.content = block.content.replace(item.base64DataUrl, publicUrl);
+              }
+              successCount++;
+            }
+          }
+        } catch (uploadErr) {
+          const errMessage = (uploadErr as Error).message || '';
+          console.error('Error uploading image index', i, uploadErr);
+          if (errMessage === 'BUCKET_NOT_FOUND') {
+            throw new Error('BUCKET_NOT_FOUND');
+          }
+        }
+      }
+
+      setBlocks(updatedBlocks);
+      await updatePage(pageId, { conteudo: JSON.stringify(updatedBlocks) });
+      toast.success(`${successCount} imagens migradas com sucesso para o Supabase Storage!`);
+      setIsImageAuditOpen(false);
+    } catch (err) {
+      const errMessage = (err as Error).message || '';
+      console.error('Image migration failed:', err);
+      if (errMessage === 'BUCKET_NOT_FOUND') {
+        toast.error('Bucket "note-assets" não encontrado no Supabase Storage. Crie o bucket "note-assets" como público no painel do Supabase.', { duration: 10000 });
+      } else {
+        toast.error('Houve um problema ao migrar algumas imagens.');
+      }
+    } finally {
+      setIsMigratingImages(false);
+      setMigrationStatus('');
+    }
+  }, [pageId, detectedBase64Images, blocks, updatePage]);
+
+  const handleScanOrphans = useCallback(async () => {
+    if (!pageId) return;
+    const userState = useAuthStore.getState();
+    const userId = userState.user?.id;
+    if (!userId) {
+      toast.error('Usuário não autenticado.');
+      return;
+    }
+
+    setIsCleaningOrphans(true);
+    try {
+      const result = await cleanupOrphanedAssets(pageId, userId, blocks);
+      setOrphanedList(result.orphans);
+      if (result.orphans.length === 0) {
+        toast.success('Nenhum arquivo órfão detectado nesta página!');
+      } else {
+        toast.success(`Identificados ${result.orphans.length} arquivos de imagem órfãos no storage.`);
+      }
+    } catch (err) {
+      console.error('Falha ao auditar órfãos:', err);
+      toast.error('Erro ao buscar arquivos órfãos.');
+    } finally {
+      setIsCleaningOrphans(false);
+    }
+  }, [pageId, blocks]);
+
+  const handleClearOrphans = useCallback(async () => {
+    if (!pageId || orphanedList.length === 0) return;
+    setIsCleaningOrphans(true);
+    try {
+      let deletedCount = 0;
+      for (const url of orphanedList) {
+        const ok = await deleteAsset(url);
+        if (ok) deletedCount++;
+      }
+      toast.success(`${deletedCount} arquivos de imagem órfãos removidos com sucesso do Supabase Storage.`);
+      setOrphanedList([]);
+    } catch (err) {
+      console.error('Falha ao remover órfãos:', err);
+      toast.error('Erro ao excluir arquivos órfãos.');
+    } finally {
+      setIsCleaningOrphans(false);
+    }
+  }, [pageId, orphanedList]);
+
+  // --- DRAG AND DROP AUTO-SCROLL EFFECT (Notion-like Experience) ---
+  useEffect(() => {
+    let animationFrameId: number | null = null;
+    let lastPointerPosition = { x: 0, y: 0 };
+    let isDragging = false;
+
+    // Dynamically inject CSS style for visual cursor drag lock
+    const styleId = 'meuhub-dragging-styles';
+    let styleEl = document.getElementById(styleId);
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = styleId;
+      styleEl.innerHTML = `
+        .meuhub-dragging, .meuhub-dragging * {
+          cursor: grabbing !important;
+          user-select: none !important;
+        }
+      `;
+      document.head.appendChild(styleEl);
+    }
+
+    const startScrollLoop = () => {
+      if (animationFrameId) return;
+
+      const tick = () => {
+        if (!isDragging) {
+          stopScrollLoop();
+          return;
+        }
+
+        const container = canvasRef.current?.parentElement;
+        if (!container) {
+          animationFrameId = requestAnimationFrame(tick);
+          return;
+        }
+
+        const rect = container.getBoundingClientRect();
+        const { x, y } = lastPointerPosition;
+
+        let scrollX = 0;
+        let scrollY = 0;
+
+        const THRESHOLD = 70; // px edge zone
+        const MAX_SPEED = 18; // px max per frame
+
+        // Vertical auto-scroll calculation (with speed scaling relative to edge proximity)
+        if (y >= rect.top && y <= rect.top + THRESHOLD) {
+          const offset = THRESHOLD - (y - rect.top);
+          scrollY = -Math.pow(offset / THRESHOLD, 1.5) * MAX_SPEED;
+        } else if (y <= rect.bottom && y >= rect.bottom - THRESHOLD) {
+          const offset = THRESHOLD - (rect.bottom - y);
+          scrollY = Math.pow(offset / THRESHOLD, 1.5) * MAX_SPEED;
+        }
+
+        // Horizontal auto-scroll calculation (with speed scaling relative to edge proximity)
+        if (x >= rect.left && x <= rect.left + THRESHOLD) {
+          const offset = THRESHOLD - (x - rect.left);
+          scrollX = -Math.pow(offset / THRESHOLD, 1.5) * MAX_SPEED;
+        } else if (x <= rect.right && x >= rect.right - THRESHOLD) {
+          const offset = THRESHOLD - (rect.right - x);
+          scrollX = Math.pow(offset / THRESHOLD, 1.5) * MAX_SPEED;
+        }
+
+        // Apply smooth scrolling and update block coordinates in sync
+        if (scrollX !== 0 || scrollY !== 0) {
+          container.scrollLeft += scrollX;
+          container.scrollTop += scrollY;
+
+          // Crucial: Update the dragged block's coordinates in the parent state by the exact scroll delta
+          // This keeps the block completely locked under the cursor instead of drifting away!
+          const activeId = selectedBlockIdRef.current;
+          if (activeId) {
+            setBlocks((prev) => {
+              return prev.map((b) => {
+                if (b.id === activeId) {
+                  return {
+                    ...b,
+                    x: Math.max(0, b.x + scrollX),
+                    y: Math.max(12, b.y + scrollY)
+                  };
+                }
+                return b;
+              });
+            });
+          }
+        }
+
+        animationFrameId = requestAnimationFrame(tick);
+      };
+
+      animationFrameId = requestAnimationFrame(tick);
+    };
+
+    const stopScrollLoop = () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+    };
+
+    const handlePointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+
+      // Detect if click/touch is on a drag handle (class suffix -drag-handle or any closest element)
+      const hasDragHandleClass = target.className && typeof target.className === 'string' && (
+        target.className.includes('-drag-handle') || 
+        target.className.includes('cursor-grab') || 
+        target.className.includes('cursor-grabbing')
+      );
+      const isDragHandle = hasDragHandleClass || target.closest('[class*="-drag-handle"]');
+
+      if (isDragHandle) {
+        isDragging = true;
+        lastPointerPosition = { x: e.clientX, y: e.clientY };
+        document.body.classList.add('meuhub-dragging');
+        startScrollLoop();
+      }
+    };
+
+    const handlePointerMove = (e: PointerEvent) => {
+      if (isDragging) {
+        lastPointerPosition = { x: e.clientX, y: e.clientY };
+      }
+    };
+
+    const handlePointerUp = () => {
+      if (isDragging) {
+        isDragging = false;
+        document.body.classList.remove('meuhub-dragging');
+        stopScrollLoop();
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    document.addEventListener('pointermove', handlePointerMove);
+    document.addEventListener('pointerup', handlePointerUp);
+    document.addEventListener('pointercancel', handlePointerUp);
+
+    return () => {
+      isDragging = false;
+      document.body.classList.remove('meuhub-dragging');
+      stopScrollLoop();
+      document.removeEventListener('pointerdown', handlePointerDown);
+      document.removeEventListener('pointermove', handlePointerMove);
+      document.removeEventListener('pointerup', handlePointerUp);
+      document.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, []);
 
   // Handle opening AI Assistant modal
   const handleOpenAiAssistant = useCallback((blockId?: string, ed?: Editor | null) => {
@@ -1435,6 +1814,92 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     setSelectedBlockId(newBlock.id);
   }, [aiTargetBlockId, selectedBlockId, blocks, activeEditor, pageId, updatePage]);
 
+  // Automatic Background Migration of Base64 Images
+  const triggerAutoMigration = useCallback(async (blocksToCheck: CanvasBlock[]) => {
+    if (!pageId) return;
+    const userState = useAuthStore.getState();
+    const userId = userState.user?.id;
+    if (!userId) return;
+
+    // Scan for Base64 images
+    const legacyImages: { blockId: string; blockType: string; base64DataUrl: string }[] = [];
+    
+    blocksToCheck.forEach((block) => {
+      if (block.type === 'image') {
+        if (block.imageUrl && block.imageUrl.startsWith('data:image/')) {
+          legacyImages.push({
+            blockId: block.id,
+            blockType: 'image',
+            base64DataUrl: block.imageUrl
+          });
+        }
+        else if (block.conteudo && block.conteudo.startsWith('data:image/')) {
+          legacyImages.push({
+            blockId: block.id,
+            blockType: 'image',
+            base64DataUrl: block.conteudo
+          });
+        }
+      } else if (block.type === 'text') {
+        const regex = /src="(data:image\/[^"]+;base64,[^"]+)"/g;
+        let match;
+        const blockContent = block.conteudo || block.content || '';
+        while ((match = regex.exec(blockContent)) !== null) {
+          legacyImages.push({
+            blockId: block.id,
+            blockType: 'text',
+            base64DataUrl: match[1]
+          });
+        }
+      }
+    });
+
+    if (legacyImages.length === 0) return;
+
+    console.log(`[Auto-Migration] Detectadas ${legacyImages.length} imagens Base64 na página ${pageId}. Iniciando migração em segundo plano...`);
+    toast.info(`Otimizando ${legacyImages.length} imagens desta nota em segundo plano para o Supabase Storage...`, { duration: 4500 });
+
+    try {
+      const updatedBlocks = JSON.parse(JSON.stringify(blocksToCheck)) as CanvasBlock[];
+      let migrationCount = 0;
+
+      for (const item of legacyImages) {
+        try {
+          const publicUrl = await uploadImageToStorage(item.base64DataUrl, pageId, userId);
+          
+          const block = updatedBlocks.find(b => b.id === item.blockId);
+          if (block) {
+            if (block.type === 'image') {
+              block.imageUrl = publicUrl;
+              block.conteudo = publicUrl;
+              migrationCount++;
+            } else if (block.type === 'text') {
+              if (block.conteudo) {
+                block.conteudo = block.conteudo.replace(item.base64DataUrl, publicUrl);
+              }
+              if (block.content) {
+                block.content = block.content.replace(item.base64DataUrl, publicUrl);
+              }
+              migrationCount++;
+            }
+          }
+        } catch (uploadErr) {
+          console.error('[Auto-Migration] Falha ao migrar uma imagem individual:', uploadErr);
+        }
+      }
+
+      if (migrationCount > 0) {
+        setBlocks(updatedBlocks);
+        const json = JSON.stringify(updatedBlocks);
+        lastSavedContentRef.current = json;
+        await updatePage(pageId, { conteudo: json });
+        toast.success(`Otimização concluída! ${migrationCount} imagens migradas com sucesso para o note-assets.`);
+      }
+    } catch (err) {
+      console.error('[Auto-Migration] Falha no processo de migração automática:', err);
+    }
+  }, [pageId, updatePage]);
+
   // Load and parse content on page switch
   useEffect(() => {
     if (!page) return;
@@ -1460,11 +1925,12 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
             if (decrypted && decrypted !== raw) {
               try {
                 if (decrypted.trim().startsWith('[')) {
-                  const blocksData = JSON.parse(decrypted);
+                  const blocksData = JSON.parse(decrypted) as CanvasBlock[];
                   lastSavedContentRef.current = decrypted;
                   lastLoadedPageIdRef.current = pageId;
                   setBlocks(blocksData);
                   updatePage(pageId, { conteudo: decrypted });
+                  triggerAutoMigration(blocksData);
                 }
               } catch {
                 // ignore
@@ -1495,10 +1961,99 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     // Filter out unselected empty blocks on load
     const safeParsed = Array.isArray(parsedBlocks) ? parsedBlocks : [];
     const validBlocks = safeParsed.filter((b) => b && !isBlockEmpty(b));
-    setBlocks(validBlocks.length > 0 ? validBlocks : safeParsed);
+    const blocksToUse = validBlocks.length > 0 ? validBlocks : safeParsed;
+    setBlocks(blocksToUse);
     setActiveEditor(null);
     setSelectedBlockId(null);
-  }, [pageId, page?.conteudo]);
+    
+    // Auto-migrate Base64 images to Storage in second background thread
+    triggerAutoMigration(blocksToUse);
+  }, [pageId, page?.conteudo, triggerAutoMigration]);
+
+  // Immediate manual and unmount save function
+  const saveNow = useCallback(async (blocksToSave?: CanvasBlock[]) => {
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+
+    const blocksArray = blocksToSave || blocksRef.current;
+    const latestJson = JSON.stringify(blocksArray);
+
+    setSyncStatus('saving');
+
+    try {
+      await updatePage(pageId, { conteudo: latestJson });
+      lastSavedContentRef.current = latestJson;
+      hasUnsavedChangesRef.current = false;
+      setSyncStatus('saved');
+    } catch (err) {
+      console.error('Failed to save page changes:', err);
+      setSyncStatus('error');
+      toast.error('Falha ao salvar alterações de forma síncrona.');
+    }
+  }, [pageId, updatePage]);
+
+  // Debounced auto-save triggers
+  const triggerAutosave = useCallback(() => {
+    hasUnsavedChangesRef.current = true;
+    setSyncStatus('dirty');
+
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+    }
+
+    autosaveTimerRef.current = setTimeout(async () => {
+      setSyncStatus('saving');
+      const latestJson = JSON.stringify(blocksRef.current);
+      try {
+        await updatePage(pageId, { conteudo: latestJson });
+        lastSavedContentRef.current = latestJson;
+        hasUnsavedChangesRef.current = false;
+        setSyncStatus('saved');
+      } catch (err) {
+        console.error('Autosave failed:', err);
+        setSyncStatus('error');
+      }
+    }, 1500);
+  }, [pageId, updatePage]);
+
+  // Synchronize blocks to store/Supabase whenever blocks state changes
+  useEffect(() => {
+    // Skip if page just loaded or has changed and we are waiting for initial load
+    if (pageId !== lastLoadedPageIdRef.current) {
+      return;
+    }
+
+    const currentJson = JSON.stringify(blocks);
+    // Skip if identical to what is already saved or currently being saved
+    if (currentJson === lastSavedContentRef.current) {
+      return;
+    }
+
+    triggerAutosave();
+  }, [blocks, pageId, triggerAutosave]);
+
+  // Save when switching pages or unmounting
+  useEffect(() => {
+    // Reset status on page change
+    setSyncStatus('saved');
+    hasUnsavedChangesRef.current = false;
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+
+    return () => {
+      // Force immediate flush of any unsaved changes before page switches or unmounts
+      if (hasUnsavedChangesRef.current) {
+        const latestJson = JSON.stringify(blocksRef.current);
+        updatePage(pageId, { conteudo: latestJson }).catch((err) => {
+          console.error('Error in unmount save:', err);
+        });
+      }
+    };
+  }, [pageId, updatePage]);
 
   // Clean up empty blocks
   const purgeAndSave = useCallback(
@@ -1508,48 +2063,36 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
         (b) => b && (b.id === activeId || !isBlockEmpty(b))
       );
       setBlocks(cleaned);
-      const json = JSON.stringify(cleaned);
-      lastSavedContentRef.current = json;
-      updatePage(pageId, { conteudo: json });
+      saveNow(cleaned);
       return cleaned;
     },
-    [pageId, updatePage]
+    [saveNow]
   );
 
   const updateBlock = useCallback((id: string, updates: Partial<CanvasBlock>) => {
     setBlocks((prev) => {
-      const updated = prev.map((b) => (b.id === id ? { ...b, ...updates } : b));
-      const json = JSON.stringify(updated);
-      lastSavedContentRef.current = json;
-      Promise.resolve().then(() => {
-        updatePage(pageId, { conteudo: json });
-      });
-      return updated;
+      return prev.map((b) => (b.id === id ? { ...b, ...updates } : b));
     });
-  }, [pageId, updatePage]);
+  }, []);
 
   const removeBlock = useCallback((id: string) => {
     setBlocks((prev) => {
       const blockToRemove = prev.find((b) => b.id === id);
       const updated = prev.filter((b) => b.id !== id);
-      const json = JSON.stringify(updated);
-      lastSavedContentRef.current = json;
-      Promise.resolve().then(() => {
-        updatePage(pageId, { conteudo: json });
-      });
+      
+      // Save structural change immediately
+      saveNow(updated);
+
       if (blockToRemove && !isBlockEmpty(blockToRemove)) {
+        const capturedBlock = blockToRemove;
         toast('Bloco removido', {
           duration: 7000,
           action: {
             label: 'Desfazer',
             onClick: () => {
               setBlocks((current) => {
-                const restored = [...current, blockToRemove];
-                const restoredJson = JSON.stringify(restored);
-                lastSavedContentRef.current = restoredJson;
-                Promise.resolve().then(() => {
-                  updatePage(pageId, { conteudo: restoredJson });
-                });
+                const restored = [...current, capturedBlock];
+                saveNow(restored);
                 return restored;
               });
               toast.success('Bloco restaurado!');
@@ -1561,7 +2104,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     });
     setSelectedBlockId((curr) => (curr === id ? null : curr));
     setActiveEditor(null);
-  }, [pageId, updatePage]);
+  }, [saveNow]);
 
   // Duplicate a block
   const duplicateBlock = useCallback((id: string) => {
@@ -1960,14 +2503,16 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     const initialWidth = Math.min(560, Math.max(340, origW));
     const initialHeight = Math.round(initialWidth * aspect) + 56; // account for header/footer
 
+    const blockId = `img_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const newBlock: CanvasBlock = {
-      id: `img_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: blockId,
       x: pos.x,
       y: pos.y,
       width: initialWidth,
       height: Math.min(initialHeight, 520),
       type: 'image',
       imageUrl: dataUrl,
+      conteudo: dataUrl, // Fallback retrocompatível
       imageTitle: `${title} - ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
       capturedAt: `${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`,
     };
@@ -1975,10 +2520,33 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     const nextBlocks = [...cleaned, newBlock];
     setBlocks(nextBlocks);
     setSelectedBlockId(newBlock.id);
-    const json = JSON.stringify(nextBlocks);
-    lastSavedContentRef.current = json;
-    updatePage(pageId, { conteudo: json });
-  }, [blocks, pageId, purgeAndSave, updatePage]);
+    saveNow(nextBlocks);
+
+    // Envio assíncrono em segundo plano para o Supabase Storage se for Base64
+    if (dataUrl.startsWith('data:image/')) {
+      const userState = useAuthStore.getState();
+      const userId = userState.user?.id;
+      if (userId && pageId) {
+        uploadImageToStorage(dataUrl, pageId, userId)
+          .then((publicUrl) => {
+            setBlocks((prevBlocks) => {
+              const updated = prevBlocks.map((b) => {
+                if (b.id === blockId) {
+                  return { ...b, imageUrl: publicUrl, conteudo: publicUrl };
+                }
+                return b;
+              });
+              saveNow(updated);
+              return updated;
+            });
+            console.log(`[Storage] Imagem ${blockId} gravada com sucesso no bucket note-assets.`);
+          })
+          .catch((err) => {
+            console.error('[Storage] Erro no upload em segundo plano da imagem recém-criada:', err);
+          });
+      }
+    }
+  }, [blocks, getSpawnPosition, purgeAndSave, saveNow, pageId]);
 
   // Convert standalone ImageBlock into a rich TextBlock with the image embedded + editable text
   const handleConvertImageBlockToTextBlock = useCallback((imageBlockId: string) => {
@@ -2111,6 +2679,10 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
       if (activeEditor && activeEditor.isFocused) {
         activeEditor.chain().focus().setImage({ src: dataUrl, alt: file.name }).run();
         toast.success('Imagem inserida no bloco de anotações!');
+        // Force immediate save of the active blocks state including the newly inserted image
+        setTimeout(() => {
+          saveNow();
+        }, 50);
         return;
       }
       const cleanName = file.name.replace(/\.[^/.]+$/, '');
@@ -2172,6 +2744,10 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
               if (activeEditor && activeEditor.isFocused) {
                 activeEditor.chain().focus().setImage({ src: dataUrl, alt: 'Print Colado' }).run();
                 toast.success('Imagem colada no bloco de anotações!');
+                // Force immediate save of the active blocks state including the newly pasted image
+                setTimeout(() => {
+                  saveNow();
+                }, 50);
                 return;
               }
 
@@ -2187,9 +2763,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                       }
                       return b;
                     });
-                    const json = JSON.stringify(updated);
-                    lastSavedContentRef.current = json;
-                    updatePage(pageId, { conteudo: json });
+                    saveNow(updated);
                     return updated;
                   });
                   toast.success('Imagem colada no bloco de anotações!');
@@ -2211,7 +2785,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
 
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [activeEditor, blocks, insertImageBlock, pageId, selectedBlockId, updatePage]);
+  }, [activeEditor, blocks, insertImageBlock, pageId, selectedBlockId, saveNow]);
 
   const handleCanvasClick = (e: React.MouseEvent) => {
     if (e.target === canvasRef.current) {
@@ -2308,6 +2882,32 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
               >
                 <Clock size={11} className="text-slate-400 dark:text-zinc-500" />
                 <span>{formattedDate}</span>
+              </span>
+            )}
+
+            {/* Sync status indicator */}
+            {syncStatus === 'saving' && (
+              <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium whitespace-nowrap shrink-0 flex items-center gap-1 bg-amber-50/80 dark:bg-amber-950/20 px-2 py-0.5 rounded-md border border-amber-200/40">
+                <RefreshCw size={11} className="animate-spin text-amber-500" />
+                <span>Salvando...</span>
+              </span>
+            )}
+            {syncStatus === 'saved' && (
+              <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium whitespace-nowrap shrink-0 flex items-center gap-1 bg-emerald-50/80 dark:bg-emerald-950/20 px-2 py-0.5 rounded-md border border-emerald-200/40">
+                <Check size={11} className="text-emerald-500" />
+                <span>Sincronizado</span>
+              </span>
+            )}
+            {syncStatus === 'dirty' && (
+              <span className="text-[11px] text-blue-600 dark:text-blue-400 font-medium whitespace-nowrap shrink-0 flex items-center gap-1 bg-blue-50/80 dark:bg-blue-950/20 px-2 py-0.5 rounded-md border border-blue-200/40">
+                <Clock size={11} className="text-blue-500" />
+                <span>Alterações pendentes</span>
+              </span>
+            )}
+            {syncStatus === 'error' && (
+              <span className="text-[11px] text-rose-600 dark:text-rose-400 font-medium whitespace-nowrap shrink-0 flex items-center gap-1 bg-rose-50/80 dark:bg-rose-950/20 px-2 py-0.5 rounded-md border border-rose-200/40" title="Falha ao sincronizar com o banco de dados">
+                <AlertCircle size={11} className="text-rose-500" />
+                <span>Falha ao salvar alterações</span>
               </span>
             )}
           </div>
@@ -2433,6 +3033,33 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
               </kbd>
             </Button>
 
+            {/* Version History Button */}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setIsRevisionsOpen(true);
+                handleLoadRevisions();
+              }}
+              className="h-7 px-2 text-xs text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg gap-1 font-medium"
+              title="Histórico de Versões Locais"
+            >
+              <History size={13} className="text-emerald-500 dark:text-emerald-400" />
+              <span className="hidden lg:inline">Histórico</span>
+            </Button>
+
+            {/* Image Audit Button */}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleScanBase64Images}
+              className="h-7 px-2 text-xs text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg gap-1 font-medium"
+              title="Auditoria de Imagens Base64"
+            >
+              <Database size={13} className="text-amber-500 dark:text-amber-400" />
+              <span className="hidden lg:inline">Imagens</span>
+            </Button>
+
             {/* Related Links */}
             <Button
               size="sm"
@@ -2477,6 +3104,32 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                 <span>•</span>
                 <Clock size={10} className="text-slate-400 dark:text-zinc-500" />
                 <span>{formattedDate}</span>
+              </span>
+            )}
+
+            {/* Sync status indicator */}
+            {syncStatus === 'saving' && (
+              <span className="text-[10px] text-amber-600 dark:text-amber-400 flex items-center gap-1 font-medium bg-amber-50/50 dark:bg-amber-950/10 px-1.5 py-0.5 rounded border border-amber-200/20">
+                <RefreshCw size={10} className="animate-spin text-amber-500" />
+                <span>Salvando...</span>
+              </span>
+            )}
+            {syncStatus === 'saved' && (
+              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium bg-emerald-50/50 dark:bg-emerald-950/10 px-1.5 py-0.5 rounded border border-emerald-200/20">
+                <Check size={10} className="text-emerald-500" />
+                <span>Sincronizado</span>
+              </span>
+            )}
+            {syncStatus === 'dirty' && (
+              <span className="text-[10px] text-blue-600 dark:text-blue-400 flex items-center gap-1 font-medium bg-blue-50/50 dark:bg-blue-950/10 px-1.5 py-0.5 rounded border border-blue-200/20">
+                <Clock size={10} className="text-blue-500" />
+                <span>Pendente</span>
+              </span>
+            )}
+            {syncStatus === 'error' && (
+              <span className="text-[10px] text-rose-600 dark:text-rose-400 flex items-center gap-1 font-medium bg-rose-50/50 dark:bg-rose-950/10 px-1.5 py-0.5 rounded border border-rose-200/20">
+                <AlertCircle size={10} className="text-rose-500" />
+                <span>Falha ao salvar</span>
               </span>
             )}
           </div>
@@ -2830,6 +3483,240 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
           onCreateNewTextBlockWithImage={handleCreateNewTextBlockWithImage}
         />
       )}
+
+      {/* Local Version History Dialog */}
+      <Dialog open={isRevisionsOpen} onOpenChange={setIsRevisionsOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-indigo-700 dark:text-indigo-300">
+              <History className="h-5 w-5" />
+              Histórico de Versões Locais
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            <p className="text-xs text-slate-500 dark:text-zinc-400">
+              Este histórico armazena automaticamente backups locais conforme você edita, fornecendo proteção corporativa avançada contra perda de dados.
+            </p>
+            {isLoadingRevisions ? (
+              <div className="flex justify-center items-center py-10 gap-2 text-sm text-slate-500">
+                <RefreshCw className="animate-spin h-5 w-5 text-indigo-500" />
+                <span>Carregando revisões...</span>
+              </div>
+            ) : revisionsList.length === 0 ? (
+              <div className="text-center py-10 text-sm text-slate-400 dark:text-zinc-500">
+                Nenhum ponto de restauração anterior foi encontrado para esta página.
+              </div>
+            ) : (
+              <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
+                {revisionsList.map((rev) => {
+                  const revId = rev.id as number;
+                  const revVer = rev.version as number;
+                  const revTitle = rev.titulo as string;
+                  const revTimestamp = rev.timestamp as number;
+                  const revContentStr = rev.conteudo as string || '[]';
+                  let blockCount = 0;
+                  try {
+                    blockCount = JSON.parse(revContentStr).length;
+                  } catch {
+                    // empty
+                  }
+                  
+                  return (
+                    <div 
+                      key={revId}
+                      className="flex items-center justify-between p-3 rounded-lg border border-slate-150 dark:border-zinc-850 bg-slate-50/50 dark:bg-zinc-900/50 hover:bg-slate-50 dark:hover:bg-zinc-800/40 transition-colors"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-1.5 py-0.5 rounded">
+                            v{revVer}
+                          </span>
+                          <span className="text-xs font-semibold text-slate-700 dark:text-zinc-300 truncate">
+                            {revTitle}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1 flex items-center gap-1.5">
+                          <Clock className="h-3 w-3 text-slate-400" />
+                          <span>{new Date(revTimestamp).toLocaleString('pt-BR')}</span>
+                          <span>•</span>
+                          <span>{blockCount} {blockCount === 1 ? 'bloco' : 'blocos'}</span>
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+                        onClick={() => handleRestoreRevision(revId)}
+                      >
+                        Restaurar
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" className="text-xs h-8" onClick={() => setIsRevisionsOpen(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Image Storage Audit Dialog */}
+      <Dialog open={isImageAuditOpen} onOpenChange={(open) => !open && !isMigratingImages && setIsImageAuditOpen(false)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-slate-800 dark:text-zinc-100">
+              <Database className="h-5 w-5 text-amber-500" />
+              Auditoria de Imagens
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            <p className="text-xs text-slate-500 dark:text-zinc-400 leading-relaxed">
+              Analisa se esta página contém imagens inline em formato <strong>Base64</strong>. Imagens Base64 inflam o banco de dados PostgreSQL e degradam o tempo de sincronização e o consumo de banda. Recomendamos fortemente migrar esses arquivos para o <strong>Supabase Storage</strong> para mantê-los otimizados e acessíveis via URLs rápidas.
+            </p>
+
+            {detectedBase64Images.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 px-4 border border-dashed border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/20 dark:bg-emerald-950/10 rounded-xl text-center">
+                <Check className="h-10 w-10 text-emerald-500 mb-2" />
+                <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300">
+                  Nenhuma imagem em Base64 encontrada nesta página!
+                </p>
+                <p className="text-[11px] text-slate-400 dark:text-zinc-500 mt-1">
+                  Seu Atlas Workspace está 100% otimizado. Todas as imagens usam URLs do Storage.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200/60 rounded-lg flex items-start gap-2.5">
+                  <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5 animate-pulse" />
+                  <div>
+                    <p className="text-xs font-bold text-amber-800 dark:text-amber-400">
+                      Atenção: Encontradas {detectedBase64Images.length} {detectedBase64Images.length === 1 ? 'imagem' : 'imagens'} Base64!
+                    </p>
+                    <p className="text-[11px] text-slate-600 dark:text-zinc-400 mt-1">
+                      Essas imagens estão salvas diretamente dentro do texto. Clique em "Migrar para o Supabase Storage" para convertê-las automaticamente.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="max-h-40 overflow-y-auto space-y-1.5 border border-slate-150 dark:border-zinc-850 rounded-lg p-2 bg-slate-50/50 dark:bg-zinc-900/50">
+                  {detectedBase64Images.map((img, i) => (
+                    <div key={img.id} className="text-[11px] flex items-center justify-between text-slate-600 dark:text-zinc-400 p-1.5 bg-white dark:bg-zinc-900 rounded border border-slate-150 dark:border-zinc-850">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className="font-bold text-slate-400">#{i + 1}</span>
+                        <span className="font-semibold px-1 rounded bg-slate-100 dark:bg-zinc-850 text-[10px] uppercase text-slate-500">
+                          {img.blockType === 'image' ? 'Bloco de Imagem' : 'Imagem Inline'}
+                        </span>
+                        <span className="truncate text-slate-400 font-mono">
+                          {img.base64DataUrl.substring(0, 30)}...
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">
+                        {(img.base64DataUrl.length / 1024).toFixed(1)} KB
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                {isMigratingImages && (
+                  <div className="p-3 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200/30 rounded-lg space-y-2">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-indigo-700 dark:text-indigo-400">
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                      <span>{migrationStatus}</span>
+                    </div>
+                    <div className="w-full bg-slate-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                      <div className="bg-indigo-600 h-1.5 animate-pulse rounded-full" style={{ width: '100%' }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Separator and Orphan Assets section */}
+            <div className="border-t border-slate-150 dark:border-zinc-850 pt-4 space-y-3">
+              <h4 className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
+                <Trash2 className="h-3.5 w-3.5 text-rose-500" />
+                Auditoria de Arquivos Órfãos (Storage)
+              </h4>
+              <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-relaxed">
+                Quando você exclui um bloco de imagem, o arquivo correspondente continua no Storage. Use este escanear para identificar e limpar com segurança arquivos de imagem que não possuem referências ativas nesta nota.
+              </p>
+
+              {orphanedList.length > 0 && (
+                <div className="space-y-2">
+                  <div className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-200/30 rounded-lg flex items-start gap-2">
+                    <AlertCircle className="h-4 w-4 text-rose-500 shrink-0 mt-0.5" />
+                    <span className="text-[11px] font-medium text-rose-800 dark:text-rose-400">
+                      Identificados {orphanedList.length} arquivos órfãos sem referências nesta nota!
+                    </span>
+                  </div>
+                  <div className="max-h-24 overflow-y-auto space-y-1 p-2 bg-slate-50/50 dark:bg-zinc-900/50 rounded border border-slate-150 dark:border-zinc-850">
+                    {orphanedList.map((url, i) => (
+                      <div key={url} className="text-[10px] text-slate-500 truncate font-mono">
+                        #{i + 1}: {url}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-8 border-slate-200 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800"
+                  onClick={handleScanOrphans}
+                  disabled={isCleaningOrphans}
+                >
+                  {isCleaningOrphans ? (
+                    <RefreshCw className="h-3 w-3 animate-spin mr-1" />
+                  ) : null}
+                  <span>{isCleaningOrphans ? 'Escaneando...' : 'Escanear Órfãos'}</span>
+                </Button>
+
+                {orphanedList.length > 0 && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="text-xs h-8 bg-rose-600 hover:bg-rose-700 text-white gap-1"
+                    onClick={handleClearOrphans}
+                    disabled={isCleaningOrphans}
+                  >
+                    <Trash2 size={12} />
+                    <span>Excluir Órfãos</span>
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="flex gap-2">
+            <Button 
+              variant="outline" 
+              className="text-xs h-8" 
+              onClick={() => {
+                setIsImageAuditOpen(false);
+                setOrphanedList([]);
+              }}
+              disabled={isMigratingImages || isCleaningOrphans}
+            >
+              Fechar
+            </Button>
+            {detectedBase64Images.length > 0 && (
+              <Button 
+                className="text-xs h-8 bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5"
+                onClick={handleMigrateImages}
+                disabled={isMigratingImages || isCleaningOrphans}
+              >
+                <Upload size={13} />
+                <span>Migrar para o Storage</span>
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

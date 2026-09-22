@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import { Rnd } from 'react-rnd';
 import { CanvasBlock } from '@/types/notes';
 import { 
@@ -24,7 +24,7 @@ interface ImageBlockProps {
   onOpenInsertToTextBlockModal?: (block: CanvasBlock) => void;
 }
 
-export function ImageBlock({
+export const ImageBlock = memo(function ImageBlock({
   block,
   updateBlock,
   removeBlock,
@@ -451,5 +451,16 @@ export function ImageBlock({
       </Dialog>
     </>
   );
-}
+}, (prev, next) => {
+  return (
+    prev.isSelected === next.isSelected &&
+    prev.block.x === next.block.x &&
+    prev.block.y === next.block.y &&
+    prev.block.width === next.block.width &&
+    prev.block.height === next.block.height &&
+    prev.block.imageUrl === next.block.imageUrl &&
+    prev.block.imageCaption === next.block.imageCaption &&
+    prev.block.imageNotes === next.block.imageNotes
+  );
+});
 

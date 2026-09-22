@@ -3,6 +3,11 @@ import { supabase } from '../supabase';
 import { NoteSection, NotePage, NoteLinkRelation, DeletedNoteItem } from '@/types/notes';
 import { toast } from 'sonner';
 import { decryptNoteContent, sanitizeAndEncryptNoteContent } from '@/lib/encryption';
+import { offlineDb } from '@/lib/db/offlineDb';
+import { validateAndSanitizeBlocks } from '@/lib/validation/blockSchema';
+import { auditAndRepairSyncQueue } from '@/lib/storage/syncAudit';
+
+let isSyncingQueue = false;
 
 const TRASH_STORAGE_KEY = 'meuhub_deleted_notes_vault';
 const ACTIVE_PAGE_STORAGE_KEY = 'meuhub_active_page_id';
@@ -17,8 +22,107 @@ const CACHE_KEYS = {
 };
 
 const DEFAULT_USER_ID = 'c72212e7-2b6a-4da7-8745-01eb33414af4';
-const DEFAULT_SECTION_ID = 'sec_default_geral_01';
-const DEFAULT_PAGE_ID = 'page_default_welcome_01';
+const DEFAULT_SECTION_ID = '10000000-0000-0000-0000-000000000001';
+const DEFAULT_PAGE_ID = '20000000-0000-0000-0000-000000000002';
+
+export function sanitizeUuid(id: string | null | undefined): string {
+  if (!id) return '';
+  if (id === 'sec_default_geral_01') return '10000000-0000-0000-0000-000000000001';
+  if (id === 'page_default_welcome_01') return '20000000-0000-0000-0000-000000000002';
+  if (id === 'sec_default_credenciais_02') return '10000000-0000-0000-0000-000000000002';
+  if (id === 'sec_default_dev_03') return '10000000-0000-0000-0000-000000000003';
+  return id;
+}
+
+export function sanitizeUuidOrNull(id: string | null | undefined): string | null {
+  if (!id) return null;
+  const cleaned = sanitizeUuid(id);
+  if (cleaned === 'null' || cleaned === 'undefined') return null;
+  return cleaned;
+}
+
+async function migrateLegacyDatabase() {
+  try {
+    // 1. Migrate LocalStorage active IDs
+    const activePage = localStorage.getItem(ACTIVE_PAGE_STORAGE_KEY);
+    if (activePage) {
+      localStorage.setItem(ACTIVE_PAGE_STORAGE_KEY, sanitizeUuid(activePage));
+    }
+    const activeSec = localStorage.getItem(ACTIVE_SECTION_STORAGE_KEY);
+    if (activeSec) {
+      localStorage.setItem(ACTIVE_SECTION_STORAGE_KEY, sanitizeUuid(activeSec));
+    }
+
+    // 2. Migrate IndexedDB pages
+    const localPages = await offlineDb.pages.toArray();
+    for (const page of localPages) {
+      const sanitizedId = sanitizeUuid(page.id);
+      const sanitizedSecId = sanitizeUuid(page.section_id);
+      const sanitizedParentId = sanitizeUuidOrNull(page.parent_id);
+
+      if (page.id !== sanitizedId || page.section_id !== sanitizedSecId || page.parent_id !== sanitizedParentId) {
+        await offlineDb.pages.delete(page.id);
+        await offlineDb.pages.put({
+          ...page,
+          id: sanitizedId,
+          section_id: sanitizedSecId,
+          parent_id: sanitizedParentId
+        });
+      }
+    }
+
+    // 3. Migrate IndexedDB syncQueue
+    const syncItems = await offlineDb.syncQueue.toArray();
+    for (const item of syncItems) {
+      const sanitizedPageId = sanitizeUuid(item.pageId);
+      let payloadChanged = false;
+      const newPayload = item.payload ? { ...item.payload } : {};
+      
+      if (newPayload.id) {
+        const orig = newPayload.id;
+        newPayload.id = sanitizeUuid(String(orig));
+        if (newPayload.id !== orig) payloadChanged = true;
+      }
+      if (newPayload.section_id) {
+        const orig = newPayload.section_id;
+        newPayload.section_id = sanitizeUuid(String(orig));
+        if (newPayload.section_id !== orig) payloadChanged = true;
+      }
+      if (newPayload.parent_id) {
+        const orig = newPayload.parent_id;
+        newPayload.parent_id = sanitizeUuidOrNull(String(orig));
+        if (newPayload.parent_id !== orig) payloadChanged = true;
+      }
+
+      if (item.pageId !== sanitizedPageId || payloadChanged) {
+        await offlineDb.syncQueue.update(item.id!, {
+          pageId: sanitizedPageId,
+          payload: newPayload
+        });
+      }
+    }
+
+    // 4. Migrate IndexedDB revisions
+    const revs = await offlineDb.revisions.toArray();
+    for (const rev of revs) {
+      const sanitizedPageId = sanitizeUuid(rev.pageId);
+      if (rev.pageId !== sanitizedPageId) {
+        await offlineDb.revisions.delete(rev.id!);
+        await offlineDb.revisions.put({
+          ...rev,
+          pageId: sanitizedPageId
+        });
+      }
+    }
+
+    console.log('[Migration] Legacy non-UUID IDs successfully migrated to valid UUID format.');
+  } catch (err) {
+    console.warn('[Migration] Error migrating database from legacy non-UUID format:', err);
+  }
+}
+
+// Run asynchronous migration immediately upon module loading
+migrateLegacyDatabase();
 
 const DEFAULT_SECTIONS: NoteSection[] = [
   {
@@ -28,13 +132,13 @@ const DEFAULT_SECTIONS: NoteSection[] = [
     created_at: new Date().toISOString()
   },
   {
-    id: 'sec_default_credenciais_02',
+    id: '10000000-0000-0000-0000-000000000002',
     nome: 'Cofre & Credenciais',
     user_id: DEFAULT_USER_ID,
     created_at: new Date().toISOString()
   },
   {
-    id: 'sec_default_dev_03',
+    id: '10000000-0000-0000-0000-000000000003',
     nome: 'Desenvolvimento & Scripts',
     user_id: DEFAULT_USER_ID,
     created_at: new Date().toISOString()
@@ -67,7 +171,22 @@ function getCached<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return fallback;
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    
+    if (Array.isArray(parsed)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return parsed.map((item: any) => {
+        if (item && typeof item === 'object') {
+          const newItem = { ...item };
+          if (newItem.id) newItem.id = sanitizeUuid(newItem.id);
+          if (newItem.section_id) newItem.section_id = sanitizeUuid(newItem.section_id);
+          if (newItem.parent_id) newItem.parent_id = sanitizeUuidOrNull(newItem.parent_id);
+          return newItem;
+        }
+        return item;
+      }) as unknown as T;
+    }
+    return parsed;
   } catch {
     return fallback;
   }
@@ -102,7 +221,8 @@ function saveTrashToStorage(items: DeletedNoteItem[]) {
 
 function getStoredActivePageId(): string | null {
   try {
-    return localStorage.getItem(ACTIVE_PAGE_STORAGE_KEY);
+    const val = localStorage.getItem(ACTIVE_PAGE_STORAGE_KEY);
+    return val ? sanitizeUuid(val) : null;
   } catch {
     return null;
   }
@@ -110,7 +230,8 @@ function getStoredActivePageId(): string | null {
 
 function getStoredActiveSectionId(): string | null {
   try {
-    return localStorage.getItem(ACTIVE_SECTION_STORAGE_KEY);
+    const val = localStorage.getItem(ACTIVE_SECTION_STORAGE_KEY);
+    return val ? sanitizeUuid(val) : null;
   } catch {
     return null;
   }
@@ -215,6 +336,13 @@ interface NoteState {
   activePageId: string | null;
   isLoading: boolean;
   
+  // Offline-first Sync Status map
+  pageSyncStatuses: Record<string, 'synced' | 'pending' | 'conflict'>;
+  resolveConflict: (pageId: string, resolution: 'local' | 'remote') => Promise<void>;
+  syncPendingQueue: () => Promise<void>;
+  getLocalRevisions: (pageId: string) => Promise<unknown[]>;
+  restoreRevision: (pageId: string, revisionId: number) => Promise<void>;
+  
   fetchNotes: (userId?: string) => Promise<void>;
   addSection: (nome: string, userId: string) => Promise<void>;
   updateSection: (id: string, nome: string) => Promise<void>;
@@ -242,6 +370,8 @@ const getUserCacheKey = (userId: string, baseKey: string) => {
   return `meuhub_user_${userId}_${baseKey}`;
 };
 
+const activeAbortControllers = new Map<string, AbortController>();
+
 export const useNoteStore = create<NoteState>((set, get) => ({
   sections: DEFAULT_SECTIONS,
   pages: DEFAULT_PAGES,
@@ -250,6 +380,218 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   activeSectionId: DEFAULT_SECTION_ID,
   activePageId: DEFAULT_PAGE_ID,
   isLoading: false,
+  pageSyncStatuses: {},
+
+  resolveConflict: async (pageId, resolution) => {
+    const localPage = await offlineDb.pages.get(pageId);
+    if (!localPage) return;
+
+    if (resolution === 'local') {
+      // Force local version as correct, clear conflict status, increment version to push
+      await offlineDb.pages.update(pageId, { syncStatus: 'pending', localVersion: localPage.localVersion + 1 });
+      set((state) => ({
+        pageSyncStatuses: { ...state.pageSyncStatuses, [pageId]: 'pending' }
+      }));
+      // Remove any existing sync queue items for this page to prevent conflicts
+      const existing = await offlineDb.syncQueue.where('pageId').equals(pageId).toArray();
+      for (const item of existing) {
+        if (item.id) await offlineDb.syncQueue.delete(item.id);
+      }
+      // Insert new update action
+      await offlineDb.syncQueue.add({
+        pageId,
+        action: 'update',
+        payload: {
+          titulo: localPage.titulo,
+          conteudo: localPage.conteudo,
+          section_id: localPage.section_id,
+          parent_id: localPage.parent_id
+        },
+        timestamp: Date.now(),
+        attempts: 0
+      });
+      toast.success('Versão local selecionada! Enviando atualizações para a nuvem.');
+      get().syncPendingQueue().catch(console.error);
+    } else {
+      // Keep remote version. Fetch from Supabase, decrypt, and apply to local state
+      try {
+        const { data: remotePage, error } = await supabase
+          .from('note_pages')
+          .select('*')
+          .eq('id', pageId)
+          .single();
+
+        if (error) throw error;
+
+        let decryptedContent = null;
+        if (remotePage.conteudo) {
+          decryptedContent = await decryptNoteContent(remotePage.conteudo);
+        }
+
+        const updatedPage: NotePage = {
+          ...remotePage,
+          conteudo: decryptedContent
+        };
+
+        // Update local memory state
+        const updatedPages = get().pages.map(p => p.id === pageId ? updatedPage : p);
+        set({ pages: updatedPages });
+        setCached(getUserCacheKey(localPage.user_id, 'note_pages'), updatedPages);
+
+        // Update Dexie database
+        await offlineDb.pages.put({
+          ...updatedPage,
+          localVersion: localPage.localVersion + 1,
+          remoteVersion: localPage.localVersion + 1,
+          syncStatus: 'synced',
+          lastUpdatedAt: Date.now()
+        });
+
+        set((state) => ({
+          pageSyncStatuses: { ...state.pageSyncStatuses, [pageId]: 'synced' }
+        }));
+
+        // Clean any sync queue item for this page
+        const existing = await offlineDb.syncQueue.where('pageId').equals(pageId).toArray();
+        for (const item of existing) {
+          if (item.id) await offlineDb.syncQueue.delete(item.id);
+        }
+
+        toast.success('Versão remota restaurada com sucesso!');
+      } catch (err) {
+        console.error('Failed to resolve conflict with remote version:', err);
+        toast.error('Não foi possível obter a versão remota do servidor.');
+      }
+    }
+  },
+
+  syncPendingQueue: async () => {
+    if (!navigator.onLine) return;
+
+    if (isSyncingQueue) return;
+    isSyncingQueue = true;
+
+    try {
+      // Run automatic audit & self-repair before syncing (de-duplicates rapid edits, removes dead-letter retries, cleans orphans)
+      await auditAndRepairSyncQueue();
+
+      const queue = await offlineDb.syncQueue.toArray();
+      if (queue.length === 0) return;
+
+      for (const item of queue) {
+        const { id, pageId, action, payload } = item;
+        try {
+          const localPage = await offlineDb.pages.get(pageId);
+          if (!localPage && action !== 'delete') {
+            // If no local page, clean the orphaned queue item
+            if (id) await offlineDb.syncQueue.delete(id);
+            continue;
+          }
+
+          if (localPage && localPage.syncStatus === 'conflict') {
+            // Skip syncing if in conflict, wait for manual resolution
+            continue;
+          }
+
+          // 1. Optimistic Locking Check (only for updates and deletions)
+          if (action !== 'create') {
+            const { data: remotePage, error: fetchErr } = await supabase
+              .from('note_pages')
+              .select('id, titulo, conteudo, created_at')
+              .eq('id', pageId)
+              .maybeSingle();
+
+            if (fetchErr) throw fetchErr;
+
+            if (remotePage && localPage) {
+              let remoteContentDecrypted = null;
+              if (remotePage.conteudo) {
+                try {
+                  remoteContentDecrypted = await decryptNoteContent(remotePage.conteudo);
+                } catch {
+                  remoteContentDecrypted = null;
+                }
+              }
+
+              const isRemoteDifferent = remotePage.titulo !== localPage.titulo || (remoteContentDecrypted !== null && remoteContentDecrypted !== localPage.conteudo);
+              
+              if (isRemoteDifferent && localPage.remoteVersion < localPage.localVersion - 1) {
+                // Conflict detected!
+                await offlineDb.pages.update(pageId, { syncStatus: 'conflict' });
+                set((state) => ({
+                  pageSyncStatuses: { ...state.pageSyncStatuses, [pageId]: 'conflict' }
+                }));
+                toast.error(`Conflito de sincronização detectado na página "${localPage.titulo}". Por favor, selecione qual versão deseja manter.`);
+                continue;
+              }
+            }
+          }
+
+          // 2. Encryption & Supabase Sync
+          const updatePayload = { ...payload } as Record<string, unknown>;
+          delete updatePayload.version;
+
+          if (updatePayload.conteudo) {
+            updatePayload.conteudo = await sanitizeAndEncryptNoteContent(updatePayload.conteudo);
+          }
+
+          let dbError = null;
+          if (action === 'update') {
+            const { error } = await supabase.from('note_pages').update(updatePayload).eq('id', pageId);
+            dbError = error;
+          } else if (action === 'create') {
+            const { error } = await supabase.from('note_pages').insert([updatePayload]);
+            dbError = error;
+          } else if (action === 'delete') {
+            const { error } = await supabase.from('note_pages').delete().eq('id', pageId);
+            dbError = error;
+          }
+
+          if (dbError) throw dbError;
+
+          // 3. Clear Queue Item and Mark Synced
+          if (id) await offlineDb.syncQueue.delete(id);
+          
+          if (localPage) {
+            await offlineDb.pages.update(pageId, {
+              syncStatus: 'synced',
+              remoteVersion: localPage.localVersion
+            });
+
+            set((state) => ({
+              pageSyncStatuses: { ...state.pageSyncStatuses, [pageId]: 'synced' }
+            }));
+          }
+
+        } catch (err) {
+          console.error(`Failed to process sync item for page ${pageId}:`, err);
+          if (id) {
+            await offlineDb.syncQueue.update(id, { attempts: item.attempts + 1 });
+          }
+        }
+      }
+    } finally {
+      isSyncingQueue = false;
+    }
+  },
+
+  getLocalRevisions: async (pageId) => {
+    return await offlineDb.revisions.where('pageId').equals(pageId).reverse().toArray();
+  },
+
+  restoreRevision: async (pageId, revisionId) => {
+    const revision = await offlineDb.revisions.get(revisionId);
+    if (!revision || revision.pageId !== pageId) {
+      toast.error('Revisão não encontrada.');
+      return;
+    }
+
+    await get().updatePage(pageId, {
+      titulo: revision.titulo,
+      conteudo: revision.conteudo
+    });
+    toast.success('Revisão restaurada com sucesso!');
+  },
 
   fetchNotes: async (userId?: string) => {
     const targetUserId = userId || DEFAULT_USER_ID;
@@ -384,18 +726,64 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         if (finalPageId) saveActivePageId(finalPageId);
         if (finalSectionId) saveActiveSectionId(finalSectionId);
 
+        // Reconcile and merge fetched Supabase pages with Dexie IndexedDB
+        let reconciledPages = sanitizedPages;
+        try {
+          const localDexiePages = await offlineDb.pages.toArray();
+          const dexieMap = new Map(localDexiePages.map(p => [p.id, p]));
+          const initialSyncStatuses: Record<string, 'synced' | 'pending' | 'conflict'> = {};
+
+          reconciledPages = sanitizedPages.map(p => {
+            const localMatch = dexieMap.get(p.id);
+            if (localMatch) {
+              initialSyncStatuses[p.id] = localMatch.syncStatus;
+              if (localMatch.syncStatus === 'pending' || localMatch.syncStatus === 'conflict') {
+                return {
+                  ...p,
+                  titulo: localMatch.titulo,
+                  conteudo: localMatch.conteudo
+                };
+              }
+              if (localMatch.conteudo !== p.conteudo || localMatch.titulo !== p.titulo) {
+                offlineDb.pages.update(p.id, {
+                  titulo: p.titulo,
+                  conteudo: p.conteudo,
+                  lastUpdatedAt: Date.now()
+                });
+              }
+              return p;
+            } else {
+              offlineDb.pages.put({
+                ...p,
+                localVersion: 1,
+                remoteVersion: 1,
+                syncStatus: 'synced',
+                lastUpdatedAt: Date.now()
+              });
+              initialSyncStatuses[p.id] = 'synced';
+              return p;
+            }
+          });
+
+          set({ pageSyncStatuses: initialSyncStatuses });
+        } catch (err) {
+          console.error('Dexie reconciliation failed inside fetchNotes:', err);
+        }
+
         setCached(sectionsKey, loadedSections);
-        setCached(pagesKey, sanitizedPages);
+        setCached(pagesKey, reconciledPages);
         if (relRes?.data) setCached(relationsKey, relRes.data);
 
         set({
           sections: loadedSections,
-          pages: sanitizedPages,
+          pages: reconciledPages,
           relations: relRes?.data || get().relations,
           deletedItems: getStoredTrash(),
           activePageId: finalPageId,
           activeSectionId: finalSectionId,
         });
+
+        get().syncPendingQueue().catch(console.error);
       }
     } catch (error) {
       console.warn('Fetch notes network issue:', error);
@@ -583,43 +971,135 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     set({ pages: updatedPages, activePageId: newPage.id, activeSectionId: sectionId });
     toast.success('Página criada!');
 
+    // Register inside IndexedDB
     try {
-      const { data, error } = await supabase
-        .from('note_pages')
-        .insert([{ titulo, section_id: sectionId, parent_id: parentId, user_id: fallbackUserId, conteudo: initialContent }])
-        .select()
-        .single();
+      await offlineDb.pages.put({
+        ...newPage,
+        localVersion: 1,
+        remoteVersion: 0,
+        syncStatus: 'pending',
+        lastUpdatedAt: Date.now()
+      });
 
-      if (!error && data) {
-        const syncedPages = get().pages.map(p => p.id === newPage.id ? data : p);
-        setCached(getUserCacheKey(fallbackUserId, 'note_pages'), syncedPages);
-        set({ pages: syncedPages, activePageId: data.id });
-        return data;
-      }
+      await offlineDb.revisions.add({
+        pageId: newPage.id,
+        version: 1,
+        titulo: newPage.titulo,
+        conteudo: newPage.conteudo,
+        timestamp: Date.now()
+      });
+
+      await offlineDb.syncQueue.add({
+        pageId: newPage.id,
+        action: 'create',
+        payload: {
+          id: newPage.id,
+          titulo,
+          section_id: sectionId,
+          parent_id: parentId,
+          user_id: fallbackUserId,
+          conteudo: initialContent
+        },
+        timestamp: Date.now(),
+        attempts: 0
+      });
+
+      set((state) => ({
+        pageSyncStatuses: { ...state.pageSyncStatuses, [newPage.id]: 'pending' }
+      }));
+
+      get().syncPendingQueue().catch(console.error);
     } catch (e) {
-      console.debug('Page saved locally, background sync pending:', e);
+      console.error('Dexie add page failed:', e);
     }
 
     return newPage;
   },
 
   updatePage: async (id, updates) => {
+    if (activeAbortControllers.has(id)) {
+      activeAbortControllers.get(id)?.abort();
+      activeAbortControllers.delete(id);
+    }
+    const controller = new AbortController();
+    activeAbortControllers.set(id, controller);
+
     const page = get().pages.find(p => p.id === id);
     const userId = page ? page.user_id : DEFAULT_USER_ID;
 
+    // Schema Validation with Zod
+    if (updates.conteudo) {
+      try {
+        const validated = validateAndSanitizeBlocks(updates.conteudo);
+        updates.conteudo = JSON.stringify(validated);
+      } catch (err) {
+        console.error('Zod schema validation failed on updatePage:', err);
+        toast.error('Falha na validação de dados antes de salvar.');
+        return;
+      }
+    }
+
+    const previousPages = get().pages;
     const updatedPages = get().pages.map(p => p.id === id ? { ...p, ...updates } : p);
     setCached(getUserCacheKey(userId, 'note_pages'), updatedPages);
     set({ pages: updatedPages });
 
     try {
-      const payload: Partial<NotePage> = { ...updates };
-      if (updates.conteudo) {
-        payload.conteudo = await sanitizeAndEncryptNoteContent(updates.conteudo);
-      }
+      const localPage = await offlineDb.pages.get(id);
+      const currentLocalVersion = localPage ? localPage.localVersion + 1 : 1;
+      const currentRemoteVersion = localPage ? localPage.remoteVersion : 0;
 
-      await supabase.from('note_pages').update(payload).eq('id', id);
+      const pageData: NotePage = {
+        id,
+        titulo: updates.titulo ?? (page?.titulo || ''),
+        conteudo: updates.conteudo ?? (page?.conteudo || null),
+        section_id: updates.section_id ?? (page?.section_id || ''),
+        parent_id: updates.parent_id ?? (page?.parent_id || null),
+        user_id: userId,
+        created_at: page?.created_at || new Date().toISOString()
+      };
+
+      await offlineDb.revisions.add({
+        pageId: id,
+        version: currentLocalVersion,
+        titulo: pageData.titulo,
+        conteudo: pageData.conteudo,
+        timestamp: Date.now()
+      });
+
+      await offlineDb.pages.put({
+        ...pageData,
+        localVersion: currentLocalVersion,
+        remoteVersion: currentRemoteVersion,
+        syncStatus: 'pending',
+        lastUpdatedAt: Date.now()
+      });
+
+      set((state) => ({
+        pageSyncStatuses: { ...state.pageSyncStatuses, [id]: 'pending' }
+      }));
+
+      await offlineDb.syncQueue.add({
+        pageId: id,
+        action: 'update',
+        payload: { ...updates, version: currentLocalVersion },
+        timestamp: Date.now(),
+        attempts: 0
+      });
+
+      get().syncPendingQueue().catch((err) => {
+        console.debug('Sync postponed:', err);
+      });
+
     } catch (e) {
-      console.debug('Page updated locally:', e);
+      console.error('Dexie database update failed, rolling back:', e);
+      setCached(getUserCacheKey(userId, 'note_pages'), previousPages);
+      set({ pages: previousPages });
+      throw e;
+    } finally {
+      if (activeAbortControllers.get(id) === controller) {
+        activeAbortControllers.delete(id);
+      }
     }
   },
 
@@ -670,9 +1150,19 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     });
 
     try {
-      await supabase.from('note_pages').delete().eq('id', id);
+      for (const p of allPagesToDelete) {
+        await offlineDb.pages.delete(p.id);
+        await offlineDb.syncQueue.add({
+          pageId: p.id,
+          action: 'delete',
+          payload: {},
+          timestamp: Date.now(),
+          attempts: 0
+        });
+      }
+      get().syncPendingQueue().catch(console.error);
     } catch (e) {
-      console.debug('Page deleted locally:', e);
+      console.error('Dexie queue delete failed:', e);
     }
 
     toast('Anotação enviada para a Lixeira', {

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import { Rnd } from 'react-rnd';
 import { CanvasBlock } from '@/types/notes';
 import { 
@@ -92,7 +92,7 @@ interface ScriptBlockProps {
   onCopyClipboard?: (block: CanvasBlock) => void;
 }
 
-export function ScriptBlock({
+export const ScriptBlock = memo(function ScriptBlock({
   block,
   updateBlock,
   removeBlock,
@@ -750,4 +750,16 @@ export function ScriptBlock({
       </div>
     </Rnd>
   );
-}
+}, (prev, next) => {
+  return (
+    prev.isSelected === next.isSelected &&
+    prev.block.x === next.block.x &&
+    prev.block.y === next.block.y &&
+    prev.block.width === next.block.width &&
+    prev.block.height === next.block.height &&
+    prev.block.code === next.block.code &&
+    prev.block.title === next.block.title &&
+    prev.block.targetPurpose === next.block.targetPurpose &&
+    prev.block.description === next.block.description
+  );
+});
