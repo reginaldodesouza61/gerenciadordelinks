@@ -170,10 +170,28 @@ function isBlockEmpty(block?: CanvasBlock | null): boolean {
     return false;
   }
   if (!block.content) return true;
+
+  // Non-empty if it contains images, tables, embeds, checklist, hr or code
+  if (
+    block.content.includes('<img') ||
+    block.content.includes('<table') ||
+    block.content.includes('<svg') ||
+    block.content.includes('<iframe') ||
+    block.content.includes('data-type=') ||
+    block.content.includes('<hr') ||
+    block.content.includes('<pre') ||
+    block.content.includes('class="task-list"')
+  ) {
+    return false;
+  }
+
   const text = (block.content || '')
     .replace(/<[^>]*>/g, '')
     .replace(/&nbsp;/g, ' ')
+    .replace(/&#160;/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
     .trim();
+
   return text.length === 0;
 }
 
@@ -823,6 +841,10 @@ const TextBlock = memo(function TextBlock({
       setActiveEditor(ed);
       setSelectedId(block.id);
     },
+    onBlur: ({ editor: ed }) => {
+      const currentContent = ed.getHTML();
+      updateBlock(block.id, { content: currentContent });
+    },
   });
 
   const handleInlineImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1301,6 +1323,11 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
   const restoreRevision = useNoteStore((state) => state.restoreRevision);
   const page = pages.find((p) => p.id === pageId);
   const [blocks, setBlocks] = useState<CanvasBlock[]>([]);
+  const updateBlock = useCallback((id: string, updates: Partial<CanvasBlock>) => {
+    setBlocks((prev) => {
+      return prev.map((b) => (b.id === id ? { ...b, ...updates } : b));
+    });
+  }, []);
   const [activeEditor, setActiveEditor] = useState<Editor | null>(null);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const selectedBlockIdRef = useRef<string | null>(null);
@@ -1379,7 +1406,14 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     handleDragStart: onCanvasDragStart,
     handleDrag: onCanvasDrag,
     handleDragStop: onCanvasDragStop,
-  } = useCanvasDragAutoScroll(viewportContainerRef);
+    handleCanvasMouseDown,
+    handleCanvasMouseMove,
+    handleCanvasMouseUp,
+  } = useCanvasDragAutoScroll(viewportContainerRef, blocks);
+
+  const handleBlockDragStop = useCallback((blockId: string, data: { x: number; y: number }) => {
+    onCanvasDragStop(blockId, data, updateBlock);
+  }, [onCanvasDragStop, updateBlock]);
 
   // Sync and Autosave State / Refs
   const [syncStatus, setSyncStatus] = useState<'saved' | 'saving' | 'dirty' | 'error'>('saved');
@@ -1405,8 +1439,8 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
 
       // Locate block and scroll canvas
       const targetBlock = blocks.find((b) => b.id === targetBlockId);
-      if (targetBlock && canvasRef.current) {
-        canvasRef.current.scrollTo({
+      if (targetBlock && viewportContainerRef.current) {
+        viewportContainerRef.current.scrollTo({
           left: Math.max(0, targetBlock.x - 60),
           top: Math.max(0, targetBlock.y - 60),
           behavior: 'smooth',
@@ -1979,6 +2013,21 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [pageId, updatePage]);
 
+  // Select a block and automatically clean up any empty text blocks (OneNote behavior)
+  const handleSelectBlock = useCallback(
+    (id: string | null) => {
+      setSelectedBlockId(id);
+      selectedBlockIdRef.current = id;
+      const safeBlocks = blocksRef.current;
+      const cleaned = safeBlocks.filter((b) => b && (b.id === id || !isBlockEmpty(b)));
+      setBlocks(cleaned);
+      if (cleaned.length !== safeBlocks.length) {
+        saveNow(cleaned);
+      }
+    },
+    [saveNow]
+  );
+
   // Clean up empty blocks
   const purgeAndSave = useCallback(
     (currentBlocks: CanvasBlock[], activeId?: string | null) => {
@@ -1993,65 +2042,50 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     [saveNow]
   );
 
-  const updateBlock = useCallback((id: string, updates: Partial<CanvasBlock>) => {
-    setBlocks((prev) => {
-      return prev.map((b) => (b.id === id ? { ...b, ...updates } : b));
-    });
-  }, []);
-
   const removeBlock = useCallback((id: string) => {
-    setBlocks((prev) => {
-      const blockToRemove = prev.find((b) => b.id === id);
-      const updated = prev.filter((b) => b.id !== id);
-      
-      // Save structural change immediately
-      saveNow(updated);
+    const prev = blocksRef.current;
+    const blockToRemove = prev.find((b) => b.id === id);
+    const updated = prev.filter((b) => b.id !== id);
+    
+    setBlocks(updated);
+    saveNow(updated);
 
-      if (blockToRemove && !isBlockEmpty(blockToRemove)) {
-        const capturedBlock = blockToRemove;
-        toast('Bloco removido', {
-          duration: 7000,
-          action: {
-            label: 'Desfazer',
-            onClick: () => {
-              setBlocks((current) => {
-                const restored = [...current, capturedBlock];
-                saveNow(restored);
-                return restored;
-              });
-              toast.success('Bloco restaurado!');
-            },
+    if (blockToRemove && !isBlockEmpty(blockToRemove)) {
+      const capturedBlock = blockToRemove;
+      toast('Bloco removido', {
+        duration: 7000,
+        action: {
+          label: 'Desfazer',
+          onClick: () => {
+            const restored = [...blocksRef.current, capturedBlock];
+            setBlocks(restored);
+            saveNow(restored);
+            toast.success('Bloco restaurado!');
           },
-        });
-      }
-      return updated;
-    });
+        },
+      });
+    }
     setSelectedBlockId((curr) => (curr === id ? null : curr));
     setActiveEditor(null);
   }, [saveNow]);
 
   // Duplicate a block
   const duplicateBlock = useCallback((id: string) => {
-    setBlocks((prev) => {
-      const target = prev.find((b) => b.id === id);
-      if (!target) return prev;
-      const newBlock: CanvasBlock = {
-        ...target,
-        id: `block_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        x: target.x + 30,
-        y: target.y + 30,
-      };
-      const updated = [...prev, newBlock];
-      const json = JSON.stringify(updated);
-      lastSavedContentRef.current = json;
-      Promise.resolve().then(() => {
-        updatePage(pageId, { conteudo: json });
-      });
-      setSelectedBlockId(newBlock.id);
-      return updated;
-    });
+    const prev = blocksRef.current;
+    const target = prev.find((b) => b.id === id);
+    if (!target) return;
+    const newBlock: CanvasBlock = {
+      ...target,
+      id: `block_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      x: target.x + 30,
+      y: target.y + 30,
+    };
+    const updated = [...prev, newBlock];
+    setBlocks(updated);
+    saveNow(updated);
+    setSelectedBlockId(newBlock.id);
     toast.success('Bloco duplicado!');
-  }, [pageId, updatePage]);
+  }, [saveNow]);
 
   // Open modal to move or copy block to another page or section
   const handleOpenTransferModal = useCallback((block: CanvasBlock, action: 'move' | 'copy' = 'move') => {
@@ -2084,18 +2118,12 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
       x: pos.x,
       y: pos.y,
     };
-    setBlocks((prev) => {
-      const updated = [...prev, newBlock];
-      const json = JSON.stringify(updated);
-      lastSavedContentRef.current = json;
-      Promise.resolve().then(() => {
-        updatePage(pageId, { conteudo: json });
-      });
-      return updated;
-    });
+    const updated = [...blocksRef.current, newBlock];
+    setBlocks(updated);
+    saveNow(updated);
     setSelectedBlockId(newBlock.id);
     toast.success(`Bloco "${getBlockSummary(newBlock)}" colado na página!`);
-  }, [pageId, updatePage, blocks]);
+  }, [saveNow, blocks]);
 
   // Helper to calculate spawn position avoiding overlapping on top of existing notes
   const getSpawnPosition = (blockWidth = 440, blockHeight = 220) => {
@@ -2128,44 +2156,34 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
 
   // Bring a block to the highest visual layer (front of DOM stack)
   const bringBlockToFront = useCallback((id: string) => {
-    setBlocks((prev) => {
-      const idx = prev.findIndex((b) => b.id === id);
-      if (idx === -1 || idx === prev.length - 1) return prev;
-      const target = prev[idx];
-      const rest = prev.filter((b) => b.id !== id);
-      const updated = [...rest, target];
-      const json = JSON.stringify(updated);
-      lastSavedContentRef.current = json;
-      Promise.resolve().then(() => {
-        updatePage(pageId, { conteudo: json });
-      });
-      return updated;
-    });
+    const prev = blocksRef.current;
+    const idx = prev.findIndex((b) => b.id === id);
+    if (idx === -1 || idx === prev.length - 1) return;
+    const target = prev[idx];
+    const rest = prev.filter((b) => b.id !== id);
+    const updated = [...rest, target];
+    setBlocks(updated);
+    saveNow(updated);
     setSelectedBlockId(id);
-  }, [pageId, updatePage]);
+  }, [saveNow]);
 
   // Send a block to the back of the DOM stack
   const sendBlockToBack = useCallback((id: string) => {
-    setBlocks((prev) => {
-      const idx = prev.findIndex((b) => b.id === id);
-      if (idx <= 0) return prev;
-      const target = prev[idx];
-      const rest = prev.filter((b) => b.id !== id);
-      const updated = [target, ...rest];
-      const json = JSON.stringify(updated);
-      lastSavedContentRef.current = json;
-      Promise.resolve().then(() => {
-        updatePage(pageId, { conteudo: json });
-      });
-      return updated;
-    });
+    const prev = blocksRef.current;
+    const idx = prev.findIndex((b) => b.id === id);
+    if (idx <= 0) return;
+    const target = prev[idx];
+    const rest = prev.filter((b) => b.id !== id);
+    const updated = [target, ...rest];
+    setBlocks(updated);
+    saveNow(updated);
     setSelectedBlockId(id);
-  }, [pageId, updatePage]);
+  }, [saveNow]);
 
   // Add a new Text & Table block
   const handleAddTextBlock = useCallback((e?: React.MouseEvent) => {
     e?.stopPropagation();
-    const cleaned = purgeAndSave(blocks, null);
+    const cleaned = purgeAndSave(blocksRef.current, null);
     const pos = getSpawnPosition(440, 180);
     const newBlock: CanvasBlock = {
       id: `text_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -2179,10 +2197,8 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     const nextBlocks = [...cleaned, newBlock];
     setBlocks(nextBlocks);
     setSelectedBlockId(newBlock.id);
-    const json = JSON.stringify(nextBlocks);
-    lastSavedContentRef.current = json;
-    updatePage(pageId, { conteudo: json });
-  }, [blocks, purgeAndSave, pageId, updatePage]);
+    saveNow(nextBlocks);
+  }, [purgeAndSave, saveNow]);
 
   // Add a new Script / Code block
   const handleAddScriptBlock = useCallback((e?: React.MouseEvent) => {
@@ -2717,7 +2733,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
   const handleCanvasClick = (e: React.MouseEvent) => {
     if (e.target === canvasRef.current || e.target === viewportContainerRef.current) {
       // Clean up any existing empty blocks
-      const cleaned = purgeAndSave(blocks, null);
+      const cleaned = blocksRef.current.filter((b) => !isBlockEmpty(b));
 
       const scrollContainer = viewportContainerRef.current;
       const rect = canvasRef.current?.getBoundingClientRect();
@@ -2739,13 +2755,11 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
       const nextBlocks = [...cleaned, newBlock];
       setBlocks(nextBlocks);
       setSelectedBlockId(newBlock.id);
-      const json = JSON.stringify(nextBlocks);
-      lastSavedContentRef.current = json;
-      updatePage(pageId, { conteudo: json });
+      selectedBlockIdRef.current = newBlock.id;
+      saveNow(nextBlocks);
     } else {
       // Clicked somewhere else (deselect & clean empty blocks)
-      purgeAndSave(blocks, selectedBlockId);
-      setSelectedBlockId(null);
+      handleSelectBlock(null);
       setActiveEditor(null);
     }
   };
@@ -2753,14 +2767,14 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
   // Dynamically calculate canvas dimensions based on blocks position + real-time extra margin during dragging
   const canvasWidth = useMemo(() => {
     if (blocks.length === 0) return '100%';
-    const maxX = Math.max(...blocks.map((b) => b.x + (typeof b.width === 'number' ? b.width : parseInt(String(b.width)) || 450)));
-    return Math.max(100, maxX + 350 + canvasExtraWidth);
+    const maxX = Math.max(...blocks.map((b) => b.x + (typeof b.width === 'number' ? b.width : parseInt(String(b.width), 10) || 450)));
+    return Math.max(1400, maxX + 700 + (canvasExtraWidth || 0));
   }, [blocks, canvasExtraWidth]);
 
   const canvasHeight = useMemo(() => {
     if (blocks.length === 0) return '100%';
-    const maxY = Math.max(...blocks.map((b) => b.y + (typeof b.height === 'number' ? b.height : parseInt(String(b.height)) || 320)));
-    return Math.max(100, maxY + 350 + canvasExtraHeight);
+    const maxY = Math.max(...blocks.map((b) => b.y + (typeof b.height === 'number' ? b.height : parseInt(String(b.height), 10) || 320)));
+    return Math.max(1000, maxY + 700 + (canvasExtraHeight || 0));
   }, [blocks, canvasExtraHeight]);
 
   const formattedDate = useMemo(() => {
@@ -3140,6 +3154,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
       <div 
         ref={viewportContainerRef}
         className="flex-1 overflow-auto onenote-canvas-viewport bg-[#ffffff] dark:bg-zinc-950 relative w-full h-full p-4 pt-6"
+        onMouseDown={handleCanvasMouseDown}
+        onMouseMove={handleCanvasMouseMove}
+        onMouseUp={handleCanvasMouseUp}
       >
         <div
           ref={canvasRef}
@@ -3165,13 +3182,13 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   updateBlock={updateBlock}
                   removeBlock={removeBlock}
                   isSelected={selectedBlockId === block.id}
-                  setSelectedId={setSelectedBlockId}
+                  setSelectedId={handleSelectBlock}
                   onMoveOrCopy={handleOpenTransferModal}
                   onDuplicate={duplicateBlock}
                   onCopyClipboard={handleCopyBlockToClipboard}
                   onDragStart={onCanvasDragStart}
                   onDrag={onCanvasDrag}
-                  onDragStop={onCanvasDragStop}
+                  onDragStop={handleBlockDragStop}
                   isDragging={isBlockBeingDragged}
                 />
               );
@@ -3185,13 +3202,13 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   updateBlock={updateBlock}
                   removeBlock={removeBlock}
                   isSelected={selectedBlockId === block.id}
-                  setSelectedId={setSelectedBlockId}
+                  setSelectedId={handleSelectBlock}
                   onMoveOrCopy={handleOpenTransferModal}
                   onDuplicate={duplicateBlock}
                   onCopyClipboard={handleCopyBlockToClipboard}
                   onDragStart={onCanvasDragStart}
                   onDrag={onCanvasDrag}
-                  onDragStop={onCanvasDragStop}
+                  onDragStop={handleBlockDragStop}
                   isDragging={isBlockBeingDragged}
                 />
               );
@@ -3205,13 +3222,13 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   updateBlock={updateBlock}
                   removeBlock={removeBlock}
                   isSelected={selectedBlockId === block.id}
-                  setSelectedId={setSelectedBlockId}
+                  setSelectedId={handleSelectBlock}
                   onMoveOrCopy={handleOpenTransferModal}
                   onDuplicate={duplicateBlock}
                   onCopyClipboard={handleCopyBlockToClipboard}
                   onDragStart={onCanvasDragStart}
                   onDrag={onCanvasDrag}
-                  onDragStop={onCanvasDragStop}
+                  onDragStop={handleBlockDragStop}
                   isDragging={isBlockBeingDragged}
                 />
               );
@@ -3225,7 +3242,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   updateBlock={updateBlock}
                   removeBlock={removeBlock}
                   isSelected={selectedBlockId === block.id}
-                  setSelectedId={setSelectedBlockId}
+                  setSelectedId={handleSelectBlock}
                   onMoveOrCopy={handleOpenTransferModal}
                   onDuplicate={duplicateBlock}
                   onCopyClipboard={handleCopyBlockToClipboard}
@@ -3233,7 +3250,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   onOpenInsertToTextBlockModal={(blk) => setInsertImageToTextBlockModal({ isOpen: true, imageBlock: blk })}
                   onDragStart={onCanvasDragStart}
                   onDrag={onCanvasDrag}
-                  onDragStop={onCanvasDragStop}
+                  onDragStop={handleBlockDragStop}
                   isDragging={isBlockBeingDragged}
                 />
               );
@@ -3247,7 +3264,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   updateBlock={updateBlock}
                   removeBlock={removeBlock}
                   isSelected={selectedBlockId === block.id}
-                  setSelectedId={setSelectedBlockId}
+                  setSelectedId={handleSelectBlock}
                   bringToFront={bringBlockToFront}
                   sendToBack={sendBlockToBack}
                   onMoveOrCopy={handleOpenTransferModal}
@@ -3255,7 +3272,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   onCopyClipboard={handleCopyBlockToClipboard}
                   onDragStart={onCanvasDragStart}
                   onDrag={onCanvasDrag}
-                  onDragStop={onCanvasDragStop}
+                  onDragStop={handleBlockDragStop}
                   isDragging={isBlockBeingDragged}
                 />
               );
@@ -3269,7 +3286,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   updateBlock={updateBlock}
                   removeBlock={removeBlock}
                   isSelected={selectedBlockId === block.id}
-                  setSelectedId={setSelectedBlockId}
+                  setSelectedId={handleSelectBlock}
                   bringToFront={bringBlockToFront}
                   sendToBack={sendBlockToBack}
                   onMoveOrCopy={handleOpenTransferModal}
@@ -3277,7 +3294,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   onCopyClipboard={handleCopyBlockToClipboard}
                   onDragStart={onCanvasDragStart}
                   onDrag={onCanvasDrag}
-                  onDragStop={onCanvasDragStop}
+                  onDragStop={handleBlockDragStop}
                   isDragging={isBlockBeingDragged}
                 />
               );
@@ -3291,7 +3308,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   updateBlock={updateBlock}
                   removeBlock={removeBlock}
                   isSelected={selectedBlockId === block.id}
-                  setSelectedId={setSelectedBlockId}
+                  setSelectedId={handleSelectBlock}
                   bringToFront={bringBlockToFront}
                   sendToBack={sendBlockToBack}
                   onMoveOrCopy={handleOpenTransferModal}
@@ -3299,7 +3316,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   onCopyClipboard={handleCopyBlockToClipboard}
                   onDragStart={onCanvasDragStart}
                   onDrag={onCanvasDrag}
-                  onDragStop={onCanvasDragStop}
+                  onDragStop={handleBlockDragStop}
                   isDragging={isBlockBeingDragged}
                 />
               );
@@ -3314,7 +3331,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                 removeBlock={removeBlock}
                 setActiveEditor={setActiveEditor}
                 isSelected={selectedBlockId === block.id}
-                setSelectedId={setSelectedBlockId}
+                setSelectedId={handleSelectBlock}
                 onOpenAiAssistant={handleOpenAiAssistant}
                 onOpenInsertLink={(bId) => handleOpenInsertLink('registered', bId)}
                 onMoveOrCopy={handleOpenTransferModal}
@@ -3322,7 +3339,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                 onCopyClipboard={handleCopyBlockToClipboard}
                 onDragStart={onCanvasDragStart}
                 onDrag={onCanvasDrag}
-                onDragStop={onCanvasDragStop}
+                onDragStop={handleBlockDragStop}
                 isDragging={isBlockBeingDragged}
               />
             );
