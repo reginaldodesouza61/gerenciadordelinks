@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuthStore } from '@/lib/store/authStore';
 import { useLinkStore } from '@/lib/store/linkStore';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,7 @@ import { Link } from '@/types/supabase';
 
 export function LinkContainer() {
   const { user, initialized } = useAuthStore();
+  const lastFetchedUserIdRef = useRef<string | null>(null);
   const { 
     links, 
     categorias, 
@@ -55,8 +56,11 @@ export function LinkContainer() {
   useEffect(() => {
     if (!initialized) return;
     const userId = user?.id || 'c72212e7-2b6a-4da7-8745-01eb33414af4';
-    fetchLinks(userId);
-  }, [user, initialized, fetchLinks]);
+    if (lastFetchedUserIdRef.current !== userId) {
+      lastFetchedUserIdRef.current = userId;
+      fetchLinks(userId);
+    }
+  }, [user?.id, initialized, fetchLinks]);
   
   const handleAddLink = () => {
     setEditingLink(null);

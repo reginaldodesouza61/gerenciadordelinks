@@ -6,6 +6,7 @@ import { decryptNoteContent, sanitizeAndEncryptNoteContent } from '@/lib/encrypt
 import { offlineDb } from '@/lib/db/offlineDb';
 import { validateAndSanitizeBlocks } from '@/lib/validation/blockSchema';
 import { auditAndRepairSyncQueue } from '@/lib/storage/syncAudit';
+import { useAuthStore } from './authStore';
 
 let isSyncingQueue = false;
 
@@ -261,44 +262,96 @@ function saveActiveSectionId(id: string | null) {
   }
 }
 
-function getStoredSectionOrder(): string[] {
+function getStoredSectionOrder(userId?: string): string[] {
   try {
+    const effectiveUserId = userId || useAuthStore.getState().user?.id;
+    if (effectiveUserId) {
+      const userRaw = localStorage.getItem(`${SECTION_ORDER_STORAGE_KEY}_${effectiveUserId}`);
+      if (userRaw) {
+        const parsed = JSON.parse(userRaw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    }
+    // Also check user_metadata from auth user if available
+    const metaOrder = useAuthStore.getState().user?.user_metadata?.note_section_order;
+    if (Array.isArray(metaOrder) && metaOrder.length > 0) {
+      return metaOrder;
+    }
     const raw = localStorage.getItem(SECTION_ORDER_STORAGE_KEY);
     if (!raw) return [];
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
 }
 
-function saveSectionOrder(ids: string[]) {
+function saveSectionOrder(ids: string[], userId?: string) {
   try {
+    const effectiveUserId = userId || useAuthStore.getState().user?.id || DEFAULT_USER_ID;
     localStorage.setItem(SECTION_ORDER_STORAGE_KEY, JSON.stringify(ids));
-  } catch {
-    // ignore
+    if (effectiveUserId) {
+      localStorage.setItem(`${SECTION_ORDER_STORAGE_KEY}_${effectiveUserId}`, JSON.stringify(ids));
+    }
+    // Sync to Supabase user metadata if user is authenticated
+    const authUser = useAuthStore.getState().user;
+    if (authUser && authUser.id && authUser.id !== DEFAULT_USER_ID) {
+      supabase.auth.updateUser({
+        data: { note_section_order: ids }
+      }).catch((err) => {
+        console.debug('[Storage] Failed to sync note_section_order to Supabase metadata:', err);
+      });
+    }
+  } catch (e) {
+    console.debug('Failed to save section order:', e);
   }
 }
 
-function getStoredPageOrder(): string[] {
+function getStoredPageOrder(userId?: string): string[] {
   try {
+    const effectiveUserId = userId || useAuthStore.getState().user?.id;
+    if (effectiveUserId) {
+      const userRaw = localStorage.getItem(`${PAGE_ORDER_STORAGE_KEY}_${effectiveUserId}`);
+      if (userRaw) {
+        const parsed = JSON.parse(userRaw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    }
+    const metaOrder = useAuthStore.getState().user?.user_metadata?.note_page_order;
+    if (Array.isArray(metaOrder) && metaOrder.length > 0) {
+      return metaOrder;
+    }
     const raw = localStorage.getItem(PAGE_ORDER_STORAGE_KEY);
     if (!raw) return [];
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
 }
 
-function savePageOrder(ids: string[]) {
+function savePageOrder(ids: string[], userId?: string) {
   try {
+    const effectiveUserId = userId || useAuthStore.getState().user?.id || DEFAULT_USER_ID;
     localStorage.setItem(PAGE_ORDER_STORAGE_KEY, JSON.stringify(ids));
-  } catch {
-    // ignore
+    if (effectiveUserId) {
+      localStorage.setItem(`${PAGE_ORDER_STORAGE_KEY}_${effectiveUserId}`, JSON.stringify(ids));
+    }
+    const authUser = useAuthStore.getState().user;
+    if (authUser && authUser.id && authUser.id !== DEFAULT_USER_ID) {
+      supabase.auth.updateUser({
+        data: { note_page_order: ids }
+      }).catch((err) => {
+        console.debug('[Storage] Failed to sync note_page_order to Supabase metadata:', err);
+      });
+    }
+  } catch (e) {
+    console.debug('Failed to save page order:', e);
   }
 }
 
-function sortSectionsByStoredOrder(sections: NoteSection[]): NoteSection[] {
-  const order = getStoredSectionOrder();
+function sortSectionsByStoredOrder(sections: NoteSection[], userId?: string): NoteSection[] {
+  const order = getStoredSectionOrder(userId);
   if (order.length === 0) return sections;
 
   const orderMap = new Map<string, number>();
@@ -312,8 +365,8 @@ function sortSectionsByStoredOrder(sections: NoteSection[]): NoteSection[] {
   });
 }
 
-function sortPagesByStoredOrder(pages: NotePage[]): NotePage[] {
-  const order = getStoredPageOrder();
+function sortPagesByStoredOrder(pages: NotePage[], userId?: string): NotePage[] {
+  const order = getStoredPageOrder(userId);
   if (order.length === 0) return pages;
 
   const orderMap = new Map<string, number>();
@@ -373,8 +426,8 @@ const getUserCacheKey = (userId: string, baseKey: string) => {
 const activeAbortControllers = new Map<string, AbortController>();
 
 export const useNoteStore = create<NoteState>((set, get) => ({
-  sections: DEFAULT_SECTIONS,
-  pages: DEFAULT_PAGES,
+  sections: sortSectionsByStoredOrder(DEFAULT_SECTIONS),
+  pages: sortPagesByStoredOrder(DEFAULT_PAGES),
   relations: [],
   deletedItems: getStoredTrash(),
   activeSectionId: DEFAULT_SECTION_ID,
@@ -493,41 +546,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
             continue;
           }
 
-          // 1. Optimistic Locking Check (only for updates and deletions)
-          if (action !== 'create') {
-            const { data: remotePage, error: fetchErr } = await supabase
-              .from('note_pages')
-              .select('id, titulo, conteudo, created_at')
-              .eq('id', pageId)
-              .maybeSingle();
-
-            if (fetchErr) throw fetchErr;
-
-            if (remotePage && localPage) {
-              let remoteContentDecrypted = null;
-              if (remotePage.conteudo) {
-                try {
-                  remoteContentDecrypted = await decryptNoteContent(remotePage.conteudo);
-                } catch {
-                  remoteContentDecrypted = null;
-                }
-              }
-
-              const isRemoteDifferent = remotePage.titulo !== localPage.titulo || (remoteContentDecrypted !== null && remoteContentDecrypted !== localPage.conteudo);
-              
-              if (isRemoteDifferent && localPage.remoteVersion < localPage.localVersion - 1) {
-                // Conflict detected!
-                await offlineDb.pages.update(pageId, { syncStatus: 'conflict' });
-                set((state) => ({
-                  pageSyncStatuses: { ...state.pageSyncStatuses, [pageId]: 'conflict' }
-                }));
-                toast.error(`Conflito de sincronização detectado na página "${localPage.titulo}". Por favor, selecione qual versão deseja manter.`);
-                continue;
-              }
-            }
-          }
-
-          // 2. Encryption & Supabase Sync
+          // 1. Encryption & Supabase Sync
           const updatePayload = { ...payload } as Record<string, unknown>;
           delete updatePayload.version;
 
@@ -549,7 +568,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
           if (dbError) throw dbError;
 
-          // 3. Clear Queue Item and Mark Synced
+          // 2. Clear Queue Item and Mark Synced
           if (id) await offlineDb.syncQueue.delete(id);
           
           if (localPage) {
@@ -564,7 +583,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           }
 
         } catch (err) {
-          console.error(`Failed to process sync item for page ${pageId}:`, err);
+          console.debug(`Silent background sync retry for page ${pageId}:`, err);
           if (id) {
             await offlineDb.syncQueue.update(id, { attempts: item.attempts + 1 });
           }
@@ -595,36 +614,46 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
   fetchNotes: async (userId?: string) => {
     const targetUserId = userId || DEFAULT_USER_ID;
+    const currentPages = get().pages;
+    const currentSections = get().sections;
+    const hasDataInMemory = currentPages.length > 0 && currentSections.length > 0;
     
-    // Instantly load specific user cached pages/sections/relations
+    // Instantly load specific user cached pages/sections/relations if memory is empty
     const sectionsKey = getUserCacheKey(targetUserId, 'note_sections');
     const pagesKey = getUserCacheKey(targetUserId, 'note_pages');
     const relationsKey = getUserCacheKey(targetUserId, 'note_relations');
     
-    const cachedSections = getCached<NoteSection[]>(sectionsKey, targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : []);
-    const cachedPages = getCached<NotePage[]>(pagesKey, targetUserId === DEFAULT_USER_ID ? DEFAULT_PAGES : []);
-    const cachedRelations = getCached<NoteLinkRelation[]>(relationsKey, []);
-    
-    // Determine active page & section
-    const storedPageId = getStoredActivePageId();
-    const storedSectionId = getStoredActiveSectionId();
-
-    const targetPageId = storedPageId && cachedPages.some(p => p.id === storedPageId)
-      ? storedPageId
-      : (cachedPages.length > 0 ? cachedPages[0].id : null);
+    if (!hasDataInMemory) {
+      const rawCachedSections = getCached<NoteSection[]>(sectionsKey, targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : []);
+      const cachedSections = sortSectionsByStoredOrder(rawCachedSections, targetUserId);
+      const rawCachedPages = getCached<NotePage[]>(pagesKey, targetUserId === DEFAULT_USER_ID ? DEFAULT_PAGES : []);
+      const cachedPages = sortPagesByStoredOrder(rawCachedPages, targetUserId);
+      const cachedRelations = getCached<NoteLinkRelation[]>(relationsKey, []);
       
-    const targetSectionId = storedSectionId && cachedSections.some(s => s.id === storedSectionId)
-      ? storedSectionId
-      : (cachedSections.length > 0 ? cachedSections[0].id : null);
+      // Determine active page & section
+      const storedPageId = getStoredActivePageId();
+      const storedSectionId = getStoredActiveSectionId();
 
-    set({
-      sections: cachedSections,
-      pages: cachedPages,
-      relations: cachedRelations,
-      activePageId: targetPageId,
-      activeSectionId: targetSectionId,
-      isLoading: true
-    });
+      const targetPageId = storedPageId && cachedPages.some(p => p.id === storedPageId)
+        ? storedPageId
+        : (cachedPages.length > 0 ? cachedPages[0].id : null);
+        
+      const targetSectionId = storedSectionId && cachedSections.some(s => s.id === storedSectionId)
+        ? storedSectionId
+        : (cachedSections.length > 0 ? cachedSections[0].id : null);
+
+      const hasCachedData = cachedPages.length > 0 || cachedSections.length > 0;
+
+      set({
+        sections: cachedSections,
+        pages: cachedPages,
+        relations: cachedRelations,
+        activePageId: targetPageId,
+        activeSectionId: targetSectionId,
+        // Only show spinner on cold start when no cached data exists
+        isLoading: !hasCachedData
+      });
+    }
 
     try {
       // Use a timeout race so database queries never hang indefinitely
@@ -650,10 +679,11 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         let loadedPages: NotePage[] = [];
 
         if (rawSections.length > 0) {
-          loadedSections = sortSectionsByStoredOrder(rawSections);
+          loadedSections = sortSectionsByStoredOrder(rawSections, targetUserId);
         } else {
-          // If Supabase returned empty and we are guest/official, use cached or defaults
-          loadedSections = targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : [];
+          // If Supabase returned empty and we are guest/official, use cached or defaults with stored sort order
+          const fallbackSections = targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : (get().sections.length > 0 ? get().sections : []);
+          loadedSections = sortSectionsByStoredOrder(fallbackSections, targetUserId);
         }
 
         if (rawPagesData.length > 0) {
@@ -673,9 +703,10 @@ export const useNoteStore = create<NoteState>((set, get) => ({
               conteudo: finalContent
             };
           }));
-          loadedPages = sortPagesByStoredOrder(decryptedPages);
+          loadedPages = sortPagesByStoredOrder(decryptedPages, targetUserId);
         } else {
-          loadedPages = targetUserId === DEFAULT_USER_ID ? DEFAULT_PAGES : [];
+          const fallbackPages = targetUserId === DEFAULT_USER_ID ? DEFAULT_PAGES : (get().pages.length > 0 ? get().pages : []);
+          loadedPages = sortPagesByStoredOrder(fallbackPages, targetUserId);
         }
 
         // Sanitize page section_id and parent_id
@@ -702,17 +733,27 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           };
         });
 
-        // Determine active page and section
+        // Determine active page and section while preserving currently open page
+        const currentActivePageId = get().activePageId;
+        const currentActiveSectionId = get().activeSectionId;
         const storedPageIdCurrent = getStoredActivePageId();
         const storedSectionIdCurrent = getStoredActiveSectionId();
 
         let finalPageId: string | null = null;
         let finalSectionId: string | null = null;
 
-        if (storedPageIdCurrent && sanitizedPages.some(p => p.id === storedPageIdCurrent)) {
+        if (currentActivePageId && sanitizedPages.some(p => p.id === currentActivePageId)) {
+          finalPageId = currentActivePageId;
+          const page = sanitizedPages.find(p => p.id === currentActivePageId);
+          finalSectionId = page?.section_id || currentActiveSectionId;
+        } else if (storedPageIdCurrent && sanitizedPages.some(p => p.id === storedPageIdCurrent)) {
           finalPageId = storedPageIdCurrent;
           const page = sanitizedPages.find(p => p.id === storedPageIdCurrent);
           finalSectionId = page?.section_id || null;
+        } else if (currentActiveSectionId && loadedSections.some(s => s.id === currentActiveSectionId)) {
+          finalSectionId = currentActiveSectionId;
+          const firstPage = sanitizedPages.find(p => p.section_id === finalSectionId);
+          finalPageId = firstPage?.id || (sanitizedPages.length > 0 ? sanitizedPages[0].id : null);
         } else if (storedSectionIdCurrent && loadedSections.some(s => s.id === storedSectionIdCurrent)) {
           finalSectionId = storedSectionIdCurrent;
           const firstPage = sanitizedPages.find(p => p.section_id === finalSectionId);
@@ -731,13 +772,18 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         try {
           const localDexiePages = await offlineDb.pages.toArray();
           const dexieMap = new Map(localDexiePages.map(p => [p.id, p]));
+          const pendingQueue = await offlineDb.syncQueue.toArray();
+          const pendingPageIds = new Set(pendingQueue.map(item => item.pageId));
           const initialSyncStatuses: Record<string, 'synced' | 'pending' | 'conflict'> = {};
 
           reconciledPages = sanitizedPages.map(p => {
             const localMatch = dexieMap.get(p.id);
+            const isPendingSync = pendingPageIds.has(p.id);
+
             if (localMatch) {
-              initialSyncStatuses[p.id] = localMatch.syncStatus;
-              if (localMatch.syncStatus === 'pending' || localMatch.syncStatus === 'conflict') {
+              initialSyncStatuses[p.id] = isPendingSync ? 'pending' : localMatch.syncStatus;
+              // NEVER overwrite pages that have pending offline changes or edits in progress!
+              if (isPendingSync || localMatch.syncStatus === 'pending' || localMatch.syncStatus === 'conflict') {
                 return {
                   ...p,
                   titulo: localMatch.titulo,
@@ -803,7 +849,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
     const currentSections = get().sections;
     const updatedSections = [...currentSections, newSection];
-    saveSectionOrder(updatedSections.map(s => s.id));
+    saveSectionOrder(updatedSections.map(s => s.id), fallbackUserId);
     setCached(getUserCacheKey(fallbackUserId, 'note_sections'), updatedSections);
 
     set({ sections: updatedSections });
@@ -820,6 +866,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       if (!error && data) {
         // Update temporary ID with Supabase ID
         const syncedSections = get().sections.map(s => s.id === newSection.id ? data : s);
+        saveSectionOrder(syncedSections.map(s => s.id), fallbackUserId);
         setCached(getUserCacheKey(fallbackUserId, 'note_sections'), syncedSections);
         set({ sections: syncedSections, activeSectionId: data.id });
       }
@@ -911,9 +958,14 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
   reorderSections: (newSections: NoteSection[]) => {
     const ids = newSections.map(s => s.id);
-    saveSectionOrder(ids);
-    const userId = newSections[0]?.user_id || DEFAULT_USER_ID;
-    setCached(getUserCacheKey(userId, 'note_sections'), newSections);
+    const effectiveUserId = useAuthStore.getState().user?.id || DEFAULT_USER_ID;
+    saveSectionOrder(ids, effectiveUserId);
+    setCached(getUserCacheKey(effectiveUserId, 'note_sections'), newSections);
+    newSections.forEach(s => {
+      if (s.user_id && s.user_id !== effectiveUserId) {
+        setCached(getUserCacheKey(s.user_id, 'note_sections'), newSections);
+      }
+    });
     set({ sections: newSections });
   },
 
@@ -930,9 +982,14 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     newSections.splice(targetIndex, 0, removed);
 
     const ids = newSections.map(s => s.id);
-    saveSectionOrder(ids);
-    const userId = newSections[0]?.user_id || DEFAULT_USER_ID;
-    setCached(getUserCacheKey(userId, 'note_sections'), newSections);
+    const effectiveUserId = useAuthStore.getState().user?.id || DEFAULT_USER_ID;
+    saveSectionOrder(ids, effectiveUserId);
+    setCached(getUserCacheKey(effectiveUserId, 'note_sections'), newSections);
+    newSections.forEach(s => {
+      if (s.user_id && s.user_id !== effectiveUserId) {
+        setCached(getUserCacheKey(s.user_id, 'note_sections'), newSections);
+      }
+    });
     set({ sections: newSections });
   },
 
@@ -1179,8 +1236,14 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
   reorderPages: (newPages: NotePage[]) => {
     const ids = newPages.map(p => p.id);
-    savePageOrder(ids);
-    setCached(CACHE_KEYS.PAGES, newPages);
+    const effectiveUserId = useAuthStore.getState().user?.id || DEFAULT_USER_ID;
+    savePageOrder(ids, effectiveUserId);
+    setCached(getUserCacheKey(effectiveUserId, 'note_pages'), newPages);
+    newPages.forEach(p => {
+      if (p.user_id && p.user_id !== effectiveUserId) {
+        setCached(getUserCacheKey(p.user_id, 'note_pages'), newPages);
+      }
+    });
     set({ pages: newPages });
   },
 
@@ -1209,8 +1272,14 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     newPages.splice(mainIndexB, 0, removed);
 
     const ids = newPages.map(p => p.id);
-    savePageOrder(ids);
-    setCached(CACHE_KEYS.PAGES, newPages);
+    const effectiveUserId = useAuthStore.getState().user?.id || DEFAULT_USER_ID;
+    savePageOrder(ids, effectiveUserId);
+    setCached(getUserCacheKey(effectiveUserId, 'note_pages'), newPages);
+    newPages.forEach(p => {
+      if (p.user_id && p.user_id !== effectiveUserId) {
+        setCached(getUserCacheKey(p.user_id, 'note_pages'), newPages);
+      }
+    });
     set({ pages: newPages });
   },
 

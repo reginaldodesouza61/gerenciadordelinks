@@ -1,5 +1,44 @@
 import { supabase } from '@/lib/supabase';
 
+let bucketCheckPromise: Promise<boolean> | null = null;
+let bucketAvailableCache: boolean | null = null;
+let lastCheckTimestamp = 0;
+const CACHE_LIFETIME = 60000; // 1 minute cache
+
+/**
+ * Checks if the Supabase Storage bucket 'note-assets' exists and is accessible.
+ * Caches the result to avoid redundant network requests and prevent error spam.
+ */
+export async function isStorageBucketAvailable(forceRefresh = false): Promise<boolean> {
+  const now = Date.now();
+  if (!forceRefresh && bucketAvailableCache !== null && now - lastCheckTimestamp < CACHE_LIFETIME) {
+    return bucketAvailableCache;
+  }
+
+  if (bucketCheckPromise && !forceRefresh) {
+    return bucketCheckPromise;
+  }
+
+  bucketCheckPromise = (async () => {
+    try {
+      const { data, error } = await supabase.storage.getBucket('note-assets');
+      if (error || !data) {
+        bucketAvailableCache = false;
+      } else {
+        bucketAvailableCache = true;
+      }
+    } catch {
+      bucketAvailableCache = false;
+    } finally {
+      lastCheckTimestamp = Date.now();
+      bucketCheckPromise = null;
+    }
+    return bucketAvailableCache;
+  })();
+
+  return bucketCheckPromise;
+}
+
 /**
  * Converts a Base64 data URL to a binary Blob.
  */
@@ -22,7 +61,8 @@ export function base64ToBlob(base64DataUrl: string): Blob {
 
 /**
  * Uploads an image (Base64 string or File/Blob) directly to the Supabase Storage bucket 'note-assets'.
- * Automatically attempts to create the bucket as public if it does not exist.
+ * If the bucket is not available, gracefully throws BUCKET_NOT_FOUND without attempting
+ * client-side bucket creation (which is forbidden by Supabase RLS policies for anonymous clients).
  * 
  * @returns The public URL of the uploaded image.
  */
@@ -32,6 +72,12 @@ export async function uploadImageToStorage(
   userId: string
 ): Promise<string> {
   const bucketName = 'note-assets';
+
+  const isAvailable = await isStorageBucketAvailable();
+  if (!isAvailable) {
+    throw new Error('BUCKET_NOT_FOUND');
+  }
+
   let blob: Blob;
   let contentType = 'image/png';
 
@@ -60,7 +106,6 @@ export async function uploadImageToStorage(
     });
 
   if (uploadError) {
-    // If the bucket doesn't exist, try to create it and retry once
     const isBucketError = 
       uploadError.message?.includes('bucket') || 
       uploadError.message?.includes('not found') || 
@@ -68,33 +113,10 @@ export async function uploadImageToStorage(
       (uploadError as Record<string, unknown>).statusCode === '404';
 
     if (isBucketError) {
-      console.log(`Bucket '${bucketName}' não encontrado. Tentando criar automaticamente...`);
-      try {
-        const { error: createError } = await supabase.storage.createBucket(bucketName, {
-          public: true,
-        });
-
-        if (createError) {
-          console.warn('Não foi possível criar o bucket automaticamente devido a restrições de permissão RLS do Supabase.', createError);
-          throw new Error('BUCKET_NOT_FOUND');
-        }
-
-        // Retry the upload after creating the bucket
-        const { error: retryError } = await supabase.storage
-          .from(bucketName)
-          .upload(filePath, blob, {
-            contentType,
-            upsert: true,
-          });
-
-        if (retryError) throw retryError;
-      } catch (err) {
-        console.error('Falha na criação automática do bucket ou no reenvio:', err);
-        throw new Error('BUCKET_NOT_FOUND');
-      }
-    } else {
-      throw uploadError;
+      bucketAvailableCache = false;
+      throw new Error('BUCKET_NOT_FOUND');
     }
+    throw uploadError;
   }
 
   // Retrieve the public URL

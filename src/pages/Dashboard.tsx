@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Header } from '@/components/layout/Header';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { Footer } from '@/components/layout/Footer';
@@ -14,6 +14,8 @@ export default function Dashboard() {
   const { fetchCategorias, fetchSubcategorias, fetchCredenciais } = useLinkStore();
   const { user, initialized } = useAuthStore();
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const lastFetchedUserIdRef = useRef<string | null>(null);
+
   const [activeTab, setActiveTab] = useState<'links' | 'notes'>(() => {
     try {
       const saved = localStorage.getItem('meuhub_active_tab');
@@ -36,13 +38,16 @@ export default function Dashboard() {
   useEffect(() => {
     if (!initialized) return;
 
-    fetchCategorias();
-    fetchSubcategorias();
-    
-    // Fetch credentials
     const userId = user?.id || 'c72212e7-2b6a-4da7-8745-01eb33414af4';
-    fetchCredenciais(userId);
+    if (lastFetchedUserIdRef.current !== userId) {
+      lastFetchedUserIdRef.current = userId;
+      fetchCategorias();
+      fetchSubcategorias();
+      fetchCredenciais(userId);
+    }
+  }, [fetchCategorias, fetchSubcategorias, fetchCredenciais, user?.id, initialized]);
 
+  useEffect(() => {
     // Keyboard shortcuts
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ctrl+K to focus search
@@ -55,7 +60,7 @@ export default function Dashboard() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [fetchCategorias, fetchSubcategorias, fetchCredenciais, user, initialized]);
+  }, []);
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-zinc-950 text-foreground transition-colors duration-200">

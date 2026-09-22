@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useAuthStore } from '@/lib/store/authStore';
 import { useNoteStore } from '@/lib/store/noteStore';
 import { NotesSidebar } from './NotesSidebar';
@@ -14,9 +14,10 @@ const SIDEBAR_COLLAPSED_STORAGE_KEY = 'meuhub_notes_sidebar_collapsed';
 
 export function NotesContainer() {
   const { user, initialized } = useAuthStore();
-  const { fetchNotes, activePageId, isLoading } = useNoteStore();
+  const { fetchNotes, activePageId, isLoading, pages } = useNoteStore();
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const lastFetchedUserIdRef = useRef<string | null>(null);
   const [isDesktopSidebarCollapsed, setIsDesktopSidebarCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
@@ -51,8 +52,11 @@ export function NotesContainer() {
   useEffect(() => {
     if (!initialized) return;
     const userId = user?.id || 'c72212e7-2b6a-4da7-8745-01eb33414af4';
-    fetchNotes(userId);
-  }, [user, initialized, fetchNotes]);
+    if (lastFetchedUserIdRef.current !== userId) {
+      lastFetchedUserIdRef.current = userId;
+      fetchNotes(userId);
+    }
+  }, [user?.id, initialized, fetchNotes]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -182,7 +186,7 @@ export function NotesContainer() {
 
       {/* Main Editor Area */}
       <div className="flex-1 flex flex-col h-full overflow-hidden relative bg-[#f9f9fb] dark:bg-zinc-950">
-        {isLoading ? (
+        {isLoading && pages.length === 0 ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="animate-spin h-8 w-8 border-4 border-indigo-600 border-t-transparent rounded-full"></div>
           </div>

@@ -4,6 +4,7 @@ import { Session, User } from '@supabase/supabase-js';
 import { toast } from 'sonner';
 
 const GUEST_STORAGE_KEY = 'meuhub_guest_user_session';
+const AUTH_USER_CACHE_KEY = 'meuhub_auth_user_cache';
 const DEFAULT_USER_ID = 'c72212e7-2b6a-4da7-8745-01eb33414af4';
 
 const createGuestUser = (): User => ({
@@ -14,6 +15,22 @@ const createGuestUser = (): User => ({
   created_at: new Date().toISOString(),
   email: 'usuario@meuhub.local'
 });
+
+function getInitialCachedUser(): User | null {
+  try {
+    if (typeof window === 'undefined') return null;
+    const isGuest = localStorage.getItem(GUEST_STORAGE_KEY) === 'true';
+    if (isGuest) return createGuestUser();
+    
+    const cached = localStorage.getItem(AUTH_USER_CACHE_KEY);
+    if (cached) {
+      return JSON.parse(cached) as User;
+    }
+  } catch (e) {
+    console.debug('Failed to read initial cached auth user', e);
+  }
+  return null;
+}
 
 interface AuthState {
   user: User | null;
@@ -27,67 +44,105 @@ interface AuthState {
   initialize: () => Promise<void>;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
-  user: null,
+const initialCachedUser = getInitialCachedUser();
+
+export const useAuthStore = create<AuthState>((set, get) => ({
+  user: initialCachedUser,
   session: null,
   loading: false,
-  initialized: false,
+  initialized: initialCachedUser !== null,
   
   initialize: async () => {
-    set({ loading: true });
+    // Only set loading if we don't have any cached user to prevent UI flickers
+    if (!get().user) {
+      set({ loading: true });
+    }
     
     try {
-      // Fast check if guest session was active
+      // Check if guest session was active
       const isGuest = localStorage.getItem(GUEST_STORAGE_KEY) === 'true';
       if (isGuest) {
         const guest = createGuestUser();
-        set({ user: guest, initialized: true, loading: false });
+        set({ user: guest, session: null, initialized: true, loading: false });
         return;
       }
 
-      // Check supabase session with a guaranteed 1500ms timeout race to prevent infinite hanging
+      // Check supabase session with timeout race
       const sessionPromise = supabase.auth.getSession();
       const timeoutPromise = new Promise<{ data: { session: null } }>((resolve) => 
-        setTimeout(() => resolve({ data: { session: null } }), 1500)
+        setTimeout(() => resolve({ data: { session: null } }), 2000)
       );
 
       const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]);
       
-      if (session) {
-        set({ 
-          user: session.user,
-          session,
-        });
+      if (session?.user) {
+        try {
+          localStorage.setItem(AUTH_USER_CACHE_KEY, JSON.stringify(session.user));
+        } catch {
+          // ignore
+        }
+        
+        const currentUser = get().user;
+        // Preserve stable reference if user is already the same to prevent unneeded re-render cascades
+        if (!currentUser || currentUser.id !== session.user.id || currentUser.email !== session.user.email) {
+          set({ user: session.user, session });
+        } else if (get().session !== session) {
+          set({ session });
+        }
       } else {
-        // Do not automatically sign in as guest; keep user as null so they can log in
-        set({
-          user: null,
-          session: null
-        });
+        // If no active session found and not guest, clean cache
+        if (!isGuest && !get().user) {
+          localStorage.removeItem(AUTH_USER_CACHE_KEY);
+          set({ user: null, session: null });
+        }
       }
     } catch (error) {
       console.error('Error initializing auth:', error);
-      set({ user: null, session: null });
+      // If we have cached user, keep it in offline fallback
+      if (!get().user) {
+        set({ user: null, session: null });
+      }
     } finally {
       set({ loading: false, initialized: true });
     }
     
-    // Setup auth state change listener
+    // Setup auth state change listener (singleton)
     supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        localStorage.removeItem(GUEST_STORAGE_KEY);
+        localStorage.removeItem(AUTH_USER_CACHE_KEY);
+        set({ user: null, session: null });
+        return;
+      }
+
       if (session?.user) {
         localStorage.removeItem(GUEST_STORAGE_KEY);
-        set({ 
-          user: session.user,
-          session
-        });
+        try {
+          localStorage.setItem(AUTH_USER_CACHE_KEY, JSON.stringify(session.user));
+        } catch {
+          // ignore
+        }
+
+        const currentUser = get().user;
+        // CRITICAL: Preserve stable object reference if user identity is identical!
+        // This prevents downstream effect triggers (fetchNotes, fetchLinks, NoteEditor unmounts) on TOKEN_REFRESHED
+        if (!currentUser || currentUser.id !== session.user.id || currentUser.email !== session.user.email) {
+          set({ 
+            user: session.user,
+            session
+          });
+        } else if (get().session !== session) {
+          set({ session });
+        }
       }
     });
   },
   
   signInAsGuest: () => {
     localStorage.setItem(GUEST_STORAGE_KEY, 'true');
+    localStorage.removeItem(AUTH_USER_CACHE_KEY);
     const guest = createGuestUser();
-    set({ user: guest, session: null, initialized: true });
+    set({ user: guest, session: null, initialized: true, loading: false });
     toast.success('Workspace aberto com sucesso!');
   },
 
@@ -103,14 +158,18 @@ export const useAuthStore = create<AuthState>((set) => ({
       if (error) throw error;
       
       localStorage.removeItem(GUEST_STORAGE_KEY);
+      if (data.user) {
+        localStorage.setItem(AUTH_USER_CACHE_KEY, JSON.stringify(data.user));
+      }
       set({ 
         user: data.user,
-        session: data.session
+        session: data.session,
+        initialized: true
       });
       
       toast.success('Login realizado com sucesso!');
       
-      // Force page reload to ensure proper navigation
+      // Navigate cleanly without harsh page reload
       window.location.href = '/';
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Erro ao fazer login';
@@ -151,11 +210,12 @@ export const useAuthStore = create<AuthState>((set) => ({
     
     try {
       localStorage.removeItem(GUEST_STORAGE_KEY);
+      localStorage.removeItem(AUTH_USER_CACHE_KEY);
       await supabase.auth.signOut();
       set({ user: null, session: null });
       toast.success('Logout realizado com sucesso!');
       
-      // Force page reload to clear all cached state from stores
+      // Clear memory & redirect to login
       window.location.href = '/';
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Erro ao fazer logout';

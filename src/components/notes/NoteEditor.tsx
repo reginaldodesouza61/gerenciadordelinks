@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback, useMemo, memo } from 'react';
 import { useNoteStore } from '@/lib/store/noteStore';
 import { useAuthStore } from '@/lib/store/authStore';
 import { supabase } from '@/lib/supabase';
-import { uploadImageToStorage } from '@/lib/storage/imageStorage';
+import { uploadImageToStorage, isStorageBucketAvailable } from '@/lib/storage/imageStorage';
 import { cleanupOrphanedAssets, deleteAsset } from '@/lib/storage/storageCleanup';
 import { decryptNoteContent, isFieldEncrypted } from '@/lib/encryption';
 import { CanvasBlock } from '@/types/notes';
@@ -1332,6 +1332,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
   const [isLoadingRevisions, setIsLoadingRevisions] = useState(false);
 
   const [isImageAuditOpen, setIsImageAuditOpen] = useState(false);
+  const [isBucketConfigured, setIsBucketConfigured] = useState<boolean | null>(null);
   const [detectedBase64Images, setDetectedBase64Images] = useState<{
     id: string;
     blockId: string;
@@ -1455,6 +1456,9 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
 
     setDetectedBase64Images(detected);
     setIsImageAuditOpen(true);
+    isStorageBucketAvailable(true).then((available) => {
+      setIsBucketConfigured(available);
+    });
   }, [blocks]);
 
   const handleMigrateImages = useCallback(async () => {
@@ -1463,6 +1467,12 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     const userId = userState.user?.id;
     if (!userId) {
       toast.error('Usuário não autenticado.');
+      return;
+    }
+
+    const isBucketReady = await isStorageBucketAvailable(true);
+    if (!isBucketReady) {
+      toast.error('Bucket "note-assets" não encontrado no Supabase Storage. Crie o bucket "note-assets" como público no painel do Supabase.', { duration: 8000 });
       return;
     }
 
@@ -1498,7 +1508,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
           }
         } catch (uploadErr) {
           const errMessage = (uploadErr as Error).message || '';
-          console.error('Error uploading image index', i, uploadErr);
+          console.debug('Error uploading image index', i, uploadErr);
           if (errMessage === 'BUCKET_NOT_FOUND') {
             throw new Error('BUCKET_NOT_FOUND');
           }
@@ -1529,6 +1539,13 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     const userId = userState.user?.id;
     if (!userId) {
       toast.error('Usuário não autenticado.');
+      return;
+    }
+
+    const isBucketReady = await isStorageBucketAvailable(true);
+    if (!isBucketReady) {
+      toast.info('Bucket "note-assets" não está disponível no Supabase Storage. Nenhum arquivo remoto para escanear.');
+      setOrphanedList([]);
       return;
     }
 
@@ -1856,8 +1873,14 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
 
     if (legacyImages.length === 0) return;
 
-    console.log(`[Auto-Migration] Detectadas ${legacyImages.length} imagens Base64 na página ${pageId}. Iniciando migração em segundo plano...`);
-    toast.info(`Otimizando ${legacyImages.length} imagens desta nota em segundo plano para o Supabase Storage...`, { duration: 4500 });
+    // Check if Supabase Storage bucket exists before attempting migration
+    const isBucketReady = await isStorageBucketAvailable();
+    if (!isBucketReady) {
+      // Storage bucket note-assets does not exist in Supabase. Images remain safely in Base64 without errors.
+      return;
+    }
+
+    console.debug(`[Auto-Migration] Detectadas ${legacyImages.length} imagens Base64 na página ${pageId}. Otimizando para o Supabase Storage...`);
 
     try {
       const updatedBlocks = JSON.parse(JSON.stringify(blocksToCheck)) as CanvasBlock[];
@@ -1884,7 +1907,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
             }
           }
         } catch (uploadErr) {
-          console.error('[Auto-Migration] Falha ao migrar uma imagem individual:', uploadErr);
+          console.debug('[Auto-Migration] Imagem individual mantida em Base64:', uploadErr);
         }
       }
 
@@ -1896,7 +1919,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
         toast.success(`Otimização concluída! ${migrationCount} imagens migradas com sucesso para o note-assets.`);
       }
     } catch (err) {
-      console.error('[Auto-Migration] Falha no processo de migração automática:', err);
+      console.debug('[Auto-Migration] Processo de migração automática ignorado:', err);
     }
   }, [pageId, updatePage]);
 
@@ -1904,10 +1927,11 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
   useEffect(() => {
     if (!page) return;
 
-    // Skip reload if this update was triggered by our own internal save on the same page
+    // If we are already on this page and have active blocks or in-progress changes,
+    // do NOT let a background store fetch overwrite the user's canvas or reset selection!
     if (
       lastLoadedPageIdRef.current === pageId &&
-      lastSavedContentRef.current === page.conteudo
+      (hasUnsavedChangesRef.current || blocks.length > 0 || lastSavedContentRef.current === page.conteudo)
     ) {
       return;
     }
@@ -2053,6 +2077,24 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
         });
       }
     };
+  }, [pageId, updatePage]);
+
+  // Seamless flush when user switches tabs or hides browser window
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        if (hasUnsavedChangesRef.current) {
+          const latestJson = JSON.stringify(blocksRef.current);
+          updatePage(pageId, { conteudo: latestJson }).catch((err) => {
+            console.debug('Silent background flush on tab hide:', err);
+          });
+          hasUnsavedChangesRef.current = false;
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [pageId, updatePage]);
 
   // Clean up empty blocks
@@ -2522,28 +2564,31 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     setSelectedBlockId(newBlock.id);
     saveNow(nextBlocks);
 
-    // Envio assíncrono em segundo plano para o Supabase Storage se for Base64
+    // Envio assíncrono em segundo plano para o Supabase Storage se for Base64 e o bucket estiver configurado
     if (dataUrl.startsWith('data:image/')) {
       const userState = useAuthStore.getState();
       const userId = userState.user?.id;
       if (userId && pageId) {
-        uploadImageToStorage(dataUrl, pageId, userId)
-          .then((publicUrl) => {
-            setBlocks((prevBlocks) => {
-              const updated = prevBlocks.map((b) => {
-                if (b.id === blockId) {
-                  return { ...b, imageUrl: publicUrl, conteudo: publicUrl };
-                }
-                return b;
+        isStorageBucketAvailable().then((isReady) => {
+          if (!isReady) return;
+          uploadImageToStorage(dataUrl, pageId, userId)
+            .then((publicUrl) => {
+              setBlocks((prevBlocks) => {
+                const updated = prevBlocks.map((b) => {
+                  if (b.id === blockId) {
+                    return { ...b, imageUrl: publicUrl, conteudo: publicUrl };
+                  }
+                  return b;
+                });
+                saveNow(updated);
+                return updated;
               });
-              saveNow(updated);
-              return updated;
+              console.debug(`[Storage] Imagem ${blockId} gravada com sucesso no bucket note-assets.`);
+            })
+            .catch((err) => {
+              console.debug('[Storage] Upload em segundo plano mantido em Base64:', err);
             });
-            console.log(`[Storage] Imagem ${blockId} gravada com sucesso no bucket note-assets.`);
-          })
-          .catch((err) => {
-            console.error('[Storage] Erro no upload em segundo plano da imagem recém-criada:', err);
-          });
+        });
       }
     }
   }, [blocks, getSpawnPosition, purgeAndSave, saveNow, pageId]);
@@ -3597,10 +3642,24 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                       Atenção: Encontradas {detectedBase64Images.length} {detectedBase64Images.length === 1 ? 'imagem' : 'imagens'} Base64!
                     </p>
                     <p className="text-[11px] text-slate-600 dark:text-zinc-400 mt-1">
-                      Essas imagens estão salvas diretamente dentro do texto. Clique em "Migrar para o Supabase Storage" para convertê-las automaticamente.
+                      {isBucketConfigured === false 
+                        ? 'Essas imagens estão salvas diretamente na nota em formato Base64. Elas funcionam perfeitamente offline e sincronizam normalmente.'
+                        : 'Essas imagens estão salvas diretamente dentro do texto. Clique em "Migrar para o Supabase Storage" para convertê-las automaticamente.'}
                     </p>
                   </div>
                 </div>
+
+                {isBucketConfigured === false && (
+                  <div className="p-3 bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-900/40 rounded-lg flex items-start gap-2.5 text-blue-800 dark:text-blue-300">
+                    <CloudOff className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
+                    <div className="space-y-0.5 text-[11px]">
+                      <span className="font-semibold">Bucket "note-assets" não configurado no Supabase Storage</span>
+                      <p className="text-blue-600/90 dark:text-blue-400">
+                        O armazenamento em nuvem está desabilitado no momento. As imagens permanecem seguras em Base64. Para habilitar o envio remoto, crie o bucket público <code>note-assets</code> no painel do Supabase.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 <div className="max-h-40 overflow-y-auto space-y-1.5 border border-slate-150 dark:border-zinc-850 rounded-lg p-2 bg-slate-50/50 dark:bg-zinc-900/50">
                   {detectedBase64Images.map((img, i) => (
@@ -3706,12 +3765,13 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
             </Button>
             {detectedBase64Images.length > 0 && (
               <Button 
-                className="text-xs h-8 bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5"
+                className="text-xs h-8 bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 disabled:opacity-50"
                 onClick={handleMigrateImages}
-                disabled={isMigratingImages || isCleaningOrphans}
+                disabled={isMigratingImages || isCleaningOrphans || isBucketConfigured === false}
+                title={isBucketConfigured === false ? 'Bucket note-assets não encontrado no Supabase Storage' : 'Migrar imagens para Supabase Storage'}
               >
-                <Upload size={13} />
-                <span>Migrar para o Storage</span>
+                {isBucketConfigured === false ? <CloudOff size={13} /> : <Upload size={13} />}
+                <span>{isBucketConfigured === false ? 'Storage Indisponível' : 'Migrar para o Storage'}</span>
               </Button>
             )}
           </DialogFooter>

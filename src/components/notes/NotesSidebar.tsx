@@ -13,6 +13,7 @@ import { useAuthStore } from '@/lib/store/authStore';
 import { cn } from '@/lib/utils';
 import { NotePage } from '@/types/notes';
 import { TrashModal } from './TrashModal';
+import { toast } from 'sonner';
 
 interface NotesSidebarProps {
   onCollapse?: () => void;
@@ -219,6 +220,7 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
       }
       currentSections.splice(insertionIndex, 0, moved);
       reorderSections(currentSections);
+      toast.success('Ordem das seções salva!');
     }
 
     setDraggedSectionId(null);
@@ -526,24 +528,24 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
                 <div 
                   key={section.id} 
                   className={cn(
-                    "space-y-1 w-full transition-all duration-150 relative",
-                    isDraggingThis && "opacity-40 scale-[0.98]",
-                    isOverThis && dropSectionPosition === 'before' && "border-t-2 border-indigo-500 pt-1",
-                    isOverThis && dropSectionPosition === 'after' && "border-b-2 border-indigo-500 pb-1"
+                    "space-y-1 w-full relative",
+                    isDraggingThis && "opacity-40"
                   )}
-                  draggable
-                  onDragStart={(e) => handleSectionDragStart(e, section.id)}
-                  onDragOver={(e) => handleSectionDragOver(e, section.id)}
-                  onDrop={(e) => handleSectionDrop(e, section.id)}
-                  onDragEnd={handleSectionDragEnd}
                 >
                   {/* Section Header */}
                   <div 
+                    draggable
+                    onDragStart={(e) => handleSectionDragStart(e, section.id)}
+                    onDragOver={(e) => handleSectionDragOver(e, section.id)}
+                    onDrop={(e) => handleSectionDrop(e, section.id)}
+                    onDragEnd={handleSectionDragEnd}
                     className={cn(
-                      "group flex items-center justify-between rounded-lg px-1.5 py-1.5 cursor-pointer transition-colors w-full select-none",
+                      "group flex items-center justify-between rounded-lg px-1.5 py-1.5 cursor-pointer transition-all w-full select-none relative",
                       activeSectionId === section.id 
                         ? "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300" 
-                        : "hover:bg-gray-100 dark:hover:bg-zinc-800/60 text-gray-700 dark:text-zinc-200"
+                        : "hover:bg-gray-100 dark:hover:bg-zinc-800/60 text-gray-700 dark:text-zinc-200",
+                      isOverThis && dropSectionPosition === 'before' && "border-t-2 border-indigo-500 rounded-t-none",
+                      isOverThis && dropSectionPosition === 'after' && "border-b-2 border-indigo-500 rounded-b-none"
                     )}
                     onClick={() => {
                       setActiveSectionId(section.id);
@@ -591,6 +593,7 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
                         onClick={(e) => { 
                           e.stopPropagation(); 
                           moveSection(section.id, 'up'); 
+                          toast.success('Ordem das seções salva!');
                         }} 
                         title="Mover seção para cima"
                       >
@@ -606,6 +609,7 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
                         onClick={(e) => { 
                           e.stopPropagation(); 
                           moveSection(section.id, 'down'); 
+                          toast.success('Ordem das seções salva!');
                         }} 
                         title="Mover seção para baixo"
                       >

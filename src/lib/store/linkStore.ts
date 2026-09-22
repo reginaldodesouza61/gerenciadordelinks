@@ -132,9 +132,14 @@ export const useLinkStore = create<LinkState>((set, get) => ({
   activeFilter: (localStorage.getItem('meuhub_active_filter') as 'all' | 'favorites' | 'recent') || 'all',
   
   fetchLinks: async (userId: string) => {
+    const currentLinks = get().links;
+    const hasDataInMemory = currentLinks.length > 0;
     const cacheKey = getUserCacheKey(userId, 'links');
-    const cached = getCached<Link[]>(cacheKey, []);
-    set({ links: cached, loading: true });
+    
+    if (!hasDataInMemory) {
+      const cached = getCached<Link[]>(cacheKey, []);
+      set({ links: cached, loading: cached.length === 0 });
+    }
     
     try {
       const userIds = userId === 'c72212e7-2b6a-4da7-8745-01eb33414af4'

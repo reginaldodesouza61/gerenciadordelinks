@@ -5,11 +5,21 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from 'next-themes';
 import { useAuthStore } from '@/lib/store/authStore';
+import { useAppLifecycle } from '@/lib/lifecycle/useAppLifecycle';
 import Dashboard from './pages/Dashboard';
 import Auth from './pages/Auth';
 import NotFound from './pages/NotFound';
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      retry: 1,
+      staleTime: 5 * 60 * 1000,
+    },
+  },
+});
 
 // Auth guard component
 interface ProtectedRouteProps {
@@ -39,7 +49,10 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
 
 const App = () => {
   const { initialize, initialized } = useAuthStore();
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!initialized);
+  
+  // Enterprise lifecycle & background sync manager
+  useAppLifecycle();
   
   useEffect(() => {
     const initAuth = async () => {
