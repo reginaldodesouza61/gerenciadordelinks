@@ -16,7 +16,7 @@ import {
   Code2, ShieldCheck, Link as LinkIcon, Type, Terminal, KeyRound, Sparkles, Wand2,
   Camera, Image as ImageIcon, Upload, Download, Copy, ChevronDown, Undo2, Redo2, PanelLeftOpen,
   Shapes, Pencil, Search, Network, Workflow, Maximize2, Minimize2, ChevronUp, PlusCircle, Layers, Clock, Globe, ExternalLink,
-  Check, RefreshCw, AlertCircle, Cloud, CloudOff, Database, History, AlertTriangle
+  Check, RefreshCw, AlertCircle, Cloud, CloudOff, Database, History, AlertTriangle, Activity
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -44,6 +44,7 @@ import { RelatedLinksDrawer } from './dev/RelatedLinksDrawer';
 import { AiAssistantModal } from './AiAssistantModal';
 import { ScreenCropModal } from './ScreenCropModal';
 import { InsertImageToTextBlockModal } from './dev/InsertImageToTextBlockModal';
+import { AutoScrollDiagnosticModal } from './dev/AutoScrollDiagnosticModal';
 import { SettingsModal } from '@/components/settings/SettingsModal';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { captureScreen, fileToDataUrl } from '@/lib/screenCapture';
@@ -1323,11 +1324,16 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
   const restoreRevision = useNoteStore((state) => state.restoreRevision);
   const page = pages.find((p) => p.id === pageId);
   const [blocks, setBlocks] = useState<CanvasBlock[]>([]);
-  const updateBlock = useCallback((id: string, updates: Partial<CanvasBlock>) => {
+  const updateBlock = useCallback((id: string, updates: Partial<CanvasBlock> | ((prev: CanvasBlock) => Partial<CanvasBlock>)) => {
     setBlocks((prev) => {
-      return prev.map((b) => (b.id === id ? { ...b, ...updates } : b));
+      return prev.map((b) => {
+        if (b.id !== id) return b;
+        const resolvedUpdates = typeof updates === 'function' ? updates(b) : updates;
+        return { ...b, ...resolvedUpdates };
+      });
     });
   }, []);
+  const [isAutoScrollDiagnosticOpen, setIsAutoScrollDiagnosticOpen] = useState(false);
   const [activeEditor, setActiveEditor] = useState<Editor | null>(null);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const selectedBlockIdRef = useRef<string | null>(null);
@@ -1403,13 +1409,16 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     draggingBlockId,
     canvasExtraWidth,
     canvasExtraHeight,
+    diagnosticData,
     handleDragStart: onCanvasDragStart,
     handleDrag: onCanvasDrag,
     handleDragStop: onCanvasDragStop,
     handleCanvasMouseDown,
     handleCanvasMouseMove,
     handleCanvasMouseUp,
-  } = useCanvasDragAutoScroll(viewportContainerRef, blocks);
+  } = useCanvasDragAutoScroll(viewportContainerRef, blocks, {
+    onUpdateBlockPosition: updateBlock,
+  });
 
   const handleBlockDragStop = useCallback((blockId: string, data: { x: number; y: number }) => {
     onCanvasDragStop(blockId, data, updateBlock);
@@ -3019,6 +3028,18 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
               </span>
             </Button>
 
+            {/* Auto-Scroll Diagnostic Inspector */}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setIsAutoScrollDiagnosticOpen(true)}
+              className="h-7 px-2 text-xs text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg gap-1 font-medium"
+              title="Diagnóstico Técnico do Auto-Scroll & Viewport Canvas"
+            >
+              <Activity size={13} className="text-indigo-500 dark:text-indigo-400" />
+              <span className="hidden xl:inline">Diagnóstico Auto-Scroll</span>
+            </Button>
+
             <div className="w-px h-4 bg-slate-200 dark:bg-zinc-800 mx-0.5" />
 
             {/* Collapse Header Toggle for Maximum Workspace */}
@@ -3716,6 +3737,13 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Visual Diagnostic Inspector for Canvas Auto-Scroll */}
+      <AutoScrollDiagnosticModal 
+        isOpen={isAutoScrollDiagnosticOpen} 
+        onClose={() => setIsAutoScrollDiagnosticOpen(false)} 
+        diagnosticData={diagnosticData} 
+      />
     </div>
   );
 }
