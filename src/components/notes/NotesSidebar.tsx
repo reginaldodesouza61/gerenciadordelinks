@@ -36,9 +36,47 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
     resolveConflict
   } = useNoteStore();
 
-  const [expandedSections, setExpandedSections] = useState<string[]>([]);
-  const [expandedPages, setExpandedPages] = useState<string[]>([]);
+  const [expandedSections, setExpandedSections] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('meuhub_notes_expanded_sections');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  });
+  const [expandedPages, setExpandedPages] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('meuhub_notes_expanded_pages');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  });
   const [conflictPageId, setConflictPageId] = useState<string | null>(null);
+
+  const saveExpandedSections = (next: string[]) => {
+    try {
+      localStorage.setItem('meuhub_notes_expanded_sections', JSON.stringify(next));
+    } catch {
+      // ignore
+    }
+  };
+
+  const saveExpandedPages = (next: string[]) => {
+    try {
+      localStorage.setItem('meuhub_notes_expanded_pages', JSON.stringify(next));
+    } catch {
+      // ignore
+    }
+  };
   
   // Drag and drop state for sections
   const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
@@ -62,13 +100,15 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
   const [parentPageId, setParentPageId] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState('');
 
-  // Expand all sections automatically on load so pages are immediately visible
+  // Expand all sections automatically on load so pages are immediately visible if none expanded
   useEffect(() => {
     if (sections.length > 0) {
       setExpandedSections(prev => {
         const allSectionIds = sections.map(s => s.id);
         const setIds = new Set([...prev, ...allSectionIds]);
-        return Array.from(setIds);
+        const next = Array.from(setIds);
+        saveExpandedSections(next);
+        return next;
       });
     }
   }, [sections]);
@@ -76,9 +116,13 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
   // Expand active section automatically
   useEffect(() => {
     if (activeSectionId && !expandedSections.includes(activeSectionId)) {
-      setExpandedSections(prev => [...prev, activeSectionId]);
+      setExpandedSections(prev => {
+        const next = [...prev, activeSectionId];
+        saveExpandedSections(next);
+        return next;
+      });
     }
-  }, [activeSectionId]);
+  }, [activeSectionId, expandedSections]);
 
   // Expand parent pages recursively if active page is inside a subpage
   useEffect(() => {
@@ -94,22 +138,28 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
         }
         setExpandedPages(prev => {
           const unique = new Set([...prev, ...toExpand]);
-          return Array.from(unique);
+          const next = Array.from(unique);
+          saveExpandedPages(next);
+          return next;
         });
       }
     }
   }, [activePageId, pages]);
 
   const toggleSection = (id: string) => {
-    setExpandedSections(prev => 
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    );
+    setExpandedSections(prev => {
+      const next = prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id];
+      saveExpandedSections(next);
+      return next;
+    });
   };
 
   const togglePage = (id: string) => {
-    setExpandedPages(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    );
+    setExpandedPages(prev => {
+      const next = prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id];
+      saveExpandedPages(next);
+      return next;
+    });
   };
 
   const openDialog = (

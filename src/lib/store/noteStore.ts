@@ -377,18 +377,18 @@ function getStoredSectionOrder(userId?: string): string[] {
       const userRaw = localStorage.getItem(`${SECTION_ORDER_STORAGE_KEY}_${effectiveUserId}`);
       if (userRaw) {
         const parsed = JSON.parse(userRaw);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed.map(sanitizeUuid);
       }
     }
     // Also check user_metadata from auth user if available
     const metaOrder = useAuthStore.getState().user?.user_metadata?.note_section_order;
     if (Array.isArray(metaOrder) && metaOrder.length > 0) {
-      return metaOrder;
+      return metaOrder.map(sanitizeUuid);
     }
     const raw = localStorage.getItem(SECTION_ORDER_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed.map(sanitizeUuid) : [];
   } catch {
     return [];
   }
@@ -396,20 +396,21 @@ function getStoredSectionOrder(userId?: string): string[] {
 
 function saveSectionOrder(ids: string[], userId?: string) {
   try {
+    const cleanIds = ids.map(sanitizeUuid);
     const effectiveUserId = userId || useAuthStore.getState().user?.id || DEFAULT_USER_ID;
-    localStorage.setItem(SECTION_ORDER_STORAGE_KEY, JSON.stringify(ids));
+    localStorage.setItem(SECTION_ORDER_STORAGE_KEY, JSON.stringify(cleanIds));
     if (effectiveUserId) {
-      localStorage.setItem(`${SECTION_ORDER_STORAGE_KEY}_${effectiveUserId}`, JSON.stringify(ids));
+      localStorage.setItem(`${SECTION_ORDER_STORAGE_KEY}_${effectiveUserId}`, JSON.stringify(cleanIds));
     }
     const authUser = useAuthStore.getState().user;
     if (authUser?.id && authUser.id !== effectiveUserId) {
-      localStorage.setItem(`${SECTION_ORDER_STORAGE_KEY}_${authUser.id}`, JSON.stringify(ids));
+      localStorage.setItem(`${SECTION_ORDER_STORAGE_KEY}_${authUser.id}`, JSON.stringify(cleanIds));
     }
 
     // Sync to Supabase user metadata if user is authenticated
     if (authUser && authUser.id && authUser.id !== DEFAULT_USER_ID) {
       supabase.auth.updateUser({
-        data: { note_section_order: ids }
+        data: { note_section_order: cleanIds }
       }).then(({ data, error }) => {
         if (!error && data?.user) {
           try {
@@ -435,17 +436,17 @@ function getStoredPageOrder(userId?: string): string[] {
       const userRaw = localStorage.getItem(`${PAGE_ORDER_STORAGE_KEY}_${effectiveUserId}`);
       if (userRaw) {
         const parsed = JSON.parse(userRaw);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed.map(sanitizeUuid);
       }
     }
     const metaOrder = useAuthStore.getState().user?.user_metadata?.note_page_order;
     if (Array.isArray(metaOrder) && metaOrder.length > 0) {
-      return metaOrder;
+      return metaOrder.map(sanitizeUuid);
     }
     const raw = localStorage.getItem(PAGE_ORDER_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed.map(sanitizeUuid) : [];
   } catch {
     return [];
   }
@@ -453,19 +454,20 @@ function getStoredPageOrder(userId?: string): string[] {
 
 function savePageOrder(ids: string[], userId?: string) {
   try {
+    const cleanIds = ids.map(sanitizeUuid);
     const effectiveUserId = userId || useAuthStore.getState().user?.id || DEFAULT_USER_ID;
-    localStorage.setItem(PAGE_ORDER_STORAGE_KEY, JSON.stringify(ids));
+    localStorage.setItem(PAGE_ORDER_STORAGE_KEY, JSON.stringify(cleanIds));
     if (effectiveUserId) {
-      localStorage.setItem(`${PAGE_ORDER_STORAGE_KEY}_${effectiveUserId}`, JSON.stringify(ids));
+      localStorage.setItem(`${PAGE_ORDER_STORAGE_KEY}_${effectiveUserId}`, JSON.stringify(cleanIds));
     }
     const authUser = useAuthStore.getState().user;
     if (authUser?.id && authUser.id !== effectiveUserId) {
-      localStorage.setItem(`${PAGE_ORDER_STORAGE_KEY}_${authUser.id}`, JSON.stringify(ids));
+      localStorage.setItem(`${PAGE_ORDER_STORAGE_KEY}_${authUser.id}`, JSON.stringify(cleanIds));
     }
 
     if (authUser && authUser.id && authUser.id !== DEFAULT_USER_ID) {
       supabase.auth.updateUser({
-        data: { note_page_order: ids }
+        data: { note_page_order: cleanIds }
       }).then(({ data, error }) => {
         if (!error && data?.user) {
           try {
@@ -940,14 +942,19 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
         // 1. SECTIONS MERGING & RECONCILIATION
         const mergedSectionsMap = new Map<string, NoteSection>();
-        // Add remote sections
-        rawSections.forEach(s => mergedSectionsMap.set(s.id, s));
-        // Add locally cached sections that might not be on remote yet
+        // Populate with immediate local sections first to retain order information
         immediateSections.forEach(s => {
-          if (!mergedSectionsMap.has(s.id)) {
-            mergedSectionsMap.set(s.id, s);
-          }
+          mergedSectionsMap.set(s.id, s);
         });
+        // Merge remote sections, preserving local .ordem if present
+        rawSections.forEach(s => {
+          const localSec = mergedSectionsMap.get(s.id);
+          mergedSectionsMap.set(s.id, {
+            ...s,
+            ordem: (localSec && localSec.ordem !== undefined) ? localSec.ordem : s.ordem
+          });
+        });
+
         const finalSections = sortSectionsByStoredOrder(
           Array.from(mergedSectionsMap.values()).length > 0 
             ? Array.from(mergedSectionsMap.values()) 
@@ -1005,19 +1012,34 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
           if (localMatch) {
             initialSyncStatuses[remotePage.id] = isPendingSync ? 'pending' : localMatch.syncStatus;
-            // If local page has pending offline changes, preserve local edits!
-            if (isPendingSync || localMatch.syncStatus === 'pending' || localMatch.syncStatus === 'conflict') {
+            
+            // Preserve local changes (including moved section_id, parent_id, titulo, and conteudo)
+            const shouldUseLocal = isPendingSync || 
+              localMatch.syncStatus === 'pending' || 
+              localMatch.syncStatus === 'conflict' ||
+              (localMatch.lastUpdatedAt && localMatch.lastUpdatedAt > new Date(remotePage.created_at).getTime());
+
+            if (shouldUseLocal) {
               mergedPagesMap.set(remotePage.id, {
                 ...remotePage,
-                titulo: localMatch.titulo,
-                conteudo: localMatch.conteudo
+                titulo: localMatch.titulo ?? remotePage.titulo,
+                conteudo: localMatch.conteudo ?? remotePage.conteudo,
+                section_id: localMatch.section_id ?? remotePage.section_id,
+                parent_id: localMatch.parent_id !== undefined ? localMatch.parent_id : remotePage.parent_id
               });
             } else {
               mergedPagesMap.set(remotePage.id, remotePage);
-              if (localMatch.conteudo !== remotePage.conteudo || localMatch.titulo !== remotePage.titulo) {
+              if (
+                localMatch.conteudo !== remotePage.conteudo || 
+                localMatch.titulo !== remotePage.titulo ||
+                localMatch.section_id !== remotePage.section_id ||
+                localMatch.parent_id !== remotePage.parent_id
+              ) {
                 await offlineDb.pages.update(remotePage.id, {
                   titulo: remotePage.titulo,
                   conteudo: remotePage.conteudo,
+                  section_id: remotePage.section_id,
+                  parent_id: remotePage.parent_id,
                   lastUpdatedAt: Date.now()
                 });
               }
@@ -1491,6 +1513,34 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         timestamp: Date.now(),
         attempts: 0
       });
+
+      // Direct Supabase online update
+      const directDbPayload: Record<string, unknown> = {};
+      if (cleanUpdates.titulo !== undefined) directDbPayload.titulo = cleanUpdates.titulo;
+      if (cleanUpdates.section_id !== undefined) directDbPayload.section_id = cleanUpdates.section_id;
+      if (cleanUpdates.parent_id !== undefined) directDbPayload.parent_id = cleanUpdates.parent_id;
+      if (cleanUpdates.conteudo !== undefined) {
+        try {
+          directDbPayload.conteudo = await sanitizeAndEncryptNoteContent(cleanUpdates.conteudo);
+        } catch {
+          directDbPayload.conteudo = cleanUpdates.conteudo;
+        }
+      }
+
+      if (Object.keys(directDbPayload).length > 0) {
+        supabase.from('note_pages').update(directDbPayload).eq('id', cleanId).then(({ error }) => {
+          if (!error) {
+            offlineDb.pages.update(cleanId, { syncStatus: 'synced', remoteVersion: currentLocalVersion }).catch(() => {});
+            set((state) => ({
+              pageSyncStatuses: { ...state.pageSyncStatuses, [cleanId]: 'synced', [id]: 'synced' }
+            }));
+          } else {
+            console.debug('Direct note_pages update error:', error.message);
+          }
+        }).catch((err) => {
+          console.debug('Direct note_pages update offline:', err);
+        });
+      }
 
       get().syncPendingQueue().catch((err) => {
         console.debug('Sync postponed:', err);

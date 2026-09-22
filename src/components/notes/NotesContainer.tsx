@@ -28,16 +28,16 @@ export function NotesContainer() {
   const [sidebarWidth, setSidebarWidth] = useState(288); // Default 288px (w-72)
   const [isResizing, setIsResizing] = useState(false);
 
-  // Derive effective active page
+  // Derive effective active page without prematurely overwriting user position
   const effectiveActivePageId = activePageId && pages.some(p => p.id === activePageId)
     ? activePageId
     : (pages.length > 0 ? pages[0].id : activePageId);
 
   useEffect(() => {
-    if (pages.length > 0 && effectiveActivePageId && effectiveActivePageId !== activePageId) {
+    if (!isLoading && pages.length > 0 && effectiveActivePageId && effectiveActivePageId !== activePageId) {
       setActivePageId(effectiveActivePageId);
     }
-  }, [pages, effectiveActivePageId, activePageId, setActivePageId]);
+  }, [pages, effectiveActivePageId, activePageId, setActivePageId, isLoading]);
 
   // Global keyboard shortcut for Ctrl+K
   useEffect(() => {

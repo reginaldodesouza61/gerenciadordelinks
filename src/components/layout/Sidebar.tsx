@@ -35,36 +35,31 @@ export function Sidebar() {
     setActiveFilter
   } = useLinkStore();
 
-  const [expandedCategories, setExpandedCategories] = useState<string[]>([]);
-
-  // State for category dialog
-  const [isCategoryDialogOpen, setCategoryDialogOpen] = useState(false);
-  const [categoryName, setCategoryName] = useState('');
-  const [isEditingCategory, setIsEditingCategory] = useState(false);
-  const [currentCategoryId, setCurrentCategoryId] = useState<string | null>(null);
-
-  // State for subcategory dialog
-  const [isSubcategoryDialogOpen, setSubcategoryDialogOpen] = useState(false);
-  const [subcategoryName, setSubcategoryName] = useState('');
-  const [subcategoryCategoryId, setSubcategoryCategoryId] = useState<string>('');
-  const [isEditingSubcategory, setIsEditingSubcategory] = useState(false);
-  const [currentSubcategoryId, setCurrentSubcategoryId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if ((categorias || []).length === 0) {
-      fetchCategorias();
+  const [expandedCategories, setExpandedCategories] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('meuhub_links_expanded_categories');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
     }
-    if ((subcategorias || []).length === 0) {
-      fetchSubcategorias();
-    }
-  }, [fetchCategorias, fetchSubcategorias, categorias?.length, subcategorias?.length]);
+    return [];
+  });
 
   const toggleCategory = (categoryId: string) => {
-    setExpandedCategories(prev =>
-      prev.includes(categoryId)
+    setExpandedCategories(prev => {
+      const next = prev.includes(categoryId)
         ? prev.filter(id => id !== categoryId)
-        : [...prev, categoryId]
-    );
+        : [...prev, categoryId];
+      try {
+        localStorage.setItem('meuhub_links_expanded_categories', JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
   };
 
   const handleLinkClick = (id: string, url: string) => {
