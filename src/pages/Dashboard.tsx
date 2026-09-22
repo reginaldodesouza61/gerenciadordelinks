@@ -126,7 +126,7 @@ export default function Dashboard() {
           </div>
         )}
       </div>
-      <Footer />
+      {activeTab === 'links' && <Footer />}
     </div>
   );
 }

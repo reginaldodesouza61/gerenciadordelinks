@@ -350,6 +350,11 @@ export function Sidebar() {
             </div>
           </div>
         )}
+
+        {/* Compact Sidebar Footer */}
+        <div className="h-5 px-3 border-t border-slate-200/50 dark:border-zinc-800/50 bg-slate-50/20 dark:bg-zinc-900/20 flex items-center justify-between shrink-0 text-[10px] text-slate-400/70 dark:text-zinc-500/70 font-medium tracking-tight select-none">
+          <span>Atlas Workspace</span>
+        </div>
       </div>
 
       {/* Category Dialog */}

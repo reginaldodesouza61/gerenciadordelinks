@@ -122,8 +122,8 @@ export function SettingsModal({ open, onOpenChange, defaultTab = 'gemini' }: Set
                 <span>Autor</span>
               </TabsTrigger>
               <TabsTrigger value="system" className="rounded-lg text-xs gap-1.5 font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-zinc-900 data-[state=active]:shadow-xs">
-                <Info size={14} className="text-emerald-500" />
-                <span>Sistema</span>
+                <Info size={14} className="text-indigo-500" />
+                <span>Sobre / Sistema</span>
               </TabsTrigger>
             </TabsList>
 
@@ -368,8 +368,8 @@ export function SettingsModal({ open, onOpenChange, defaultTab = 'gemini' }: Set
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-base font-bold text-slate-900 dark:text-white">{SYSTEM_INFO.name}</span>
-                    <span className="text-xs font-semibold px-2 py-0.5 bg-slate-100 dark:bg-zinc-700 text-slate-700 dark:text-zinc-300 rounded-md">
-                      {SYSTEM_INFO.version}
+                    <span className="text-xs font-semibold px-2 py-0.5 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 border border-indigo-200/50 dark:border-indigo-800/50 rounded-md">
+                      v{SYSTEM_INFO.version}
                     </span>
                   </div>
                   <span className="text-xs text-slate-400 dark:text-zinc-500">

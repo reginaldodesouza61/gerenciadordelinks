@@ -759,22 +759,26 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
         )}
       </div>
 
-      {/* Sidebar Footer with Lixeira / Trash button */}
-      <div className="p-3 border-t border-border bg-slate-50/50 dark:bg-zinc-900/50 flex items-center justify-between">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="w-full justify-start text-xs font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-100 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg gap-2"
+      {/* Sidebar Footer - Ultra-Compact Notion/OneNote Style */}
+      <div className="h-7 px-2.5 border-t border-slate-200/50 dark:border-zinc-800/50 bg-slate-50/20 dark:bg-zinc-900/20 flex items-center justify-between shrink-0 select-none">
+        <button
+          type="button"
           onClick={() => setIsTrashOpen(true)}
+          className="flex items-center gap-1.5 px-2 h-5 rounded hover:bg-slate-200/50 dark:hover:bg-zinc-800/60 text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 transition-colors text-xs font-medium"
+          title="Lixeira & Recuperação"
         >
-          <Trash2 size={14} className="text-slate-400 dark:text-zinc-500" />
-          <span>Lixeira & Recuperação</span>
+          <Trash2 size={12} className="text-slate-400 dark:text-zinc-500 shrink-0" />
+          <span>Lixeira</span>
           {(deletedItems || []).length > 0 && (
-            <span className="ml-auto px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300">
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-100/80 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300">
               {(deletedItems || []).length}
             </span>
           )}
-        </Button>
+        </button>
+
+        <span className="text-[10px] font-medium text-slate-400/70 dark:text-zinc-500/70 tracking-tight pr-1">
+          Atlas Workspace
+        </span>
       </div>
 
       {/* Reusable Dialog */}
