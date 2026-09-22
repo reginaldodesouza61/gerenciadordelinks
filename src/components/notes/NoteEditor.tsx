@@ -36,6 +36,7 @@ import { ImageBlock } from './dev/ImageBlock';
 import { WhiteboardBlock } from './dev/WhiteboardBlock';
 import { DrawioBlock } from './dev/DrawioBlock';
 import { ExcalidrawBlock } from './dev/ExcalidrawBlock';
+import { useCanvasDragAutoScroll } from '@/hooks/useCanvasDragAutoScroll';
 import { BlockActionMenu } from './dev/BlockActionMenu';
 import { MoveOrCopyBlockModal } from './dev/MoveOrCopyBlockModal';
 import { InsertLinkModal } from './dev/InsertLinkModal';
@@ -698,6 +699,10 @@ const TextBlock = memo(function TextBlock({
   onMoveOrCopy,
   onDuplicate,
   onCopyClipboard,
+  onDragStart,
+  onDrag,
+  onDragStop,
+  isDragging,
 }: {
   block: CanvasBlock;
   updateBlock: (id: string, updates: Partial<CanvasBlock>) => void;
@@ -710,6 +715,10 @@ const TextBlock = memo(function TextBlock({
   onMoveOrCopy?: (block: CanvasBlock, action?: 'move' | 'copy') => void;
   onDuplicate?: (blockId: string) => void;
   onCopyClipboard?: (block: CanvasBlock) => void;
+  onDragStart?: (blockId: string, e?: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent | unknown) => void;
+  onDrag?: (e: unknown, data: { x: number; y: number }, width?: number, height?: number) => void;
+  onDragStop?: (blockId: string, data: { x: number; y: number }) => void;
+  isDragging?: boolean;
 }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const inlineFileInputRef = useRef<HTMLInputElement>(null);
@@ -861,10 +870,21 @@ const TextBlock = memo(function TextBlock({
         style={{
           zIndex: isSelected ? 40 : 10,
         }}
-        onDragStart={() => {
+        onDragStart={(e) => {
           setSelectedId(block.id);
+          onDragStart?.(block.id, e);
         }}
-        onDragStop={(_, d) => updateBlock(block.id, { x: Math.max(0, d.x), y: Math.max(12, d.y) })}
+        onDrag={(e, d) => {
+          const w = typeof block.width === 'number' ? block.width : 400;
+          onDrag?.(e, d, w, 160);
+        }}
+        onDragStop={(_, d) => {
+          if (onDragStop) {
+            onDragStop(block.id, d);
+          } else {
+            updateBlock(block.id, { x: Math.max(0, d.x), y: Math.max(12, d.y) });
+          }
+        }}
         enableResizing={{
           top: false,
           right: true,
@@ -890,11 +910,11 @@ const TextBlock = memo(function TextBlock({
             y: Math.max(12, position.y),
           });
         }}
-        bounds="parent"
+        bounds={false}
         minWidth={180}
         minHeight={typeof block.height === 'number' ? Math.max(40, block.height) : 40}
         dragHandleClassName="text-drag-handle"
-        className={`group ${isSelected ? 'z-40' : 'hover:z-30 z-10'}`}
+        className={`group select-none ${isSelected ? 'z-40' : 'hover:z-30 z-10'} ${isDragging ? 'onenote-block-dragging' : ''}`}
         onClick={(e) => {
           e.stopPropagation();
           setSelectedId(block.id);
@@ -1345,9 +1365,21 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
   const [orphanedList, setOrphanedList] = useState<string[]>([]);
 
   const canvasRef = useRef<HTMLDivElement>(null);
+  const viewportContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const lastLoadedPageIdRef = useRef<string | null>(null);
   const lastSavedContentRef = useRef<string | null>(null);
+
+  // Smooth OneNote Canvas Auto-scroll and Dimension Expansion
+  const {
+    isDragging: isAnyBlockDragging,
+    draggingBlockId,
+    canvasExtraWidth,
+    canvasExtraHeight,
+    handleDragStart: onCanvasDragStart,
+    handleDrag: onCanvasDrag,
+    handleDragStop: onCanvasDragStop,
+  } = useCanvasDragAutoScroll(viewportContainerRef);
 
   // Sync and Autosave State / Refs
   const [syncStatus, setSyncStatus] = useState<'saved' | 'saving' | 'dirty' | 'error'>('saved');
@@ -1584,156 +1616,6 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
       setIsCleaningOrphans(false);
     }
   }, [pageId, orphanedList]);
-
-  // --- DRAG AND DROP AUTO-SCROLL EFFECT (Notion-like Experience) ---
-  useEffect(() => {
-    let animationFrameId: number | null = null;
-    let lastPointerPosition = { x: 0, y: 0 };
-    let isDragging = false;
-
-    // Dynamically inject CSS style for visual cursor drag lock
-    const styleId = 'meuhub-dragging-styles';
-    let styleEl = document.getElementById(styleId);
-    if (!styleEl) {
-      styleEl = document.createElement('style');
-      styleEl.id = styleId;
-      styleEl.innerHTML = `
-        .meuhub-dragging, .meuhub-dragging * {
-          cursor: grabbing !important;
-          user-select: none !important;
-        }
-      `;
-      document.head.appendChild(styleEl);
-    }
-
-    const startScrollLoop = () => {
-      if (animationFrameId) return;
-
-      const tick = () => {
-        if (!isDragging) {
-          stopScrollLoop();
-          return;
-        }
-
-        const container = canvasRef.current?.parentElement;
-        if (!container) {
-          animationFrameId = requestAnimationFrame(tick);
-          return;
-        }
-
-        const rect = container.getBoundingClientRect();
-        const { x, y } = lastPointerPosition;
-
-        let scrollX = 0;
-        let scrollY = 0;
-
-        const THRESHOLD = 70; // px edge zone
-        const MAX_SPEED = 18; // px max per frame
-
-        // Vertical auto-scroll calculation (with speed scaling relative to edge proximity)
-        if (y >= rect.top && y <= rect.top + THRESHOLD) {
-          const offset = THRESHOLD - (y - rect.top);
-          scrollY = -Math.pow(offset / THRESHOLD, 1.5) * MAX_SPEED;
-        } else if (y <= rect.bottom && y >= rect.bottom - THRESHOLD) {
-          const offset = THRESHOLD - (rect.bottom - y);
-          scrollY = Math.pow(offset / THRESHOLD, 1.5) * MAX_SPEED;
-        }
-
-        // Horizontal auto-scroll calculation (with speed scaling relative to edge proximity)
-        if (x >= rect.left && x <= rect.left + THRESHOLD) {
-          const offset = THRESHOLD - (x - rect.left);
-          scrollX = -Math.pow(offset / THRESHOLD, 1.5) * MAX_SPEED;
-        } else if (x <= rect.right && x >= rect.right - THRESHOLD) {
-          const offset = THRESHOLD - (rect.right - x);
-          scrollX = Math.pow(offset / THRESHOLD, 1.5) * MAX_SPEED;
-        }
-
-        // Apply smooth scrolling and update block coordinates in sync
-        if (scrollX !== 0 || scrollY !== 0) {
-          container.scrollLeft += scrollX;
-          container.scrollTop += scrollY;
-
-          // Crucial: Update the dragged block's coordinates in the parent state by the exact scroll delta
-          // This keeps the block completely locked under the cursor instead of drifting away!
-          const activeId = selectedBlockIdRef.current;
-          if (activeId) {
-            setBlocks((prev) => {
-              return prev.map((b) => {
-                if (b.id === activeId) {
-                  return {
-                    ...b,
-                    x: Math.max(0, b.x + scrollX),
-                    y: Math.max(12, b.y + scrollY)
-                  };
-                }
-                return b;
-              });
-            });
-          }
-        }
-
-        animationFrameId = requestAnimationFrame(tick);
-      };
-
-      animationFrameId = requestAnimationFrame(tick);
-    };
-
-    const stopScrollLoop = () => {
-      if (animationFrameId) {
-        cancelAnimationFrame(animationFrameId);
-        animationFrameId = null;
-      }
-    };
-
-    const handlePointerDown = (e: PointerEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (!target) return;
-
-      // Detect if click/touch is on a drag handle (class suffix -drag-handle or any closest element)
-      const hasDragHandleClass = target.className && typeof target.className === 'string' && (
-        target.className.includes('-drag-handle') || 
-        target.className.includes('cursor-grab') || 
-        target.className.includes('cursor-grabbing')
-      );
-      const isDragHandle = hasDragHandleClass || target.closest('[class*="-drag-handle"]');
-
-      if (isDragHandle) {
-        isDragging = true;
-        lastPointerPosition = { x: e.clientX, y: e.clientY };
-        document.body.classList.add('meuhub-dragging');
-        startScrollLoop();
-      }
-    };
-
-    const handlePointerMove = (e: PointerEvent) => {
-      if (isDragging) {
-        lastPointerPosition = { x: e.clientX, y: e.clientY };
-      }
-    };
-
-    const handlePointerUp = () => {
-      if (isDragging) {
-        isDragging = false;
-        document.body.classList.remove('meuhub-dragging');
-        stopScrollLoop();
-      }
-    };
-
-    document.addEventListener('pointerdown', handlePointerDown);
-    document.addEventListener('pointermove', handlePointerMove);
-    document.addEventListener('pointerup', handlePointerUp);
-    document.addEventListener('pointercancel', handlePointerUp);
-
-    return () => {
-      isDragging = false;
-      document.body.classList.remove('meuhub-dragging');
-      stopScrollLoop();
-      document.removeEventListener('pointerdown', handlePointerDown);
-      document.removeEventListener('pointermove', handlePointerMove);
-      document.removeEventListener('pointerup', handlePointerUp);
-      document.removeEventListener('pointercancel', handlePointerUp);
-    };
-  }, []);
 
   // Handle opening AI Assistant modal
   const handleOpenAiAssistant = useCallback((blockId?: string, ed?: Editor | null) => {
@@ -2833,13 +2715,16 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
   }, [activeEditor, blocks, insertImageBlock, pageId, selectedBlockId, saveNow]);
 
   const handleCanvasClick = (e: React.MouseEvent) => {
-    if (e.target === canvasRef.current) {
+    if (e.target === canvasRef.current || e.target === viewportContainerRef.current) {
       // Clean up any existing empty blocks
       const cleaned = purgeAndSave(blocks, null);
 
-      const rect = canvasRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left + canvasRef.current.scrollLeft;
-      const y = e.clientY - rect.top + canvasRef.current.scrollTop;
+      const scrollContainer = viewportContainerRef.current;
+      const rect = canvasRef.current?.getBoundingClientRect();
+      const scrollLeft = scrollContainer ? scrollContainer.scrollLeft : 0;
+      const scrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
+      const x = rect ? Math.max(20, e.clientX - rect.left) : scrollLeft + 40;
+      const y = rect ? Math.max(12, e.clientY - rect.top) : scrollTop + 40;
 
       const newBlock: CanvasBlock = {
         id: `block_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
@@ -2865,18 +2750,18 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     }
   };
 
-  // Dynamically calculate canvas dimensions based on blocks position so scrollbars only appear when needed
+  // Dynamically calculate canvas dimensions based on blocks position + real-time extra margin during dragging
   const canvasWidth = useMemo(() => {
     if (blocks.length === 0) return '100%';
     const maxX = Math.max(...blocks.map((b) => b.x + (typeof b.width === 'number' ? b.width : parseInt(String(b.width)) || 450)));
-    return Math.max(100, maxX + 250);
-  }, [blocks]);
+    return Math.max(100, maxX + 350 + canvasExtraWidth);
+  }, [blocks, canvasExtraWidth]);
 
   const canvasHeight = useMemo(() => {
     if (blocks.length === 0) return '100%';
     const maxY = Math.max(...blocks.map((b) => b.y + (typeof b.height === 'number' ? b.height : parseInt(String(b.height)) || 320)));
-    return Math.max(100, maxY + 250);
-  }, [blocks]);
+    return Math.max(100, maxY + 350 + canvasExtraHeight);
+  }, [blocks, canvasExtraHeight]);
 
   const formattedDate = useMemo(() => {
     if (!page?.created_at) return '';
@@ -3251,8 +3136,11 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
         onOpenInsertLinkModal={handleOpenInsertLink}
       />
 
-      {/* Canvas Area */}
-      <div className="flex-1 overflow-auto bg-[#ffffff] dark:bg-zinc-950 relative w-full h-full p-4 pt-6">
+      {/* Canvas Area - OneNote smooth infinite navigation */}
+      <div 
+        ref={viewportContainerRef}
+        className="flex-1 overflow-auto onenote-canvas-viewport bg-[#ffffff] dark:bg-zinc-950 relative w-full h-full p-4 pt-6"
+      >
         <div
           ref={canvasRef}
           className="relative cursor-text"
@@ -3267,6 +3155,8 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
           onDrop={handleCanvasDrop}
         >
           {blocks.map((block) => {
+            const isBlockBeingDragged = isAnyBlockDragging && draggingBlockId === block.id;
+
             if (block.type === 'script') {
               return (
                 <ScriptBlock
@@ -3279,6 +3169,10 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   onMoveOrCopy={handleOpenTransferModal}
                   onDuplicate={duplicateBlock}
                   onCopyClipboard={handleCopyBlockToClipboard}
+                  onDragStart={onCanvasDragStart}
+                  onDrag={onCanvasDrag}
+                  onDragStop={onCanvasDragStop}
+                  isDragging={isBlockBeingDragged}
                 />
               );
             }
@@ -3295,6 +3189,10 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   onMoveOrCopy={handleOpenTransferModal}
                   onDuplicate={duplicateBlock}
                   onCopyClipboard={handleCopyBlockToClipboard}
+                  onDragStart={onCanvasDragStart}
+                  onDrag={onCanvasDrag}
+                  onDragStop={onCanvasDragStop}
+                  isDragging={isBlockBeingDragged}
                 />
               );
             }
@@ -3311,6 +3209,10 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   onMoveOrCopy={handleOpenTransferModal}
                   onDuplicate={duplicateBlock}
                   onCopyClipboard={handleCopyBlockToClipboard}
+                  onDragStart={onCanvasDragStart}
+                  onDrag={onCanvasDrag}
+                  onDragStop={onCanvasDragStop}
+                  isDragging={isBlockBeingDragged}
                 />
               );
             }
@@ -3329,6 +3231,10 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   onCopyClipboard={handleCopyBlockToClipboard}
                   onConvertToTextBlock={handleConvertImageBlockToTextBlock}
                   onOpenInsertToTextBlockModal={(blk) => setInsertImageToTextBlockModal({ isOpen: true, imageBlock: blk })}
+                  onDragStart={onCanvasDragStart}
+                  onDrag={onCanvasDrag}
+                  onDragStop={onCanvasDragStop}
+                  isDragging={isBlockBeingDragged}
                 />
               );
             }
@@ -3347,6 +3253,10 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   onMoveOrCopy={handleOpenTransferModal}
                   onDuplicate={duplicateBlock}
                   onCopyClipboard={handleCopyBlockToClipboard}
+                  onDragStart={onCanvasDragStart}
+                  onDrag={onCanvasDrag}
+                  onDragStop={onCanvasDragStop}
+                  isDragging={isBlockBeingDragged}
                 />
               );
             }
@@ -3365,6 +3275,10 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   onMoveOrCopy={handleOpenTransferModal}
                   onDuplicate={duplicateBlock}
                   onCopyClipboard={handleCopyBlockToClipboard}
+                  onDragStart={onCanvasDragStart}
+                  onDrag={onCanvasDrag}
+                  onDragStop={onCanvasDragStop}
+                  isDragging={isBlockBeingDragged}
                 />
               );
             }
@@ -3383,6 +3297,10 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                   onMoveOrCopy={handleOpenTransferModal}
                   onDuplicate={duplicateBlock}
                   onCopyClipboard={handleCopyBlockToClipboard}
+                  onDragStart={onCanvasDragStart}
+                  onDrag={onCanvasDrag}
+                  onDragStop={onCanvasDragStop}
+                  isDragging={isBlockBeingDragged}
                 />
               );
             }
@@ -3402,6 +3320,10 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                 onMoveOrCopy={handleOpenTransferModal}
                 onDuplicate={duplicateBlock}
                 onCopyClipboard={handleCopyBlockToClipboard}
+                onDragStart={onCanvasDragStart}
+                onDrag={onCanvasDrag}
+                onDragStop={onCanvasDragStop}
+                isDragging={isBlockBeingDragged}
               />
             );
           })}

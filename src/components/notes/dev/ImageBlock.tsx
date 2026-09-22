@@ -22,6 +22,10 @@ interface ImageBlockProps {
   onCopyClipboard?: (block: CanvasBlock) => void;
   onConvertToTextBlock?: (blockId: string) => void;
   onOpenInsertToTextBlockModal?: (block: CanvasBlock) => void;
+  onDragStart?: (blockId: string, e?: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent | unknown) => void;
+  onDrag?: (e: unknown, data: { x: number; y: number }, width?: number, height?: number) => void;
+  onDragStop?: (blockId: string, data: { x: number; y: number }) => void;
+  isDragging?: boolean;
 }
 
 export const ImageBlock = memo(function ImageBlock({
@@ -35,6 +39,10 @@ export const ImageBlock = memo(function ImageBlock({
   onCopyClipboard,
   onConvertToTextBlock,
   onOpenInsertToTextBlockModal,
+  onDragStart,
+  onDrag,
+  onDragStop,
+  isDragging,
 }: ImageBlockProps) {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -129,11 +137,21 @@ export const ImageBlock = memo(function ImageBlock({
         style={{
           zIndex: isSelected ? 40 : 12,
         }}
-        onDragStart={(_e) => {
+        onDragStart={(e) => {
           setSelectedId(block.id);
+          onDragStart?.(block.id, e);
+        }}
+        onDrag={(e, d) => {
+          const w = typeof block.width === 'number' ? block.width : 480;
+          const h = typeof block.height === 'number' ? block.height : 340;
+          onDrag?.(e, d, w, h);
         }}
         onDragStop={(_e, d) => {
-          updateBlock(block.id, { x: Math.max(0, d.x), y: Math.max(12, d.y) });
+          if (onDragStop) {
+            onDragStop(block.id, d);
+          } else {
+            updateBlock(block.id, { x: Math.max(0, d.x), y: Math.max(12, d.y) });
+          }
         }}
         enableResizing={{
           top: false,
@@ -158,11 +176,11 @@ export const ImageBlock = memo(function ImageBlock({
             y: Math.max(12, position.y),
           });
         }}
-        bounds="parent"
+        bounds={false}
         dragHandleClassName="image-drag-handle"
         minWidth={280}
         minHeight={180}
-        className={`group select-none ${isSelected ? 'z-40' : 'hover:z-30 z-10'}`}
+        className={`group select-none ${isSelected ? 'z-40' : 'hover:z-30 z-10'} ${isDragging ? 'onenote-block-dragging' : ''}`}
         onClick={(e) => {
           e.stopPropagation();
           setSelectedId(block.id);

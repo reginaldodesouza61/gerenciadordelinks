@@ -90,6 +90,10 @@ interface ScriptBlockProps {
   onMoveOrCopy?: (block: CanvasBlock, action?: 'move' | 'copy') => void;
   onDuplicate?: (blockId: string) => void;
   onCopyClipboard?: (block: CanvasBlock) => void;
+  onDragStart?: (blockId: string, e?: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent | unknown) => void;
+  onDrag?: (e: unknown, data: { x: number; y: number }, width?: number, height?: number) => void;
+  onDragStop?: (blockId: string, data: { x: number; y: number }) => void;
+  isDragging?: boolean;
 }
 
 export const ScriptBlock = memo(function ScriptBlock({
@@ -101,6 +105,10 @@ export const ScriptBlock = memo(function ScriptBlock({
   onMoveOrCopy,
   onDuplicate,
   onCopyClipboard,
+  onDragStart,
+  onDrag,
+  onDragStop,
+  isDragging,
 }: ScriptBlockProps) {
   const [localCode, setLocalCode] = useState<string>(block.code || '');
   const [localTitle, setLocalTitle] = useState<string>(block.title || '');
@@ -294,10 +302,22 @@ export const ScriptBlock = memo(function ScriptBlock({
       style={{
         zIndex: isSelected ? 40 : 12,
       }}
-      onDragStart={() => {
+      onDragStart={(e) => {
         setSelectedId(block.id);
+        onDragStart?.(block.id, e);
       }}
-      onDragStop={(_, d) => updateBlock(block.id, { x: Math.max(0, d.x), y: Math.max(12, d.y) })}
+      onDrag={(e, d) => {
+        const w = typeof block.width === 'number' ? block.width : 560;
+        const h = typeof block.height === 'number' ? block.height : 420;
+        onDrag?.(e, d, w, h);
+      }}
+      onDragStop={(_, d) => {
+        if (onDragStop) {
+          onDragStop(block.id, d);
+        } else {
+          updateBlock(block.id, { x: Math.max(0, d.x), y: Math.max(12, d.y) });
+        }
+      }}
       enableResizing={{
         top: false,
         right: true,
@@ -321,11 +341,11 @@ export const ScriptBlock = memo(function ScriptBlock({
           y: Math.max(12, position.y),
         });
       }}
-      bounds="parent"
+      bounds={false}
       minWidth={380}
       minHeight={260}
       dragHandleClassName="script-drag-handle"
-      className={`group ${isSelected ? 'z-40' : 'hover:z-30 z-10'}`}
+      className={`group select-none ${isSelected ? 'z-40' : 'hover:z-30 z-10'} ${isDragging ? 'onenote-block-dragging' : ''}`}
       onClick={(e) => {
         e.stopPropagation();
         setSelectedId(block.id);

@@ -335,5 +335,73 @@
     height: 0;
     pointer-events: none;
   }
+
+  /* OneNote-style Smooth & Sleek Canvas Scrollbars */
+  .onenote-canvas-viewport {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+    scroll-behavior: smooth;
+    overscroll-behavior: contain;
+  }
+
+  .dark .onenote-canvas-viewport {
+    scrollbar-color: rgba(113, 113, 122, 0.45) transparent;
+  }
+
+  .onenote-canvas-viewport::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+
+  .onenote-canvas-viewport::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 9999px;
+  }
+
+  .onenote-canvas-viewport::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.35);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    transition: background-color 0.2s ease;
+  }
+
+  .onenote-canvas-viewport::-webkit-scrollbar-thumb:hover {
+    background: rgba(100, 116, 139, 0.6);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .dark .onenote-canvas-viewport::-webkit-scrollbar-thumb {
+    background: rgba(113, 113, 122, 0.4);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .dark .onenote-canvas-viewport::-webkit-scrollbar-thumb:hover {
+    background: rgba(161, 161, 170, 0.65);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  .onenote-canvas-viewport::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* Fluid Block Dragging & Elevation Effects */
+  .onenote-block-dragging {
+    box-shadow: 0 20px 30px -10px rgba(0, 0, 0, 0.18), 0 10px 15px -3px rgba(0, 0, 0, 0.1) !important;
+    opacity: 0.94 !important;
+    transform-origin: center center;
+    transition: box-shadow 0.15s ease, opacity 0.15s ease !important;
+    will-change: transform;
+    pointer-events: none;
+  }
+
+  .onenote-block-dragging * {
+    pointer-events: none !important;
+    user-select: none !important;
+  }
 }
+
 

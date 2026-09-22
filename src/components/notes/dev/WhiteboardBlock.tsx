@@ -57,6 +57,10 @@ interface WhiteboardBlockProps {
   onMoveOrCopy?: (block: CanvasBlock, action?: 'move' | 'copy') => void;
   onDuplicate?: (blockId: string) => void;
   onCopyClipboard?: (block: CanvasBlock) => void;
+  onDragStart?: (blockId: string, e?: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent | unknown) => void;
+  onDrag?: (e: unknown, data: { x: number; y: number }, width?: number, height?: number) => void;
+  onDragStop?: (blockId: string, data: { x: number; y: number }) => void;
+  isDragging?: boolean;
 }
 
 type ToolType = 
@@ -142,6 +146,10 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
   onMoveOrCopy,
   onDuplicate,
   onCopyClipboard,
+  onDragStart,
+  onDrag,
+  onDragStop,
+  isDragging,
 }) => {
   const elements = block.elements || [];
   const title = block.drawingTitle || 'Quadro de Diagramas & Fluxos';
@@ -1989,12 +1997,22 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
         style={{
           zIndex: isSelected ? 40 : 15,
         }}
-        onDragStart={() => {
+        onDragStart={(e) => {
           setSelectedId?.(block.id);
           bringToFront?.(block.id);
+          onDragStart?.(block.id, e);
+        }}
+        onDrag={(e, d) => {
+          const w = typeof block.width === 'number' ? block.width : 960;
+          const h = typeof block.height === 'number' ? block.height : 600;
+          onDrag?.(e, d, w, h);
         }}
         onDragStop={(_e, d) => {
-          updateBlock(block.id, { x: Math.max(0, d.x), y: Math.max(12, d.y) });
+          if (onDragStop) {
+            onDragStop(block.id, d);
+          } else {
+            updateBlock(block.id, { x: Math.max(0, d.x), y: Math.max(12, d.y) });
+          }
         }}
         enableResizing={{
           top: false,
@@ -2019,7 +2037,7 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
             y: Math.max(12, position.y),
           });
         }}
-        bounds="parent"
+        bounds={false}
         dragHandleClassName="whiteboard-drag-handle"
         minWidth={600}
         minHeight={450}
@@ -2030,11 +2048,11 @@ export const WhiteboardBlock: React.FC<WhiteboardBlockProps> = ({
           e.stopPropagation();
           setSelectedId?.(block.id);
         }}
-        className={`group bg-white dark:bg-zinc-900 border rounded-xl transition-all overflow-hidden flex flex-col ${
+        className={`group bg-white dark:bg-zinc-900 border rounded-xl transition-all overflow-hidden flex flex-col select-none ${
           isSelected 
             ? 'z-40 ring-2 ring-indigo-500 border-indigo-400 shadow-xl' 
             : 'hover:z-30 z-10 border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 shadow-sm'
-        }`}
+        } ${isDragging ? 'onenote-block-dragging' : ''}`}
       >
         {/* Card Header & Move Handle */}
         <div className="whiteboard-drag-handle px-3 py-1.5 bg-slate-100 dark:bg-zinc-800 border-b border-slate-200 dark:border-zinc-700 flex items-center justify-between cursor-grab active:cursor-grabbing select-none shrink-0">

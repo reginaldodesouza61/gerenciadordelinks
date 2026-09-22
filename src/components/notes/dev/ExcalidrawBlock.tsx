@@ -82,6 +82,10 @@ interface ExcalidrawBlockProps {
   onMoveOrCopy?: (block: CanvasBlock, action?: 'move' | 'copy') => void;
   onDuplicate?: (blockId: string) => void;
   onCopyClipboard?: (block: CanvasBlock) => void;
+  onDragStart?: (blockId: string, e?: any) => void;
+  onDrag?: (e: any, data: any, width?: number, height?: number) => void;
+  onDragStop?: (blockId: string, data: { x: number; y: number }) => void;
+  isDragging?: boolean;
 }
 
 // Predefined professional starter templates for Excalidraw
@@ -183,6 +187,10 @@ export function ExcalidrawBlock({
   onMoveOrCopy,
   onDuplicate,
   onCopyClipboard,
+  onDragStart,
+  onDrag,
+  onDragStop,
+  isDragging,
 }: ExcalidrawBlockProps) {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -571,11 +579,20 @@ export function ExcalidrawBlock({
           zIndex: isSelected ? 40 : 12,
           touchAction: 'none',
         }}
-        onDragStart={() => {
+        onDragStart={(e) => {
           setSelectedId?.(block.id);
+          bringToFront?.(block.id);
+          onDragStart?.(block.id, e);
+        }}
+        onDrag={(e, d) => {
+          onDrag?.(e, d, widthVal, heightVal);
         }}
         onDragStop={(_e, d) => {
-          updateBlock(block.id, { x: Math.max(0, d.x), y: Math.max(12, d.y) });
+          if (onDragStop) {
+            onDragStop(block.id, d);
+          } else {
+            updateBlock(block.id, { x: Math.max(0, d.x), y: Math.max(12, d.y) });
+          }
         }}
         enableResizing={{
           top: false,
@@ -601,16 +618,16 @@ export function ExcalidrawBlock({
           });
         }}
         dragHandleClassName="excalidraw-drag-handle"
-        bounds="parent"
+        bounds={false}
         minWidth={460}
         minHeight={320}
         onClick={(e) => {
           e.stopPropagation();
           setSelectedId?.(block.id);
         }}
-        className={`group transition-shadow ${
+        className={`group transition-shadow select-none ${
           isSelected ? 'z-40 ring-2 ring-indigo-500 shadow-xl' : 'hover:z-30 z-10 hover:shadow-md'
-        }`}
+        } ${isDragging ? 'onenote-block-dragging' : ''}`}
       >
         <div 
           className="w-full h-full flex flex-col rounded-xl bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800 shadow-sm overflow-hidden text-slate-800 dark:text-zinc-100"

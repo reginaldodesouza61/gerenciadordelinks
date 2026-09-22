@@ -19,6 +19,10 @@ interface LinkCardBlockProps {
   onMoveOrCopy?: (block: CanvasBlock, action?: 'move' | 'copy') => void;
   onDuplicate?: (blockId: string) => void;
   onCopyClipboard?: (block: CanvasBlock) => void;
+  onDragStart?: (blockId: string, e?: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent | unknown) => void;
+  onDrag?: (e: unknown, data: { x: number; y: number }, width?: number, height?: number) => void;
+  onDragStop?: (blockId: string, data: { x: number; y: number }) => void;
+  isDragging?: boolean;
 }
 
 export function LinkCardBlock({
@@ -30,6 +34,10 @@ export function LinkCardBlock({
   onMoveOrCopy,
   onDuplicate,
   onCopyClipboard,
+  onDragStart,
+  onDrag,
+  onDragStop,
+  isDragging,
 }: LinkCardBlockProps) {
   const { user } = useAuthStore();
   const { links, categorias, subcategorias, getCredencialByLinkId, addLink } = useLinkStore();
@@ -116,10 +124,22 @@ export function LinkCardBlock({
       style={{
         zIndex: isSelected ? 40 : 12,
       }}
-      onDragStart={() => {
+      onDragStart={(e) => {
         setSelectedId(block.id);
+        onDragStart?.(block.id, e);
       }}
-      onDragStop={(_, d) => updateBlock(block.id, { x: Math.max(0, d.x), y: Math.max(12, d.y) })}
+      onDrag={(e, d) => {
+        const w = typeof block.width === 'number' ? block.width : 380;
+        const h = typeof block.height === 'number' ? block.height : 190;
+        onDrag?.(e, d, w, h);
+      }}
+      onDragStop={(_, d) => {
+        if (onDragStop) {
+          onDragStop(block.id, d);
+        } else {
+          updateBlock(block.id, { x: Math.max(0, d.x), y: Math.max(12, d.y) });
+        }
+      }}
       enableResizing={{
         top: false,
         right: true,
@@ -143,11 +163,11 @@ export function LinkCardBlock({
           y: Math.max(12, position.y),
         });
       }}
-      bounds="parent"
+      bounds={false}
       minWidth={280}
       minHeight={150}
       dragHandleClassName="link-drag-handle"
-      className={`group ${isSelected ? 'z-40' : 'hover:z-30 z-10'}`}
+      className={`group select-none ${isSelected ? 'z-40' : 'hover:z-30 z-10'} ${isDragging ? 'onenote-block-dragging' : ''}`}
       onClick={(e) => {
         e.stopPropagation();
         setSelectedId(block.id);
