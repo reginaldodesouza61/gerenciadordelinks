@@ -1,5 +1,5 @@
 import { offlineDb, SyncQueueItem } from '@/lib/db/offlineDb';
-import { supabase } from '@/lib/supabase';
+import { sanitizeUuid } from '@/lib/store/noteStore';
 
 const MAX_RETRIES = 5;
 
@@ -52,7 +52,17 @@ export async function auditAndRepairSyncQueue(): Promise<AuditReport> {
 
     for (const pageId of Object.keys(pageOps)) {
       const ops = pageOps[pageId];
-      const localPage = await offlineDb.pages.get(pageId);
+      const cleanPageId = sanitizeUuid(pageId);
+      const localPage = (await offlineDb.pages.get(cleanPageId)) || (await offlineDb.pages.get(pageId));
+
+      // If pageId was non-UUID, update queue items immediately to cleanPageId
+      if (cleanPageId !== pageId) {
+        for (const op of ops) {
+          if (op.id) {
+            await offlineDb.syncQueue.update(op.id, { pageId: cleanPageId });
+          }
+        }
+      }
 
       // --- 1. ORPHAN CHECK ---
       // If there is no local page and the action is NOT a deletion, the queue item is orphaned

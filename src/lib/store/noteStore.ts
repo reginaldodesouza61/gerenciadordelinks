@@ -26,25 +26,61 @@ const DEFAULT_USER_ID = 'c72212e7-2b6a-4da7-8745-01eb33414af4';
 const DEFAULT_SECTION_ID = '10000000-0000-0000-0000-000000000001';
 const DEFAULT_PAGE_ID = '20000000-0000-0000-0000-000000000002';
 
+export function isValidUuid(id: unknown): id is string {
+  if (typeof id !== 'string') return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id.trim());
+}
+
+export function generateUuid(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      // fallback
+    }
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 export function sanitizeUuid(id: string | null | undefined): string {
   if (!id) return '';
-  if (id === 'sec_default_geral_01') return '10000000-0000-0000-0000-000000000001';
-  if (id === 'page_default_welcome_01') return '20000000-0000-0000-0000-000000000002';
-  if (id === 'sec_default_credenciais_02') return '10000000-0000-0000-0000-000000000002';
-  if (id === 'sec_default_dev_03') return '10000000-0000-0000-0000-000000000003';
-  return id;
+  const trimmed = id.trim();
+  if (isValidUuid(trimmed)) return trimmed.toLowerCase();
+
+  // Known legacy constant mappings
+  if (trimmed === 'sec_default_geral_01') return '10000000-0000-0000-0000-000000000001';
+  if (trimmed === 'page_default_welcome_01') return '20000000-0000-0000-0000-000000000002';
+  if (trimmed === 'sec_default_credenciais_02') return '10000000-0000-0000-0000-000000000002';
+  if (trimmed === 'sec_default_dev_03') return '10000000-0000-0000-0000-000000000003';
+
+  // Deterministically hash any arbitrary non-UUID string into a valid RFC-4122 v4 UUID
+  let h1 = 0xdeadbeef, h2 = 0x41c6ce57, h3 = 0x61c88647, h4 = 0x9e3779b9;
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+    h3 = Math.imul(h3 ^ ch, 3812015801);
+    h4 = Math.imul(h4 ^ ch, 2718281829);
+  }
+  const toHex = (n: number) => (n >>> 0).toString(16).padStart(8, '0');
+  const fullHex = (toHex(h1) + toHex(h2) + toHex(h3) + toHex(h4)).slice(0, 32);
+  return `${fullHex.slice(0, 8)}-${fullHex.slice(8, 12)}-4${fullHex.slice(13, 16)}-a${fullHex.slice(17, 20)}-${fullHex.slice(20, 32)}`;
 }
 
 export function sanitizeUuidOrNull(id: string | null | undefined): string | null {
   if (!id) return null;
-  const cleaned = sanitizeUuid(id);
-  if (cleaned === 'null' || cleaned === 'undefined') return null;
-  return cleaned;
+  const trimmed = id.trim();
+  if (trimmed === 'null' || trimmed === 'undefined' || trimmed === '') return null;
+  return sanitizeUuid(trimmed);
 }
 
 async function migrateLegacyDatabase() {
   try {
-    // 1. Migrate LocalStorage active IDs
+    // 1. Migrate LocalStorage active IDs and cached lists
     const activePage = localStorage.getItem(ACTIVE_PAGE_STORAGE_KEY);
     if (activePage) {
       localStorage.setItem(ACTIVE_PAGE_STORAGE_KEY, sanitizeUuid(activePage));
@@ -52,6 +88,54 @@ async function migrateLegacyDatabase() {
     const activeSec = localStorage.getItem(ACTIVE_SECTION_STORAGE_KEY);
     if (activeSec) {
       localStorage.setItem(ACTIVE_SECTION_STORAGE_KEY, sanitizeUuid(activeSec));
+    }
+
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      if (key.includes('page_order') || key.includes('section_order')) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) {
+              localStorage.setItem(key, JSON.stringify(arr.map(id => sanitizeUuid(id))));
+            }
+          }
+        } catch { /* ignore */ }
+      }
+      if (key.includes('cached_note_pages')) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const pages = JSON.parse(raw);
+            if (Array.isArray(pages)) {
+              const updated = pages.map((p: Partial<NotePage>) => ({
+                ...p,
+                id: sanitizeUuid(p.id),
+                section_id: sanitizeUuid(p.section_id),
+                parent_id: sanitizeUuidOrNull(p.parent_id)
+              }));
+              localStorage.setItem(key, JSON.stringify(updated));
+            }
+          }
+        } catch { /* ignore */ }
+      }
+      if (key.includes('cached_note_sections')) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const secs = JSON.parse(raw);
+            if (Array.isArray(secs)) {
+              const updated = secs.map((s: Partial<NoteSection>) => ({
+                ...s,
+                id: sanitizeUuid(s.id)
+              }));
+              localStorage.setItem(key, JSON.stringify(updated));
+            }
+          }
+        } catch { /* ignore */ }
+      }
     }
 
     // 2. Migrate IndexedDB pages
@@ -397,7 +481,7 @@ interface NoteState {
   restoreRevision: (pageId: string, revisionId: number) => Promise<void>;
   
   fetchNotes: (userId?: string) => Promise<void>;
-  addSection: (nome: string, userId: string) => Promise<void>;
+  addSection: (nome: string, userId?: string) => Promise<NoteSection>;
   updateSection: (id: string, nome: string) => Promise<void>;
   deleteSection: (id: string) => Promise<void>;
   reorderSections: (newSections: NoteSection[]) => void;
@@ -430,8 +514,8 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   pages: sortPagesByStoredOrder(DEFAULT_PAGES),
   relations: [],
   deletedItems: getStoredTrash(),
-  activeSectionId: DEFAULT_SECTION_ID,
-  activePageId: DEFAULT_PAGE_ID,
+  activeSectionId: sanitizeUuid(getStoredActiveSectionId()) || DEFAULT_SECTION_ID,
+  activePageId: sanitizeUuid(getStoredActivePageId()) || DEFAULT_PAGE_ID,
   isLoading: false,
   pageSyncStatuses: {},
 
@@ -533,8 +617,14 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
       for (const item of queue) {
         const { id, pageId, action, payload } = item;
+        const cleanPageId = sanitizeUuid(pageId);
+        if (!cleanPageId || !isValidUuid(cleanPageId)) {
+          if (id) await offlineDb.syncQueue.delete(id);
+          continue;
+        }
+
         try {
-          const localPage = await offlineDb.pages.get(pageId);
+          const localPage = (await offlineDb.pages.get(cleanPageId)) || (await offlineDb.pages.get(pageId));
           if (!localPage && action !== 'delete') {
             // If no local page, clean the orphaned queue item
             if (id) await offlineDb.syncQueue.delete(id);
@@ -549,6 +639,14 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           // 1. Encryption & Supabase Sync
           const updatePayload = { ...payload } as Record<string, unknown>;
           delete updatePayload.version;
+          updatePayload.id = cleanPageId;
+
+          if (updatePayload.section_id) {
+            updatePayload.section_id = sanitizeUuid(updatePayload.section_id as string);
+          }
+          if (updatePayload.parent_id !== undefined) {
+            updatePayload.parent_id = sanitizeUuidOrNull(updatePayload.parent_id as string);
+          }
 
           if (updatePayload.conteudo) {
             updatePayload.conteudo = await sanitizeAndEncryptNoteContent(updatePayload.conteudo);
@@ -556,29 +654,58 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
           let dbError = null;
           if (action === 'update') {
-            const { error } = await supabase.from('note_pages').update(updatePayload).eq('id', pageId);
+            const { error, count } = await supabase.from('note_pages').update(updatePayload).eq('id', cleanPageId);
             dbError = error;
+
+            // If updated 0 rows and no error, the page may have been created offline or missed insert. Upsert it!
+            if (!error && count === 0 && localPage) {
+              const upsertData = {
+                id: cleanPageId,
+                titulo: localPage.titulo,
+                conteudo: updatePayload.conteudo || (localPage.conteudo ? await sanitizeAndEncryptNoteContent(localPage.conteudo) : null),
+                section_id: sanitizeUuid(localPage.section_id),
+                parent_id: sanitizeUuidOrNull(localPage.parent_id),
+                user_id: localPage.user_id,
+                created_at: localPage.created_at || new Date().toISOString()
+              };
+              const { error: upsertErr } = await supabase.from('note_pages').upsert([upsertData]);
+              dbError = upsertErr;
+            }
           } else if (action === 'create') {
-            const { error } = await supabase.from('note_pages').insert([updatePayload]);
+            const { error } = await supabase.from('note_pages').upsert([updatePayload]);
             dbError = error;
           } else if (action === 'delete') {
-            const { error } = await supabase.from('note_pages').delete().eq('id', pageId);
+            const { error } = await supabase.from('note_pages').delete().eq('id', cleanPageId);
             dbError = error;
           }
 
-          if (dbError) throw dbError;
+          if (dbError) {
+            const postgrestErr = dbError as { code?: string; message?: string };
+            const errCode = postgrestErr?.code;
+            const errMsg = String(postgrestErr?.message || '');
+            if (errCode === '22P02' || errMsg.includes('22P02') || errMsg.includes('invalid input syntax for type uuid')) {
+              console.warn(`[Sync] Dropping invalid UUID queue item ${id} due to 22P02:`, dbError);
+              if (id) await offlineDb.syncQueue.delete(id);
+              continue;
+            }
+            throw dbError;
+          }
 
           // 2. Clear Queue Item and Mark Synced
           if (id) await offlineDb.syncQueue.delete(id);
           
           if (localPage) {
-            await offlineDb.pages.update(pageId, {
+            await offlineDb.pages.update(localPage.id, {
               syncStatus: 'synced',
               remoteVersion: localPage.localVersion
             });
 
             set((state) => ({
-              pageSyncStatuses: { ...state.pageSyncStatuses, [pageId]: 'synced' }
+              pageSyncStatuses: {
+                ...state.pageSyncStatuses,
+                [cleanPageId]: 'synced',
+                [pageId]: 'synced'
+              }
             }));
           }
 
@@ -840,8 +967,9 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
   addSection: async (nome, userId) => {
     const fallbackUserId = userId || DEFAULT_USER_ID;
+    const newSectionId = generateUuid();
     const newSection: NoteSection = {
-      id: `sec_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+      id: newSectionId,
       nome,
       user_id: fallbackUserId,
       created_at: new Date().toISOString()
@@ -859,44 +987,47 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     try {
       const { data, error } = await supabase
         .from('note_sections')
-        .insert([{ nome, user_id: fallbackUserId }])
+        .insert([{ id: newSectionId, nome, user_id: fallbackUserId }])
         .select()
         .single();
 
       if (!error && data) {
-        // Update temporary ID with Supabase ID
         const syncedSections = get().sections.map(s => s.id === newSection.id ? data : s);
         saveSectionOrder(syncedSections.map(s => s.id), fallbackUserId);
         setCached(getUserCacheKey(fallbackUserId, 'note_sections'), syncedSections);
         set({ sections: syncedSections, activeSectionId: data.id });
+        return data;
       }
     } catch (e) {
       console.debug('Section saved locally, background sync pending:', e);
     }
+    return newSection;
   },
 
   updateSection: async (id, nome) => {
-    const section = get().sections.find(s => s.id === id);
+    const cleanId = sanitizeUuid(id);
+    const section = get().sections.find(s => s.id === cleanId || s.id === id);
     const userId = section ? section.user_id : DEFAULT_USER_ID;
 
-    const updated = get().sections.map(s => s.id === id ? { ...s, nome } : s);
+    const updated = get().sections.map(s => (s.id === cleanId || s.id === id) ? { ...s, id: cleanId, nome } : s);
     setCached(getUserCacheKey(userId, 'note_sections'), updated);
     set({ sections: updated });
 
     try {
-      await supabase.from('note_sections').update({ nome }).eq('id', id);
+      await supabase.from('note_sections').update({ nome }).eq('id', cleanId);
     } catch (e) {
       console.debug('Section updated locally:', e);
     }
   },
 
   deleteSection: async (id) => {
+    const cleanId = sanitizeUuid(id);
     const state = get();
-    const sectionToDelete = state.sections.find(s => s.id === id);
+    const sectionToDelete = state.sections.find(s => s.id === cleanId || s.id === id);
     if (!sectionToDelete) return;
 
     const userId = sectionToDelete.user_id;
-    const pagesToDelete = state.pages.filter(p => p.section_id === id);
+    const pagesToDelete = state.pages.filter(p => p.section_id === cleanId || p.section_id === id);
 
     const trashItem: DeletedNoteItem = {
       id: sectionToDelete.id,
@@ -907,18 +1038,18 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       sectionPages: pagesToDelete
     };
 
-    const nextTrash = [trashItem, ...state.deletedItems.filter(item => item.id !== id)];
+    const nextTrash = [trashItem, ...state.deletedItems.filter(item => item.id !== cleanId && item.id !== id)];
     saveTrashToStorage(nextTrash);
 
-    const remainingSections = state.sections.filter(s => s.id !== id);
+    const remainingSections = state.sections.filter(s => s.id !== cleanId && s.id !== id);
     saveSectionOrder(remainingSections.map(s => s.id));
     setCached(getUserCacheKey(userId, 'note_sections'), remainingSections);
 
-    const remainingPages = state.pages.filter(p => p.section_id !== id);
+    const remainingPages = state.pages.filter(p => p.section_id !== cleanId && p.section_id !== id);
     savePageOrder(remainingPages.map(p => p.id));
     setCached(getUserCacheKey(userId, 'note_pages'), remainingPages);
 
-    const isCurrentActiveSection = state.activeSectionId === id;
+    const isCurrentActiveSection = state.activeSectionId === cleanId || state.activeSectionId === id;
     const isCurrentActivePage = pagesToDelete.some(p => p.id === state.activePageId);
 
     if (isCurrentActiveSection) {
@@ -939,7 +1070,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     }));
 
     try {
-      await supabase.from('note_sections').delete().eq('id', id);
+      await supabase.from('note_sections').delete().eq('id', cleanId);
     } catch (e) {
       console.debug('Section deleted locally:', e);
     }
@@ -995,6 +1126,10 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
   addPage: async (titulo, sectionId, userId, parentId = null) => {
     const fallbackUserId = userId || DEFAULT_USER_ID;
+    const cleanSectionId = sanitizeUuid(sectionId);
+    const cleanParentId = sanitizeUuidOrNull(parentId);
+    const newPageId = generateUuid();
+
     const initialContent = JSON.stringify([
       {
         id: `block_${Date.now()}`,
@@ -1008,24 +1143,24 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     ]);
 
     const newPage: NotePage = {
-      id: `page_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+      id: newPageId,
       titulo,
       conteudo: initialContent,
-      section_id: sectionId,
-      parent_id: parentId,
+      section_id: cleanSectionId,
+      parent_id: cleanParentId,
       user_id: fallbackUserId,
       created_at: new Date().toISOString()
     };
 
     saveActivePageId(newPage.id);
-    saveActiveSectionId(sectionId);
+    saveActiveSectionId(cleanSectionId);
 
     const currentPages = get().pages;
     const updatedPages = [...currentPages, newPage];
     savePageOrder(updatedPages.map(p => p.id));
     setCached(getUserCacheKey(fallbackUserId, 'note_pages'), updatedPages);
 
-    set({ pages: updatedPages, activePageId: newPage.id, activeSectionId: sectionId });
+    set({ pages: updatedPages, activePageId: newPage.id, activeSectionId: cleanSectionId });
     toast.success('Página criada!');
 
     // Register inside IndexedDB
@@ -1052,8 +1187,8 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         payload: {
           id: newPage.id,
           titulo,
-          section_id: sectionId,
-          parent_id: parentId,
+          section_id: cleanSectionId,
+          parent_id: cleanParentId,
           user_id: fallbackUserId,
           conteudo: initialContent
         },
@@ -1074,21 +1209,30 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   },
 
   updatePage: async (id, updates) => {
-    if (activeAbortControllers.has(id)) {
-      activeAbortControllers.get(id)?.abort();
-      activeAbortControllers.delete(id);
+    const cleanId = sanitizeUuid(id);
+    if (activeAbortControllers.has(cleanId)) {
+      activeAbortControllers.get(cleanId)?.abort();
+      activeAbortControllers.delete(cleanId);
     }
     const controller = new AbortController();
-    activeAbortControllers.set(id, controller);
+    activeAbortControllers.set(cleanId, controller);
 
-    const page = get().pages.find(p => p.id === id);
+    const cleanUpdates = { ...updates };
+    if (cleanUpdates.section_id) {
+      cleanUpdates.section_id = sanitizeUuid(cleanUpdates.section_id);
+    }
+    if (cleanUpdates.parent_id !== undefined) {
+      cleanUpdates.parent_id = sanitizeUuidOrNull(cleanUpdates.parent_id);
+    }
+
+    const page = get().pages.find(p => p.id === cleanId || p.id === id);
     const userId = page ? page.user_id : DEFAULT_USER_ID;
 
     // Schema Validation with Zod
-    if (updates.conteudo) {
+    if (cleanUpdates.conteudo) {
       try {
-        const validated = validateAndSanitizeBlocks(updates.conteudo);
-        updates.conteudo = JSON.stringify(validated);
+        const validated = validateAndSanitizeBlocks(cleanUpdates.conteudo);
+        cleanUpdates.conteudo = JSON.stringify(validated);
       } catch (err) {
         console.error('Zod schema validation failed on updatePage:', err);
         toast.error('Falha na validação de dados antes de salvar.');
@@ -1097,27 +1241,27 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     }
 
     const previousPages = get().pages;
-    const updatedPages = get().pages.map(p => p.id === id ? { ...p, ...updates } : p);
+    const updatedPages = get().pages.map(p => (p.id === cleanId || p.id === id) ? { ...p, ...cleanUpdates, id: cleanId } : p);
     setCached(getUserCacheKey(userId, 'note_pages'), updatedPages);
     set({ pages: updatedPages });
 
     try {
-      const localPage = await offlineDb.pages.get(id);
+      const localPage = (await offlineDb.pages.get(cleanId)) || (await offlineDb.pages.get(id));
       const currentLocalVersion = localPage ? localPage.localVersion + 1 : 1;
       const currentRemoteVersion = localPage ? localPage.remoteVersion : 0;
 
       const pageData: NotePage = {
-        id,
-        titulo: updates.titulo ?? (page?.titulo || ''),
-        conteudo: updates.conteudo ?? (page?.conteudo || null),
-        section_id: updates.section_id ?? (page?.section_id || ''),
-        parent_id: updates.parent_id ?? (page?.parent_id || null),
+        id: cleanId,
+        titulo: cleanUpdates.titulo ?? (page?.titulo || ''),
+        conteudo: cleanUpdates.conteudo ?? (page?.conteudo || null),
+        section_id: cleanUpdates.section_id ?? (page?.section_id ? sanitizeUuid(page.section_id) : ''),
+        parent_id: cleanUpdates.parent_id !== undefined ? cleanUpdates.parent_id : (page?.parent_id ? sanitizeUuidOrNull(page.parent_id) : null),
         user_id: userId,
         created_at: page?.created_at || new Date().toISOString()
       };
 
       await offlineDb.revisions.add({
-        pageId: id,
+        pageId: cleanId,
         version: currentLocalVersion,
         titulo: pageData.titulo,
         conteudo: pageData.conteudo,
@@ -1133,13 +1277,13 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       });
 
       set((state) => ({
-        pageSyncStatuses: { ...state.pageSyncStatuses, [id]: 'pending' }
+        pageSyncStatuses: { ...state.pageSyncStatuses, [cleanId]: 'pending', [id]: 'pending' }
       }));
 
       await offlineDb.syncQueue.add({
-        pageId: id,
+        pageId: cleanId,
         action: 'update',
-        payload: { ...updates, version: currentLocalVersion },
+        payload: { ...cleanUpdates, id: cleanId, version: currentLocalVersion },
         timestamp: Date.now(),
         attempts: 0
       });
@@ -1154,15 +1298,16 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       set({ pages: previousPages });
       throw e;
     } finally {
-      if (activeAbortControllers.get(id) === controller) {
-        activeAbortControllers.delete(id);
+      if (activeAbortControllers.get(cleanId) === controller) {
+        activeAbortControllers.delete(cleanId);
       }
     }
   },
 
   deletePage: async (id) => {
+    const cleanId = sanitizeUuid(id);
     const state = get();
-    const pageToDelete = state.pages.find(p => p.id === id);
+    const pageToDelete = state.pages.find(p => p.id === cleanId || p.id === id);
     if (!pageToDelete) return;
 
     const userId = pageToDelete.user_id;
@@ -1175,7 +1320,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       }
       return all;
     };
-    const subpagesToDelete = getSubpages(id);
+    const subpagesToDelete = getSubpages(pageToDelete.id);
     const allPagesToDelete = [pageToDelete, ...subpagesToDelete];
 
     const trashItem: DeletedNoteItem = {
@@ -1187,14 +1332,14 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       subpages: subpagesToDelete
     };
 
-    const nextTrash = [trashItem, ...state.deletedItems.filter(item => item.id !== id)];
+    const nextTrash = [trashItem, ...state.deletedItems.filter(item => item.id !== cleanId && item.id !== id)];
     saveTrashToStorage(nextTrash);
 
     const remainingPages = state.pages.filter(p => !allPagesToDelete.some(dp => dp.id === p.id));
     savePageOrder(remainingPages.map(p => p.id));
     setCached(getUserCacheKey(userId, 'note_pages'), remainingPages);
 
-    const isCurrentActivePage = state.activePageId === id || allPagesToDelete.some(dp => dp.id === state.activePageId);
+    const isCurrentActivePage = state.activePageId === cleanId || state.activePageId === id || allPagesToDelete.some(dp => dp.id === state.activePageId);
     if (isCurrentActivePage) {
       const fallbackPage = remainingPages.find(p => p.section_id === pageToDelete.section_id) || (remainingPages.length > 0 ? remainingPages[0] : null);
       saveActivePageId(fallbackPage?.id || null);
@@ -1208,11 +1353,13 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
     try {
       for (const p of allPagesToDelete) {
+        const cId = sanitizeUuid(p.id);
         await offlineDb.pages.delete(p.id);
+        if (cId !== p.id) await offlineDb.pages.delete(cId);
         await offlineDb.syncQueue.add({
-          pageId: p.id,
+          pageId: cId,
           action: 'delete',
-          payload: {},
+          payload: { id: cId },
           timestamp: Date.now(),
           attempts: 0
         });
@@ -1321,9 +1468,16 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         toast.success(`Seção "${section.nome}" restaurada com sucesso!`);
 
         try {
-          await supabase.from('note_sections').upsert([section]);
+          const cleanSection = { ...section, id: sanitizeUuid(section.id) };
+          await supabase.from('note_sections').upsert([cleanSection]);
           if (pages.length > 0) {
-            await supabase.from('note_pages').upsert(pages);
+            const cleanPages = pages.map(p => ({
+              ...p,
+              id: sanitizeUuid(p.id),
+              section_id: sanitizeUuid(p.section_id),
+              parent_id: sanitizeUuidOrNull(p.parent_id)
+            }));
+            await supabase.from('note_pages').upsert(cleanPages);
           }
         } catch {
           // ignore
@@ -1367,7 +1521,13 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         toast.success(`Anotação "${page.titulo}" restaurada com sucesso!`);
 
         try {
-          await supabase.from('note_pages').upsert(normalizedPages);
+          const cleanUpsertPages = normalizedPages.map(p => ({
+            ...p,
+            id: sanitizeUuid(p.id),
+            section_id: sanitizeUuid(p.section_id),
+            parent_id: sanitizeUuidOrNull(p.parent_id)
+          }));
+          await supabase.from('note_pages').upsert(cleanUpsertPages);
         } catch {
           // ignore
         }

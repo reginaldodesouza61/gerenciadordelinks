@@ -233,13 +233,8 @@ export function MoveOrCopyBlockModal({
         const finalPageTitle = newPageTitle.trim() || 'Página Inicial';
 
         // 1. Create new section
-        const tempSecId = `sec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-        await addSection(finalSecName, fallbackUserId);
-        
-        // Find latest sections from store
-        const currentSecs = useNoteStore.getState().sections;
-        const foundSec = currentSecs.find((s) => s.nome === finalSecName) || currentSecs[currentSecs.length - 1];
-        const newSecId = foundSec?.id || tempSecId;
+        const createdSec = await addSection(finalSecName, fallbackUserId);
+        const newSecId = createdSec?.id || useNoteStore.getState().activeSectionId || '';
 
         targetFinalSectionId = newSecId;
         targetFinalPageTitle = finalPageTitle;
