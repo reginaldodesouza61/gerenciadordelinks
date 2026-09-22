@@ -185,47 +185,60 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
   const handleSectionDragOver = (e: React.DragEvent, id: string) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!draggedSectionId || draggedSectionId === id) return;
 
-    e.dataTransfer.dropEffect = 'move';
-    const rect = e.currentTarget.getBoundingClientRect();
-    const midY = rect.top + rect.height / 2;
-    const pos = e.clientY < midY ? 'before' : 'after';
+    if (draggedSectionId) {
+      if (draggedSectionId === id) return;
+      e.dataTransfer.dropEffect = 'move';
+      const rect = e.currentTarget.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      const pos = e.clientY < midY ? 'before' : 'after';
 
-    if (dragOverSectionId !== id || dropSectionPosition !== pos) {
-      setDragOverSectionId(id);
-      setDropSectionPosition(pos);
+      if (dragOverSectionId !== id || dropSectionPosition !== pos) {
+        setDragOverSectionId(id);
+        setDropSectionPosition(pos);
+      }
+    } else if (draggedPageId) {
+      e.dataTransfer.dropEffect = 'move';
+      if (dragOverSectionId !== id) {
+        setDragOverSectionId(id);
+        setDropSectionPosition(null);
+      }
     }
   };
 
   const handleSectionDrop = (e: React.DragEvent, targetId: string) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!draggedSectionId || draggedSectionId === targetId) {
-      setDraggedSectionId(null);
-      setDragOverSectionId(null);
-      setDropSectionPosition(null);
-      return;
-    }
 
-    const currentSections = [...sections];
-    const sourceIndex = currentSections.findIndex(s => s.id === draggedSectionId);
-    const targetIndex = currentSections.findIndex(s => s.id === targetId);
+    if (draggedSectionId && draggedSectionId !== targetId) {
+      const currentSections = [...sections];
+      const sourceIndex = currentSections.findIndex(s => s.id === draggedSectionId);
+      const targetIndex = currentSections.findIndex(s => s.id === targetId);
 
-    if (sourceIndex !== -1 && targetIndex !== -1) {
-      const [moved] = currentSections.splice(sourceIndex, 1);
-      let insertionIndex = currentSections.findIndex(s => s.id === targetId);
-      if (dropSectionPosition === 'after') {
-        insertionIndex += 1;
+      if (sourceIndex !== -1 && targetIndex !== -1) {
+        const [moved] = currentSections.splice(sourceIndex, 1);
+        let insertionIndex = currentSections.findIndex(s => s.id === targetId);
+        if (dropSectionPosition === 'after') {
+          insertionIndex += 1;
+        }
+        currentSections.splice(insertionIndex, 0, moved);
+        reorderSections(currentSections);
+        toast.success('Ordem das seções salva com sucesso!');
       }
-      currentSections.splice(insertionIndex, 0, moved);
-      reorderSections(currentSections);
-      toast.success('Ordem das seções salva!');
+    } else if (draggedPageId) {
+      const draggedPage = pages.find(p => p.id === draggedPageId);
+      const targetSection = sections.find(s => s.id === targetId);
+      if (draggedPage && targetSection) {
+        updatePage(draggedPageId, { section_id: targetId, parent_id: null });
+        toast.success(`Página movida para a seção "${targetSection.nome}"!`);
+      }
     }
 
     setDraggedSectionId(null);
     setDragOverSectionId(null);
     setDropSectionPosition(null);
+    setDraggedPageId(null);
+    setDragOverPageId(null);
   };
 
   const handleSectionDragEnd = () => {
@@ -649,7 +662,31 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
                   {expandedSections.includes(section.id) && (
                     <div className="ml-5 space-y-0.5 border-l-2 border-gray-100 dark:border-zinc-800 pl-1 overflow-hidden">
                       {rootPages.length === 0 ? (
-                        <div className="text-[11px] text-gray-400 dark:text-zinc-500 italic px-2 py-1">Sem páginas</div>
+                        <div 
+                          onDragOver={(e) => {
+                            if (draggedPageId) {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              e.dataTransfer.dropEffect = 'move';
+                            }
+                          }}
+                          onDrop={(e) => {
+                            if (draggedPageId) {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              const draggedPage = pages.find(p => p.id === draggedPageId);
+                              if (draggedPage) {
+                                updatePage(draggedPageId, { section_id: section.id, parent_id: null });
+                                toast.success(`Página movida para a seção "${section.nome}"!`);
+                              }
+                              setDraggedPageId(null);
+                              setDragOverPageId(null);
+                            }
+                          }}
+                          className="text-[11px] text-gray-400 dark:text-zinc-500 italic px-2 py-1.5 rounded hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 hover:text-indigo-600 transition-colors"
+                        >
+                          Sem páginas (arraste uma página aqui)
+                        </div>
                       ) : (
                         rootPages.map(page => renderPage(page, 0, rootPages))
                       )}

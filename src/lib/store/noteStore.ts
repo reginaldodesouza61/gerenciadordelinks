@@ -401,11 +401,24 @@ function saveSectionOrder(ids: string[], userId?: string) {
     if (effectiveUserId) {
       localStorage.setItem(`${SECTION_ORDER_STORAGE_KEY}_${effectiveUserId}`, JSON.stringify(ids));
     }
-    // Sync to Supabase user metadata if user is authenticated
     const authUser = useAuthStore.getState().user;
+    if (authUser?.id && authUser.id !== effectiveUserId) {
+      localStorage.setItem(`${SECTION_ORDER_STORAGE_KEY}_${authUser.id}`, JSON.stringify(ids));
+    }
+
+    // Sync to Supabase user metadata if user is authenticated
     if (authUser && authUser.id && authUser.id !== DEFAULT_USER_ID) {
       supabase.auth.updateUser({
         data: { note_section_order: ids }
+      }).then(({ data, error }) => {
+        if (!error && data?.user) {
+          try {
+            localStorage.setItem('meuhub_auth_user_cache', JSON.stringify(data.user));
+          } catch (err) {
+            console.debug('Failed to cache user metadata:', err);
+          }
+          useAuthStore.setState({ user: data.user });
+        }
       }).catch((err) => {
         console.debug('[Storage] Failed to sync note_section_order to Supabase metadata:', err);
       });
@@ -446,9 +459,22 @@ function savePageOrder(ids: string[], userId?: string) {
       localStorage.setItem(`${PAGE_ORDER_STORAGE_KEY}_${effectiveUserId}`, JSON.stringify(ids));
     }
     const authUser = useAuthStore.getState().user;
+    if (authUser?.id && authUser.id !== effectiveUserId) {
+      localStorage.setItem(`${PAGE_ORDER_STORAGE_KEY}_${authUser.id}`, JSON.stringify(ids));
+    }
+
     if (authUser && authUser.id && authUser.id !== DEFAULT_USER_ID) {
       supabase.auth.updateUser({
         data: { note_page_order: ids }
+      }).then(({ data, error }) => {
+        if (!error && data?.user) {
+          try {
+            localStorage.setItem('meuhub_auth_user_cache', JSON.stringify(data.user));
+          } catch (err) {
+            console.debug('Failed to cache user metadata:', err);
+          }
+          useAuthStore.setState({ user: data.user });
+        }
       }).catch((err) => {
         console.debug('[Storage] Failed to sync note_page_order to Supabase metadata:', err);
       });
@@ -460,14 +486,21 @@ function savePageOrder(ids: string[], userId?: string) {
 
 function sortSectionsByStoredOrder(sections: NoteSection[], userId?: string): NoteSection[] {
   const order = getStoredSectionOrder(userId);
-  if (order.length === 0) return sections;
+  if (order.length === 0) {
+    return [...sections].sort((a, b) => {
+      if (a.ordem !== undefined && b.ordem !== undefined) {
+        return a.ordem - b.ordem;
+      }
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
+  }
 
   const orderMap = new Map<string, number>();
   order.forEach((id, index) => orderMap.set(id, index));
 
   return [...sections].sort((a, b) => {
-    const indexA = orderMap.has(a.id) ? (orderMap.get(a.id) as number) : 9999;
-    const indexB = orderMap.has(b.id) ? (orderMap.get(b.id) as number) : 9999;
+    const indexA = orderMap.has(a.id) ? (orderMap.get(a.id) as number) : (a.ordem !== undefined ? a.ordem : 9999);
+    const indexB = orderMap.has(b.id) ? (orderMap.get(b.id) as number) : (b.ordem !== undefined ? b.ordem : 9999);
     if (indexA !== indexB) return indexA - indexB;
     return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
   });
@@ -1241,16 +1274,25 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   },
 
   reorderSections: (newSections: NoteSection[]) => {
-    const ids = newSections.map(s => s.id);
+    const newSectionsWithOrder = newSections.map((s, idx) => ({ ...s, ordem: idx }));
+    const ids = newSectionsWithOrder.map(s => s.id);
     const effectiveUserId = useAuthStore.getState().user?.id || DEFAULT_USER_ID;
+    
     saveSectionOrder(ids, effectiveUserId);
-    setCached(getUserCacheKey(effectiveUserId, 'note_sections'), newSections);
-    newSections.forEach(s => {
+    setCached(getUserCacheKey(effectiveUserId, 'note_sections'), newSectionsWithOrder);
+    newSectionsWithOrder.forEach(s => {
       if (s.user_id && s.user_id !== effectiveUserId) {
-        setCached(getUserCacheKey(s.user_id, 'note_sections'), newSections);
+        setCached(getUserCacheKey(s.user_id, 'note_sections'), newSectionsWithOrder);
       }
     });
-    set({ sections: newSections });
+
+    if (offlineDb.sections) {
+      for (const sec of newSectionsWithOrder) {
+        offlineDb.sections.put(sec).catch(console.debug);
+      }
+    }
+
+    set({ sections: newSectionsWithOrder });
   },
 
   moveSection: (id: string, direction: 'up' | 'down') => {
@@ -1265,16 +1307,25 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const [removed] = newSections.splice(index, 1);
     newSections.splice(targetIndex, 0, removed);
 
-    const ids = newSections.map(s => s.id);
+    const newSectionsWithOrder = newSections.map((s, idx) => ({ ...s, ordem: idx }));
+    const ids = newSectionsWithOrder.map(s => s.id);
     const effectiveUserId = useAuthStore.getState().user?.id || DEFAULT_USER_ID;
+
     saveSectionOrder(ids, effectiveUserId);
-    setCached(getUserCacheKey(effectiveUserId, 'note_sections'), newSections);
-    newSections.forEach(s => {
+    setCached(getUserCacheKey(effectiveUserId, 'note_sections'), newSectionsWithOrder);
+    newSectionsWithOrder.forEach(s => {
       if (s.user_id && s.user_id !== effectiveUserId) {
-        setCached(getUserCacheKey(s.user_id, 'note_sections'), newSections);
+        setCached(getUserCacheKey(s.user_id, 'note_sections'), newSectionsWithOrder);
       }
     });
-    set({ sections: newSections });
+
+    if (offlineDb.sections) {
+      for (const sec of newSectionsWithOrder) {
+        offlineDb.sections.put(sec).catch(console.debug);
+      }
+    }
+
+    set({ sections: newSectionsWithOrder });
   },
 
   addPage: async (titulo, sectionId, userId, parentId = null) => {
