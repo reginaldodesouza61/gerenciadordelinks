@@ -1,5 +1,5 @@
 import Dexie, { Table } from 'dexie';
-import { NotePage } from '../../types/notes';
+import { NotePage, NoteSection } from '../../types/notes';
 
 export interface LocalNotePage extends NotePage {
   localVersion: number;
@@ -28,6 +28,7 @@ export interface PageRevision {
 
 class OfflineDatabase extends Dexie {
   pages!: Table<LocalNotePage, string>;
+  sections!: Table<NoteSection, string>;
   syncQueue!: Table<SyncQueueItem, number>;
   revisions!: Table<PageRevision, number>;
 
@@ -35,6 +36,12 @@ class OfflineDatabase extends Dexie {
     super('AtlasOfflineDB');
     this.version(1).stores({
       pages: 'id, section_id, user_id, syncStatus',
+      syncQueue: '++id, pageId, action, timestamp',
+      revisions: '++id, [pageId+version], timestamp',
+    });
+    this.version(2).stores({
+      pages: 'id, section_id, user_id, syncStatus',
+      sections: 'id, user_id, nome',
       syncQueue: '++id, pageId, action, timestamp',
       revisions: '++id, [pageId+version], timestamp',
     });

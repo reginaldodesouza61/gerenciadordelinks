@@ -14,7 +14,7 @@ const SIDEBAR_COLLAPSED_STORAGE_KEY = 'meuhub_notes_sidebar_collapsed';
 
 export function NotesContainer() {
   const { user, initialized } = useAuthStore();
-  const { fetchNotes, activePageId, isLoading, pages } = useNoteStore();
+  const { fetchNotes, activePageId, setActivePageId, isLoading, pages } = useNoteStore();
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const lastFetchedUserIdRef = useRef<string | null>(null);
@@ -27,6 +27,17 @@ export function NotesContainer() {
   });
   const [sidebarWidth, setSidebarWidth] = useState(288); // Default 288px (w-72)
   const [isResizing, setIsResizing] = useState(false);
+
+  // Derive effective active page
+  const effectiveActivePageId = activePageId && pages.some(p => p.id === activePageId)
+    ? activePageId
+    : (pages.length > 0 ? pages[0].id : activePageId);
+
+  useEffect(() => {
+    if (pages.length > 0 && effectiveActivePageId && effectiveActivePageId !== activePageId) {
+      setActivePageId(effectiveActivePageId);
+    }
+  }, [pages, effectiveActivePageId, activePageId, setActivePageId]);
 
   // Global keyboard shortcut for Ctrl+K
   useEffect(() => {
@@ -190,10 +201,10 @@ export function NotesContainer() {
           <div className="flex-1 flex items-center justify-center">
             <div className="animate-spin h-8 w-8 border-4 border-indigo-600 border-t-transparent rounded-full"></div>
           </div>
-        ) : activePageId ? (
+        ) : effectiveActivePageId ? (
           <div className="flex-1 overflow-hidden h-full w-full">
             <NoteEditor 
-              pageId={activePageId} 
+              pageId={effectiveActivePageId} 
               isSidebarCollapsed={isDesktopSidebarCollapsed}
               onToggleSidebar={() => toggleSidebarCollapse(!isDesktopSidebarCollapsed)}
               onOpenSearch={() => setIsSearchModalOpen(true)}

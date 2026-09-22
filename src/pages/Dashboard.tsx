@@ -5,6 +5,7 @@ import { Footer } from '@/components/layout/Footer';
 import { LinkContainer } from '@/components/links/LinkContainer';
 import { NotesContainer } from '@/components/notes/NotesContainer';
 import { useLinkStore } from '@/lib/store/linkStore';
+import { useNoteStore } from '@/lib/store/noteStore';
 import { useAuthStore } from '@/lib/store/authStore';
 import { Button } from '@/components/ui/button';
 import { Menu, X, Link as LinkIcon, FileText } from 'lucide-react';
@@ -12,6 +13,7 @@ import { cn } from '@/lib/utils';
 
 export default function Dashboard() {
   const { fetchCategorias, fetchSubcategorias, fetchCredenciais } = useLinkStore();
+  const { fetchNotes } = useNoteStore();
   const { user, initialized } = useAuthStore();
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const lastFetchedUserIdRef = useRef<string | null>(null);
@@ -44,8 +46,9 @@ export default function Dashboard() {
       fetchCategorias();
       fetchSubcategorias();
       fetchCredenciais(userId);
+      fetchNotes(userId);
     }
-  }, [fetchCategorias, fetchSubcategorias, fetchCredenciais, user?.id, initialized]);
+  }, [fetchCategorias, fetchSubcategorias, fetchCredenciais, fetchNotes, user?.id, initialized]);
 
   useEffect(() => {
     // Keyboard shortcuts

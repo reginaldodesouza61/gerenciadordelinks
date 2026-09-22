@@ -304,8 +304,13 @@ function saveTrashToStorage(items: DeletedNoteItem[]) {
   }
 }
 
-function getStoredActivePageId(): string | null {
+function getStoredActivePageId(userId?: string): string | null {
   try {
+    const effectiveUserId = userId || useAuthStore.getState().user?.id;
+    if (effectiveUserId) {
+      const userVal = localStorage.getItem(`${ACTIVE_PAGE_STORAGE_KEY}_${effectiveUserId}`);
+      if (userVal) return sanitizeUuid(userVal);
+    }
     const val = localStorage.getItem(ACTIVE_PAGE_STORAGE_KEY);
     return val ? sanitizeUuid(val) : null;
   } catch {
@@ -313,8 +318,13 @@ function getStoredActivePageId(): string | null {
   }
 }
 
-function getStoredActiveSectionId(): string | null {
+function getStoredActiveSectionId(userId?: string): string | null {
   try {
+    const effectiveUserId = userId || useAuthStore.getState().user?.id;
+    if (effectiveUserId) {
+      const userVal = localStorage.getItem(`${ACTIVE_SECTION_STORAGE_KEY}_${effectiveUserId}`);
+      if (userVal) return sanitizeUuid(userVal);
+    }
     const val = localStorage.getItem(ACTIVE_SECTION_STORAGE_KEY);
     return val ? sanitizeUuid(val) : null;
   } catch {
@@ -322,24 +332,38 @@ function getStoredActiveSectionId(): string | null {
   }
 }
 
-function saveActivePageId(id: string | null) {
+function saveActivePageId(id: string | null, userId?: string) {
   try {
+    const effectiveUserId = userId || useAuthStore.getState().user?.id;
     if (id) {
       localStorage.setItem(ACTIVE_PAGE_STORAGE_KEY, id);
+      if (effectiveUserId) {
+        localStorage.setItem(`${ACTIVE_PAGE_STORAGE_KEY}_${effectiveUserId}`, id);
+      }
     } else {
       localStorage.removeItem(ACTIVE_PAGE_STORAGE_KEY);
+      if (effectiveUserId) {
+        localStorage.removeItem(`${ACTIVE_PAGE_STORAGE_KEY}_${effectiveUserId}`);
+      }
     }
   } catch {
     // ignore
   }
 }
 
-function saveActiveSectionId(id: string | null) {
+function saveActiveSectionId(id: string | null, userId?: string) {
   try {
+    const effectiveUserId = userId || useAuthStore.getState().user?.id;
     if (id) {
       localStorage.setItem(ACTIVE_SECTION_STORAGE_KEY, id);
+      if (effectiveUserId) {
+        localStorage.setItem(`${ACTIVE_SECTION_STORAGE_KEY}_${effectiveUserId}`, id);
+      }
     } else {
       localStorage.removeItem(ACTIVE_SECTION_STORAGE_KEY);
+      if (effectiveUserId) {
+        localStorage.removeItem(`${ACTIVE_SECTION_STORAGE_KEY}_${effectiveUserId}`);
+      }
     }
   } catch {
     // ignore
@@ -509,13 +533,56 @@ const getUserCacheKey = (userId: string, baseKey: string) => {
 
 const activeAbortControllers = new Map<string, AbortController>();
 
+function getInitialNoteState() {
+  let currentUserId = DEFAULT_USER_ID;
+  try {
+    const authUser = useAuthStore.getState().user;
+    if (authUser?.id) currentUserId = authUser.id;
+  } catch {
+    // ignore
+  }
+
+  const sectionsKey = getUserCacheKey(currentUserId, 'note_sections');
+  const pagesKey = getUserCacheKey(currentUserId, 'note_pages');
+  const relationsKey = getUserCacheKey(currentUserId, 'note_relations');
+
+  const rawCachedSections = getCached<NoteSection[]>(sectionsKey, currentUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : []);
+  const initialSections = sortSectionsByStoredOrder(rawCachedSections.length > 0 ? rawCachedSections : DEFAULT_SECTIONS, currentUserId);
+
+  const rawCachedPages = getCached<NotePage[]>(pagesKey, currentUserId === DEFAULT_USER_ID ? DEFAULT_PAGES : []);
+  const initialPages = sortPagesByStoredOrder(rawCachedPages.length > 0 ? rawCachedPages : DEFAULT_PAGES, currentUserId);
+
+  const initialRelations = getCached<NoteLinkRelation[]>(relationsKey, []);
+
+  const storedPageId = getStoredActivePageId(currentUserId);
+  const storedSectionId = getStoredActiveSectionId(currentUserId);
+
+  const activePageId = (storedPageId && initialPages.some(p => p.id === storedPageId))
+    ? storedPageId
+    : (initialPages.length > 0 ? initialPages[0].id : (currentUserId === DEFAULT_USER_ID ? DEFAULT_PAGE_ID : null));
+
+  const activeSectionId = (storedSectionId && initialSections.some(s => s.id === storedSectionId))
+    ? storedSectionId
+    : (initialSections.length > 0 ? initialSections[0].id : (currentUserId === DEFAULT_USER_ID ? DEFAULT_SECTION_ID : null));
+
+  return {
+    sections: initialSections,
+    pages: initialPages,
+    relations: initialRelations,
+    activePageId,
+    activeSectionId,
+  };
+}
+
+const initialNoteState = getInitialNoteState();
+
 export const useNoteStore = create<NoteState>((set, get) => ({
-  sections: sortSectionsByStoredOrder(DEFAULT_SECTIONS),
-  pages: sortPagesByStoredOrder(DEFAULT_PAGES),
-  relations: [],
+  sections: initialNoteState.sections,
+  pages: initialNoteState.pages,
+  relations: initialNoteState.relations,
   deletedItems: getStoredTrash(),
-  activeSectionId: sanitizeUuid(getStoredActiveSectionId()) || DEFAULT_SECTION_ID,
-  activePageId: sanitizeUuid(getStoredActivePageId()) || DEFAULT_PAGE_ID,
+  activeSectionId: initialNoteState.activeSectionId,
+  activePageId: initialNoteState.activePageId,
   isLoading: false,
   pageSyncStatuses: {},
 
@@ -740,47 +807,83 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   },
 
   fetchNotes: async (userId?: string) => {
-    const targetUserId = userId || DEFAULT_USER_ID;
-    const currentPages = get().pages;
-    const currentSections = get().sections;
-    const hasDataInMemory = currentPages.length > 0 && currentSections.length > 0;
+    const targetUserId = userId || useAuthStore.getState().user?.id || DEFAULT_USER_ID;
     
-    // Instantly load specific user cached pages/sections/relations if memory is empty
+    // Instantly load specific user cached pages/sections/relations from localStorage & Dexie
     const sectionsKey = getUserCacheKey(targetUserId, 'note_sections');
     const pagesKey = getUserCacheKey(targetUserId, 'note_pages');
     const relationsKey = getUserCacheKey(targetUserId, 'note_relations');
-    
-    if (!hasDataInMemory) {
-      const rawCachedSections = getCached<NoteSection[]>(sectionsKey, targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : []);
-      const cachedSections = sortSectionsByStoredOrder(rawCachedSections, targetUserId);
-      const rawCachedPages = getCached<NotePage[]>(pagesKey, targetUserId === DEFAULT_USER_ID ? DEFAULT_PAGES : []);
-      const cachedPages = sortPagesByStoredOrder(rawCachedPages, targetUserId);
-      const cachedRelations = getCached<NoteLinkRelation[]>(relationsKey, []);
-      
-      // Determine active page & section
-      const storedPageId = getStoredActivePageId();
-      const storedSectionId = getStoredActiveSectionId();
 
-      const targetPageId = storedPageId && cachedPages.some(p => p.id === storedPageId)
-        ? storedPageId
-        : (cachedPages.length > 0 ? cachedPages[0].id : null);
-        
-      const targetSectionId = storedSectionId && cachedSections.some(s => s.id === storedSectionId)
-        ? storedSectionId
-        : (cachedSections.length > 0 ? cachedSections[0].id : null);
+    const rawCachedSections = getCached<NoteSection[]>(sectionsKey, targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : []);
+    const localCachedSections = sortSectionsByStoredOrder(rawCachedSections, targetUserId);
+    const rawCachedPages = getCached<NotePage[]>(pagesKey, targetUserId === DEFAULT_USER_ID ? DEFAULT_PAGES : []);
+    const localCachedPages = sortPagesByStoredOrder(rawCachedPages, targetUserId);
+    const cachedRelations = getCached<NoteLinkRelation[]>(relationsKey, []);
 
-      const hasCachedData = cachedPages.length > 0 || cachedSections.length > 0;
-
-      set({
-        sections: cachedSections,
-        pages: cachedPages,
-        relations: cachedRelations,
-        activePageId: targetPageId,
-        activeSectionId: targetSectionId,
-        // Only show spinner on cold start when no cached data exists
-        isLoading: !hasCachedData
-      });
+    let dexiePages: LocalNotePage[] = [];
+    let dexieSections: NoteSection[] = [];
+    try {
+      dexiePages = await offlineDb.pages.toArray();
+      if (offlineDb.sections) {
+        dexieSections = await offlineDb.sections.toArray();
+      }
+    } catch (e) {
+      console.debug('Failed to read Dexie storage during fetchNotes:', e);
     }
+
+    const userDexiePages = dexiePages.filter(p => p.user_id === targetUserId || targetUserId === DEFAULT_USER_ID);
+    const userDexieSections = dexieSections.filter(s => s.user_id === targetUserId || targetUserId === DEFAULT_USER_ID);
+
+    // Merge immediate in-memory view
+    const immediateSectionsMap = new Map<string, NoteSection>();
+    (localCachedSections.length > 0 ? localCachedSections : (targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : [])).forEach(s => immediateSectionsMap.set(s.id, s));
+    userDexieSections.forEach(s => immediateSectionsMap.set(s.id, s));
+    const immediateSections = sortSectionsByStoredOrder(Array.from(immediateSectionsMap.values()), targetUserId);
+
+    const immediatePagesMap = new Map<string, NotePage>();
+    (localCachedPages.length > 0 ? localCachedPages : (targetUserId === DEFAULT_USER_ID ? DEFAULT_PAGES : [])).forEach(p => immediatePagesMap.set(p.id, p));
+    userDexiePages.forEach(p => immediatePagesMap.set(p.id, p));
+    const immediatePages = sortPagesByStoredOrder(Array.from(immediatePagesMap.values()), targetUserId);
+
+    // Determine immediate active page & section
+    const currentActivePageId = get().activePageId;
+    const currentActiveSecId = get().activeSectionId;
+    const storedPageId = getStoredActivePageId(targetUserId);
+    const storedSecId = getStoredActiveSectionId(targetUserId);
+
+    let initialPageId: string | null = null;
+    let initialSecId: string | null = null;
+
+    if (currentActivePageId && immediatePages.some(p => p.id === currentActivePageId)) {
+      initialPageId = currentActivePageId;
+      const page = immediatePages.find(p => p.id === currentActivePageId);
+      initialSecId = page?.section_id || currentActiveSecId;
+    } else if (storedPageId && immediatePages.some(p => p.id === storedPageId)) {
+      initialPageId = storedPageId;
+      const page = immediatePages.find(p => p.id === storedPageId);
+      initialSecId = page?.section_id || storedSecId;
+    } else if ((currentActiveSecId || storedSecId) && immediateSections.some(s => s.id === (currentActiveSecId || storedSecId))) {
+      initialSecId = currentActiveSecId || storedSecId;
+      const firstPage = immediatePages.find(p => p.section_id === initialSecId);
+      initialPageId = firstPage?.id || (immediatePages.length > 0 ? immediatePages[0].id : null);
+    } else if (immediateSections.length > 0) {
+      initialSecId = immediateSections[0].id;
+      const firstPage = immediatePages.find(p => p.section_id === initialSecId);
+      initialPageId = firstPage?.id || (immediatePages.length > 0 ? immediatePages[0].id : null);
+    }
+
+    if (initialPageId) saveActivePageId(initialPageId, targetUserId);
+    if (initialSecId) saveActiveSectionId(initialSecId, targetUserId);
+
+    // Update state immediately with cached/local data so user sees their notes instantly without blank screen
+    set({
+      sections: immediateSections,
+      pages: immediatePages,
+      relations: cachedRelations,
+      activePageId: initialPageId,
+      activeSectionId: initialSecId,
+      isLoading: immediatePages.length === 0 && immediateSections.length === 0
+    });
 
     try {
       // Use a timeout race so database queries never hang indefinitely
@@ -802,20 +905,38 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         const rawSections = (sectionsRes.data as NoteSection[]) || [];
         const rawPagesData = (pagesRes.data as NotePage[]) || [];
 
-        let loadedSections: NoteSection[] = [];
-        let loadedPages: NotePage[] = [];
+        // 1. SECTIONS MERGING & RECONCILIATION
+        const mergedSectionsMap = new Map<string, NoteSection>();
+        // Add remote sections
+        rawSections.forEach(s => mergedSectionsMap.set(s.id, s));
+        // Add locally cached sections that might not be on remote yet
+        immediateSections.forEach(s => {
+          if (!mergedSectionsMap.has(s.id)) {
+            mergedSectionsMap.set(s.id, s);
+          }
+        });
+        const finalSections = sortSectionsByStoredOrder(
+          Array.from(mergedSectionsMap.values()).length > 0 
+            ? Array.from(mergedSectionsMap.values()) 
+            : (targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : []), 
+          targetUserId
+        );
 
-        if (rawSections.length > 0) {
-          loadedSections = sortSectionsByStoredOrder(rawSections, targetUserId);
-        } else {
-          // If Supabase returned empty and we are guest/official, use cached or defaults with stored sort order
-          const fallbackSections = targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : (get().sections.length > 0 ? get().sections : []);
-          loadedSections = sortSectionsByStoredOrder(fallbackSections, targetUserId);
+        // Also save sections to Dexie
+        if (offlineDb.sections) {
+          try {
+            for (const sec of finalSections) {
+              await offlineDb.sections.put(sec);
+            }
+          } catch (dexSecErr) {
+            console.debug('Failed to save sections to Dexie:', dexSecErr);
+          }
         }
 
+        // 2. PAGES DECRYPTION & RECONCILIATION
+        let decryptedRemotePages: NotePage[] = [];
         if (rawPagesData.length > 0) {
-          // Quickly process pages without blocking the UI thread
-          const decryptedPages = await Promise.all(rawPagesData.map(async p => {
+          decryptedRemotePages = await Promise.all(rawPagesData.map(async p => {
             const rawContent = p.conteudo;
             let finalContent = rawContent || '[]';
             if (rawContent) {
@@ -830,18 +951,96 @@ export const useNoteStore = create<NoteState>((set, get) => ({
               conteudo: finalContent
             };
           }));
-          loadedPages = sortPagesByStoredOrder(decryptedPages, targetUserId);
-        } else {
-          const fallbackPages = targetUserId === DEFAULT_USER_ID ? DEFAULT_PAGES : (get().pages.length > 0 ? get().pages : []);
-          loadedPages = sortPagesByStoredOrder(fallbackPages, targetUserId);
+        }
+
+        // Reconcile and merge fetched Supabase pages with Dexie IndexedDB & local cache
+        const localDexiePages = await offlineDb.pages.toArray();
+        const dexieMap = new Map(localDexiePages.map(p => [p.id, p]));
+        const pendingQueue = await offlineDb.syncQueue.toArray();
+        const pendingPageIds = new Set(pendingQueue.map(item => item.pageId));
+        const deletedPageIds = new Set(pendingQueue.filter(item => item.action === 'delete').map(item => item.pageId));
+        const initialSyncStatuses: Record<string, 'synced' | 'pending' | 'conflict'> = {};
+
+        const mergedPagesMap = new Map<string, NotePage>();
+
+        // First, add all remote pages that aren't deleted in pending sync queue
+        for (const remotePage of decryptedRemotePages) {
+          if (deletedPageIds.has(remotePage.id)) continue;
+
+          const localMatch = dexieMap.get(remotePage.id);
+          const isPendingSync = pendingPageIds.has(remotePage.id);
+
+          if (localMatch) {
+            initialSyncStatuses[remotePage.id] = isPendingSync ? 'pending' : localMatch.syncStatus;
+            // If local page has pending offline changes, preserve local edits!
+            if (isPendingSync || localMatch.syncStatus === 'pending' || localMatch.syncStatus === 'conflict') {
+              mergedPagesMap.set(remotePage.id, {
+                ...remotePage,
+                titulo: localMatch.titulo,
+                conteudo: localMatch.conteudo
+              });
+            } else {
+              mergedPagesMap.set(remotePage.id, remotePage);
+              if (localMatch.conteudo !== remotePage.conteudo || localMatch.titulo !== remotePage.titulo) {
+                await offlineDb.pages.update(remotePage.id, {
+                  titulo: remotePage.titulo,
+                  conteudo: remotePage.conteudo,
+                  lastUpdatedAt: Date.now()
+                });
+              }
+            }
+          } else {
+            // New remote page not in Dexie yet
+            mergedPagesMap.set(remotePage.id, remotePage);
+            await offlineDb.pages.put({
+              ...remotePage,
+              localVersion: 1,
+              remoteVersion: 1,
+              syncStatus: 'synced',
+              lastUpdatedAt: Date.now()
+            });
+            initialSyncStatuses[remotePage.id] = 'synced';
+          }
+        }
+
+        // Second, preserve any local Dexie pages that aren't on remote yet (e.g. created offline / pending sync)
+        for (const localPage of localDexiePages) {
+          if (localPage.user_id !== targetUserId && targetUserId !== DEFAULT_USER_ID) continue;
+          if (deletedPageIds.has(localPage.id)) continue;
+          if (!mergedPagesMap.has(localPage.id)) {
+            mergedPagesMap.set(localPage.id, localPage);
+            initialSyncStatuses[localPage.id] = pendingPageIds.has(localPage.id) ? 'pending' : (localPage.syncStatus || 'synced');
+          }
+        }
+
+        // Third, preserve any local cached pages
+        for (const cachedPage of localCachedPages) {
+          if (cachedPage.user_id !== targetUserId && targetUserId !== DEFAULT_USER_ID) continue;
+          if (deletedPageIds.has(cachedPage.id)) continue;
+          if (!mergedPagesMap.has(cachedPage.id)) {
+            mergedPagesMap.set(cachedPage.id, cachedPage);
+            await offlineDb.pages.put({
+              ...cachedPage,
+              localVersion: 1,
+              remoteVersion: 0,
+              syncStatus: 'pending',
+              lastUpdatedAt: Date.now()
+            });
+            initialSyncStatuses[cachedPage.id] = 'pending';
+          }
+        }
+
+        let reconciledPages = Array.from(mergedPagesMap.values());
+        if (reconciledPages.length === 0 && targetUserId === DEFAULT_USER_ID) {
+          reconciledPages = DEFAULT_PAGES;
         }
 
         // Sanitize page section_id and parent_id
-        const validSectionIds = new Set(loadedSections.map(s => s.id));
-        const validPageIds = new Set(loadedPages.map(p => p.id));
-        const fallbackSectionId = loadedSections.length > 0 ? loadedSections[0].id : null;
+        const validSectionIds = new Set(finalSections.map(s => s.id));
+        const validPageIds = new Set(reconciledPages.map(p => p.id));
+        const fallbackSectionId = finalSections.length > 0 ? finalSections[0].id : null;
 
-        const sanitizedPages = loadedPages.map(p => {
+        const sanitizedPages = reconciledPages.map(p => {
           let cleanParentId = p.parent_id;
           let cleanSectionId = p.section_id;
 
@@ -860,100 +1059,54 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           };
         });
 
+        const sortedPages = sortPagesByStoredOrder(sanitizedPages, targetUserId);
+
         // Determine active page and section while preserving currently open page
-        const currentActivePageId = get().activePageId;
-        const currentActiveSectionId = get().activeSectionId;
-        const storedPageIdCurrent = getStoredActivePageId();
-        const storedSectionIdCurrent = getStoredActiveSectionId();
+        const currentActivePage = get().activePageId;
+        const currentActiveSec = get().activeSectionId;
+        const storedPage = getStoredActivePageId(targetUserId);
+        const storedSec = getStoredActiveSectionId(targetUserId);
 
         let finalPageId: string | null = null;
         let finalSectionId: string | null = null;
 
-        if (currentActivePageId && sanitizedPages.some(p => p.id === currentActivePageId)) {
-          finalPageId = currentActivePageId;
-          const page = sanitizedPages.find(p => p.id === currentActivePageId);
-          finalSectionId = page?.section_id || currentActiveSectionId;
-        } else if (storedPageIdCurrent && sanitizedPages.some(p => p.id === storedPageIdCurrent)) {
-          finalPageId = storedPageIdCurrent;
-          const page = sanitizedPages.find(p => p.id === storedPageIdCurrent);
-          finalSectionId = page?.section_id || null;
-        } else if (currentActiveSectionId && loadedSections.some(s => s.id === currentActiveSectionId)) {
-          finalSectionId = currentActiveSectionId;
-          const firstPage = sanitizedPages.find(p => p.section_id === finalSectionId);
-          finalPageId = firstPage?.id || (sanitizedPages.length > 0 ? sanitizedPages[0].id : null);
-        } else if (storedSectionIdCurrent && loadedSections.some(s => s.id === storedSectionIdCurrent)) {
-          finalSectionId = storedSectionIdCurrent;
-          const firstPage = sanitizedPages.find(p => p.section_id === finalSectionId);
-          finalPageId = firstPage?.id || (sanitizedPages.length > 0 ? sanitizedPages[0].id : null);
-        } else if (loadedSections.length > 0) {
-          finalSectionId = loadedSections[0].id;
-          const firstPage = sanitizedPages.find(p => p.section_id === finalSectionId);
-          finalPageId = firstPage?.id || (sanitizedPages.length > 0 ? sanitizedPages[0].id : null);
+        if (currentActivePage && sortedPages.some(p => p.id === currentActivePage)) {
+          finalPageId = currentActivePage;
+          const page = sortedPages.find(p => p.id === currentActivePage);
+          finalSectionId = page?.section_id || currentActiveSec;
+        } else if (storedPage && sortedPages.some(p => p.id === storedPage)) {
+          finalPageId = storedPage;
+          const page = sortedPages.find(p => p.id === storedPage);
+          finalSectionId = page?.section_id || storedSec;
+        } else if ((currentActiveSec || storedSec) && finalSections.some(s => s.id === (currentActiveSec || storedSec))) {
+          finalSectionId = currentActiveSec || storedSec;
+          const firstPage = sortedPages.find(p => p.section_id === finalSectionId);
+          finalPageId = firstPage?.id || (sortedPages.length > 0 ? sortedPages[0].id : null);
+        } else if (finalSections.length > 0) {
+          finalSectionId = finalSections[0].id;
+          const firstPage = sortedPages.find(p => p.section_id === finalSectionId);
+          finalPageId = firstPage?.id || (sortedPages.length > 0 ? sortedPages[0].id : null);
+        } else if (sortedPages.length > 0) {
+          finalPageId = sortedPages[0].id;
+          finalSectionId = sortedPages[0].section_id;
         }
 
-        if (finalPageId) saveActivePageId(finalPageId);
-        if (finalSectionId) saveActiveSectionId(finalSectionId);
+        if (finalPageId) saveActivePageId(finalPageId, targetUserId);
+        if (finalSectionId) saveActiveSectionId(finalSectionId, targetUserId);
 
-        // Reconcile and merge fetched Supabase pages with Dexie IndexedDB
-        let reconciledPages = sanitizedPages;
-        try {
-          const localDexiePages = await offlineDb.pages.toArray();
-          const dexieMap = new Map(localDexiePages.map(p => [p.id, p]));
-          const pendingQueue = await offlineDb.syncQueue.toArray();
-          const pendingPageIds = new Set(pendingQueue.map(item => item.pageId));
-          const initialSyncStatuses: Record<string, 'synced' | 'pending' | 'conflict'> = {};
-
-          reconciledPages = sanitizedPages.map(p => {
-            const localMatch = dexieMap.get(p.id);
-            const isPendingSync = pendingPageIds.has(p.id);
-
-            if (localMatch) {
-              initialSyncStatuses[p.id] = isPendingSync ? 'pending' : localMatch.syncStatus;
-              // NEVER overwrite pages that have pending offline changes or edits in progress!
-              if (isPendingSync || localMatch.syncStatus === 'pending' || localMatch.syncStatus === 'conflict') {
-                return {
-                  ...p,
-                  titulo: localMatch.titulo,
-                  conteudo: localMatch.conteudo
-                };
-              }
-              if (localMatch.conteudo !== p.conteudo || localMatch.titulo !== p.titulo) {
-                offlineDb.pages.update(p.id, {
-                  titulo: p.titulo,
-                  conteudo: p.conteudo,
-                  lastUpdatedAt: Date.now()
-                });
-              }
-              return p;
-            } else {
-              offlineDb.pages.put({
-                ...p,
-                localVersion: 1,
-                remoteVersion: 1,
-                syncStatus: 'synced',
-                lastUpdatedAt: Date.now()
-              });
-              initialSyncStatuses[p.id] = 'synced';
-              return p;
-            }
-          });
-
-          set({ pageSyncStatuses: initialSyncStatuses });
-        } catch (err) {
-          console.error('Dexie reconciliation failed inside fetchNotes:', err);
-        }
-
-        setCached(sectionsKey, loadedSections);
-        setCached(pagesKey, reconciledPages);
+        setCached(sectionsKey, finalSections);
+        setCached(pagesKey, sortedPages);
         if (relRes?.data) setCached(relationsKey, relRes.data);
 
         set({
-          sections: loadedSections,
-          pages: reconciledPages,
+          sections: finalSections,
+          pages: sortedPages,
           relations: relRes?.data || get().relations,
           deletedItems: getStoredTrash(),
           activePageId: finalPageId,
           activeSectionId: finalSectionId,
+          pageSyncStatuses: initialSyncStatuses,
+          isLoading: false
         });
 
         get().syncPendingQueue().catch(console.error);
@@ -1562,16 +1715,18 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   },
 
   setActiveSectionId: (id) => {
-    saveActiveSectionId(id);
+    const userId = useAuthStore.getState().user?.id;
+    saveActiveSectionId(id, userId);
     set({ activeSectionId: id });
   },
 
   setActivePageId: (id) => {
-    saveActivePageId(id);
+    const userId = useAuthStore.getState().user?.id;
+    saveActivePageId(id, userId);
     if (id) {
       const page = get().pages.find(p => p.id === id);
       if (page?.section_id) {
-        saveActiveSectionId(page.section_id);
+        saveActiveSectionId(page.section_id, userId);
         set({ activePageId: id, activeSectionId: page.section_id });
         return;
       }
