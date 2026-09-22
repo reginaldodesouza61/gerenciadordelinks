@@ -16,6 +16,7 @@ import {
   getGeminiApiKey, setGeminiApiKey, removeGeminiApiKey, testGeminiApiKey, 
   DEFAULT_DEVELOPER_INFO, SYSTEM_INFO 
 } from '@/lib/geminiService';
+import { EgressAuditModal } from '@/components/notes/dev/EgressAuditModal';
 import { usePwaInstall } from '@/lib/pwa/usePwaInstall';
 import { toast } from 'sonner';
 
@@ -32,6 +33,7 @@ export function SettingsModal({ open, onOpenChange, defaultTab = 'gemini' }: Set
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [hasStoredKey, setHasStoredKey] = useState(false);
   const [activeTab, setActiveTab] = useState<'gemini' | 'pwa' | 'developer' | 'system'>(defaultTab);
+  const [isEgressAuditOpen, setIsEgressAuditOpen] = useState(false);
 
   const { isInstalled, isInstallable, isIOS, hasPrompt, installApp } = usePwaInstall();
 
@@ -441,9 +443,20 @@ export function SettingsModal({ open, onOpenChange, defaultTab = 'gemini' }: Set
 
               {/* Módulos e Recursos */}
               <div className="space-y-2">
-                <h4 className="text-xs font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider">
-                  Módulos & Recursos Integrados
-                </h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-700 dark:text-zinc-300 uppercase tracking-wider">
+                    Módulos & Recursos Integrados
+                  </h4>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsEgressAuditOpen(true)}
+                    className="h-7 text-[11px] gap-1.5 rounded-lg border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-400 bg-amber-50/60 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50"
+                  >
+                    <Zap size={13} />
+                    Auditoria de Egress Supabase (1.8 GB)
+                  </Button>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {SYSTEM_INFO.features.map((feature, idx) => (
                     <div key={idx} className="flex items-center gap-2 p-2.5 rounded-lg bg-slate-50 dark:bg-zinc-800/40 border border-slate-100 dark:border-zinc-800/80 text-xs text-slate-700 dark:text-zinc-300">
@@ -456,6 +469,8 @@ export function SettingsModal({ open, onOpenChange, defaultTab = 'gemini' }: Set
             </TabsContent>
           </Tabs>
         </div>
+
+        <EgressAuditModal open={isEgressAuditOpen} onOpenChange={setIsEgressAuditOpen} />
       </DialogContent>
     </Dialog>
   );

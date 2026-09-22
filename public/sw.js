@@ -70,6 +70,31 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Supabase Storage Objects (Cache-First strategy to eliminate egress)
+  const isSupabaseStorage = url.pathname.includes('/storage/v1/object/public/');
+  if (isSupabaseStorage) {
+    event.respondWith(
+      caches.match(request).then((cachedResponse) => {
+        if (cachedResponse) {
+          return cachedResponse;
+        }
+        return fetch(request).then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const copy = networkResponse.clone();
+            caches.open('supabase-storage-cache-v1').then((cache) => {
+              cache.put(request, copy);
+            });
+          }
+          return networkResponse;
+        }).catch((err) => {
+          console.warn('SW: Supabase storage fetch failed', err);
+          return new Response('Image unavailable offline', { status: 503 });
+        });
+      })
+    );
+    return;
+  }
+
   // Static Assets (JS, CSS, images, icons, fonts) - Stale While Revalidate
   const isStaticAsset = (
     url.origin === self.location.origin &&

@@ -12,9 +12,13 @@ import { Menu, X, Link as LinkIcon, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function Dashboard() {
-  const { fetchCategorias, fetchSubcategorias, fetchCredenciais } = useLinkStore();
-  const { fetchNotes } = useNoteStore();
-  const { user, initialized } = useAuthStore();
+  console.count('[Render] Dashboard');
+  const fetchCategorias = useLinkStore((state) => state.fetchCategorias);
+  const fetchSubcategorias = useLinkStore((state) => state.fetchSubcategorias);
+  const fetchCredenciais = useLinkStore((state) => state.fetchCredenciais);
+  const fetchNotes = useNoteStore((state) => state.fetchNotes);
+  const userId = useAuthStore((state) => state.user?.id);
+  const initialized = useAuthStore((state) => state.initialized);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const lastFetchedUserIdRef = useRef<string | null>(null);
 
@@ -40,15 +44,15 @@ export default function Dashboard() {
   useEffect(() => {
     if (!initialized) return;
 
-    const userId = user?.id || 'c72212e7-2b6a-4da7-8745-01eb33414af4';
-    if (lastFetchedUserIdRef.current !== userId) {
-      lastFetchedUserIdRef.current = userId;
+    const targetUserId = userId || 'c72212e7-2b6a-4da7-8745-01eb33414af4';
+    if (lastFetchedUserIdRef.current !== targetUserId) {
+      lastFetchedUserIdRef.current = targetUserId;
       fetchCategorias();
       fetchSubcategorias();
-      fetchCredenciais(userId);
-      fetchNotes(userId);
+      fetchCredenciais(targetUserId);
+      fetchNotes(targetUserId);
     }
-  }, [fetchCategorias, fetchSubcategorias, fetchCredenciais, fetchNotes, user?.id, initialized]);
+  }, [fetchCategorias, fetchSubcategorias, fetchCredenciais, fetchNotes, userId, initialized]);
 
   useEffect(() => {
     // Keyboard shortcuts

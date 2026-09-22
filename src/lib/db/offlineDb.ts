@@ -26,11 +26,34 @@ export interface PageRevision {
   timestamp: number;
 }
 
+export interface ImageBlobCacheItem {
+  url: string;
+  blob: Blob;
+  mimeType: string;
+  size: number;
+  pageId?: string;
+  fetchedAt: number;
+  hitCount: number;
+}
+
+export interface EgressLogItem {
+  id?: number;
+  timestamp: number;
+  type: 'image_download' | 'storage_list' | 'get_public_url' | 'fetch_notes' | 'sync_queue' | 'update_page';
+  url?: string;
+  sizeBytes: number;
+  noteId?: string;
+  trigger: string;
+  cached: boolean;
+}
+
 class OfflineDatabase extends Dexie {
   pages!: Table<LocalNotePage, string>;
   sections!: Table<NoteSection, string>;
   syncQueue!: Table<SyncQueueItem, number>;
   revisions!: Table<PageRevision, number>;
+  imageBlobCache!: Table<ImageBlobCacheItem, string>;
+  egressLogs!: Table<EgressLogItem, number>;
 
   constructor() {
     super('AtlasOfflineDB');
@@ -44,6 +67,14 @@ class OfflineDatabase extends Dexie {
       sections: 'id, user_id, nome',
       syncQueue: '++id, pageId, action, timestamp',
       revisions: '++id, [pageId+version], timestamp',
+    });
+    this.version(3).stores({
+      pages: 'id, section_id, user_id, syncStatus',
+      sections: 'id, user_id, nome',
+      syncQueue: '++id, pageId, action, timestamp',
+      revisions: '++id, [pageId+version], timestamp',
+      imageBlobCache: 'url, pageId, size, fetchedAt',
+      egressLogs: '++id, timestamp, type, noteId, cached',
     });
   }
 }

@@ -1317,13 +1317,25 @@ interface NoteEditorProps {
 }
 
 export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpenSearch }: NoteEditorProps) {
-  const pages = useNoteStore((state) => state.pages);
+  console.count('[Render] NoteEditor');
+  const page = useNoteStore((state) => state.pages.find((p) => p.id === pageId));
   const updatePage = useNoteStore((state) => state.updatePage);
   const relations = useNoteStore((state) => state.relations);
   const getLocalRevisions = useNoteStore((state) => state.getLocalRevisions);
   const restoreRevision = useNoteStore((state) => state.restoreRevision);
-  const page = pages.find((p) => p.id === pageId);
-  const [blocks, setBlocks] = useState<CanvasBlock[]>([]);
+  const [blocks, setBlocks] = useState<CanvasBlock[]>(() => {
+    if (!page?.conteudo) return [];
+    try {
+      const raw = page.conteudo.trim();
+      if (raw.startsWith('[')) {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      }
+    } catch {
+      // fallback
+    }
+    return [];
+  });
   const updateBlock = useCallback((id: string, updates: Partial<CanvasBlock> | ((prev: CanvasBlock) => Partial<CanvasBlock>)) => {
     setBlocks((prev) => {
       return prev.map((b) => {
@@ -1852,11 +1864,13 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
   useEffect(() => {
     if (!page) return;
 
+    const isActualPageSwitch = lastLoadedPageIdRef.current !== pageId;
+
     // If we are already on this page and have active blocks or in-progress changes,
     // do NOT let a background store fetch overwrite the user's canvas or reset selection!
     if (
-      lastLoadedPageIdRef.current === pageId &&
-      (hasUnsavedChangesRef.current || blocks.length > 0 || lastSavedContentRef.current === page.conteudo)
+      !isActualPageSwitch &&
+      (hasUnsavedChangesRef.current || blocksRef.current.length > 0 || lastSavedContentRef.current === page.conteudo)
     ) {
       return;
     }
@@ -1911,13 +1925,17 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     const safeParsed = Array.isArray(parsedBlocks) ? parsedBlocks : [];
     const validBlocks = safeParsed.filter((b) => b && !isBlockEmpty(b));
     const blocksToUse = validBlocks.length > 0 ? validBlocks : safeParsed;
+    
     setBlocks(blocksToUse);
-    setActiveEditor(null);
-    setSelectedBlockId(null);
+    
+    if (isActualPageSwitch) {
+      setActiveEditor(null);
+      setSelectedBlockId(null);
+    }
     
     // Auto-migrate Base64 images to Storage in second background thread
     triggerAutoMigration(blocksToUse);
-  }, [pageId, page?.conteudo, triggerAutoMigration]);
+  }, [pageId, page?.conteudo, triggerAutoMigration, updatePage]);
 
   // Immediate manual and unmount save function
   const saveNow = useCallback(async (blocksToSave?: CanvasBlock[]) => {

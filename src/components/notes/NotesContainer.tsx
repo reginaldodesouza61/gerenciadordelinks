@@ -13,8 +13,15 @@ import { Button } from '@/components/ui/button';
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'meuhub_notes_sidebar_collapsed';
 
 export function NotesContainer() {
-  const { user, initialized } = useAuthStore();
-  const { fetchNotes, activePageId, setActivePageId, isLoading, pages } = useNoteStore();
+  console.count('[Render] NotesContainer');
+  const user = useAuthStore((state) => state.user);
+  const initialized = useAuthStore((state) => state.initialized);
+  
+  const fetchNotes = useNoteStore((state) => state.fetchNotes);
+  const activePageId = useNoteStore((state) => state.activePageId);
+  const setActivePageId = useNoteStore((state) => state.setActivePageId);
+  const isLoading = useNoteStore((state) => state.isLoading);
+  const pages = useNoteStore((state) => state.pages);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const lastFetchedUserIdRef = useRef<string | null>(null);

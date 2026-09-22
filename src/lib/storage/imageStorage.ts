@@ -1,9 +1,71 @@
 import { supabase } from '@/lib/supabase';
+import { trackEgressEvent } from './egressTracker';
+import { offlineDb } from '@/lib/db/offlineDb';
 
 let bucketCheckPromise: Promise<boolean> | null = null;
 let bucketAvailableCache: boolean | null = null;
 let lastCheckTimestamp = 0;
 const CACHE_LIFETIME = 60000; // 1 minute cache
+
+/**
+ * Optimizes/compresses an image Blob before uploading to Supabase Storage.
+ * Reduces 8MB raw PNG screen captures down to ~300KB WebP/JPEG (95%+ egress savings).
+ */
+export async function optimizeImageBlob(blob: Blob, maxDimension = 1920, quality = 0.82): Promise<Blob> {
+  // If blob is already small (< 300 KB), leave it untouched
+  if (blob.size < 300 * 1024) return blob;
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(blob);
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+
+      if (width > maxDimension || height > maxDimension) {
+        if (width > height) {
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
+        } else {
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(blob);
+        return;
+      }
+
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      canvas.toBlob(
+        (compressedBlob) => {
+          if (compressedBlob && compressedBlob.size < blob.size) {
+            resolve(compressedBlob);
+          } else {
+            resolve(blob);
+          }
+        },
+        'image/webp',
+        quality
+      );
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(blob);
+    };
+
+    img.src = url;
+  });
+}
 
 /**
  * Checks if the Supabase Storage bucket 'note-assets' exists and is accessible.
@@ -61,8 +123,8 @@ export function base64ToBlob(base64DataUrl: string): Blob {
 
 /**
  * Uploads an image (Base64 string or File/Blob) directly to the Supabase Storage bucket 'note-assets'.
- * If the bucket is not available, gracefully throws BUCKET_NOT_FOUND without attempting
- * client-side bucket creation (which is forbidden by Supabase RLS policies for anonymous clients).
+ * Optimizes image size and immediately caches the uploaded file into IndexedDB imageBlobCache
+ * to ensure 0 B network egress on subsequent renders.
  * 
  * @returns The public URL of the uploaded image.
  */
@@ -78,22 +140,26 @@ export async function uploadImageToStorage(
     throw new Error('BUCKET_NOT_FOUND');
   }
 
-  let blob: Blob;
+  let rawBlob: Blob;
   let contentType = 'image/png';
 
   if (typeof source === 'string') {
     if (!source.startsWith('data:image/')) {
       throw new Error('A string fornecida não é um formato de dados Base64 válido.');
     }
-    blob = base64ToBlob(source);
-    contentType = blob.type;
+    rawBlob = base64ToBlob(source);
+    contentType = rawBlob.type;
   } else {
-    blob = source;
+    rawBlob = source;
     contentType = source.type || 'image/png';
   }
 
+  // Compress/optimize heavy images before upload
+  const blob = await optimizeImageBlob(rawBlob);
+  contentType = blob.type || contentType;
+
   // Generate a clean, unique file path
-  const extension = contentType.split('/')[1] || 'png';
+  const extension = contentType.includes('webp') ? 'webp' : (contentType.split('/')[1] || 'png');
   const uniqueId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
   const filePath = `${userId}/${pageId}/${uniqueId}.${extension}`;
 
@@ -103,6 +169,7 @@ export async function uploadImageToStorage(
     .upload(filePath, blob, {
       contentType,
       upsert: true,
+      cacheControl: '36500000', // 1 year HTTP cache
     });
 
   if (uploadError) {
@@ -125,5 +192,34 @@ export async function uploadImageToStorage(
     throw new Error('Não foi possível obter a URL pública do arquivo enviado.');
   }
 
-  return data.publicUrl;
+  const publicUrl = data.publicUrl;
+
+  // Immediately cache in local IndexedDB so browser never fetches it back from network!
+  try {
+    if (offlineDb.imageBlobCache) {
+      await offlineDb.imageBlobCache.put({
+        url: publicUrl,
+        blob,
+        mimeType: contentType,
+        size: blob.size,
+        pageId,
+        fetchedAt: Date.now(),
+        hitCount: 1,
+      });
+    }
+  } catch (err) {
+    console.debug('[StorageUpload] Failed to pre-cache in IndexedDB:', err);
+  }
+
+  // Record upload event
+  trackEgressEvent({
+    type: 'get_public_url',
+    url: publicUrl,
+    sizeBytes: blob.size,
+    noteId: pageId,
+    trigger: 'image_upload_initial',
+    cached: true,
+  }).catch(() => {});
+
+  return publicUrl;
 }

@@ -46,6 +46,8 @@ interface AuthState {
 
 const initialCachedUser = getInitialCachedUser();
 
+let isAuthListenerRegistered = false;
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: initialCachedUser,
   session: null,
@@ -83,14 +85,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         }
         
         const currentUser = get().user;
-        // Preserve stable reference if user is already the same to prevent unneeded re-render cascades
         if (!currentUser || currentUser.id !== session.user.id || currentUser.email !== session.user.email) {
           set({ user: session.user, session });
-        } else if (get().session !== session) {
+        } else {
+          // Keep existing user reference to avoid re-render cascades
           set({ session });
         }
       } else {
-        // If no active session found and not guest, clean cache
+        // If no active session found and not guest, keep cached user if present to prevent kick-out
         if (!isGuest && !get().user) {
           localStorage.removeItem(AUTH_USER_CACHE_KEY);
           set({ user: null, session: null });
@@ -98,7 +100,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     } catch (error) {
       console.error('Error initializing auth:', error);
-      // If we have cached user, keep it in offline fallback
       if (!get().user) {
         set({ user: null, session: null });
       }
@@ -106,36 +107,42 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ loading: false, initialized: true });
     }
     
-    // Setup auth state change listener (singleton)
-    supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT') {
-        localStorage.removeItem(GUEST_STORAGE_KEY);
-        localStorage.removeItem(AUTH_USER_CACHE_KEY);
-        set({ user: null, session: null });
-        return;
-      }
+    // Register singleton auth listener
+    if (!isAuthListenerRegistered) {
+      isAuthListenerRegistered = true;
+      supabase.auth.onAuthStateChange((event, session) => {
+        console.debug(`[AuthStore] Event: ${event} | User: ${session?.user?.email || 'None'}`);
 
-      if (session?.user) {
-        localStorage.removeItem(GUEST_STORAGE_KEY);
-        try {
-          localStorage.setItem(AUTH_USER_CACHE_KEY, JSON.stringify(session.user));
-        } catch {
-          // ignore
+        if (event === 'SIGNED_OUT') {
+          localStorage.removeItem(GUEST_STORAGE_KEY);
+          localStorage.removeItem(AUTH_USER_CACHE_KEY);
+          set({ user: null, session: null });
+          return;
         }
 
-        const currentUser = get().user;
-        // CRITICAL: Preserve stable object reference if user identity is identical!
-        // This prevents downstream effect triggers (fetchNotes, fetchLinks, NoteEditor unmounts) on TOKEN_REFRESHED
-        if (!currentUser || currentUser.id !== session.user.id || currentUser.email !== session.user.email) {
-          set({ 
-            user: session.user,
-            session
-          });
-        } else if (get().session !== session) {
-          set({ session });
+        if (session?.user) {
+          localStorage.removeItem(GUEST_STORAGE_KEY);
+          try {
+            localStorage.setItem(AUTH_USER_CACHE_KEY, JSON.stringify(session.user));
+          } catch {
+            // ignore
+          }
+
+          const currentUser = get().user;
+          // Only update user state if the user ID or email actually changed!
+          // TOKEN_REFRESHED should NOT cause user re-render
+          if (!currentUser || currentUser.id !== session.user.id || currentUser.email !== session.user.email) {
+            console.log(`[AuthStore Audit] User reference updated for new identity: ${session.user.email}`);
+            set({ 
+              user: session.user,
+              session
+            });
+          } else {
+            console.log(`[AuthStore Audit] ${event}: User identity unchanged (${currentUser.email}). Preserving stable user object reference.`);
+          }
         }
-      }
-    });
+      });
+    }
   },
   
   signInAsGuest: () => {

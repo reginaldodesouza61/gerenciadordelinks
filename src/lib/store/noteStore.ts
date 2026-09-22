@@ -6,9 +6,13 @@ import { decryptNoteContent, sanitizeAndEncryptNoteContent } from '@/lib/encrypt
 import { offlineDb } from '@/lib/db/offlineDb';
 import { validateAndSanitizeBlocks } from '@/lib/validation/blockSchema';
 import { auditAndRepairSyncQueue } from '@/lib/storage/syncAudit';
+import { trackEgressEvent } from '@/lib/storage/egressTracker';
 import { useAuthStore } from './authStore';
 
 let isSyncingQueue = false;
+const lastFetchTimestampMap = new Map<string, number>();
+const activeFetchPromiseMap = new Map<string, Promise<void>>();
+const FETCH_THROTTLE_MS = 10000; // 10 seconds throttle per user
 
 const TRASH_STORAGE_KEY = 'meuhub_deleted_notes_vault';
 const ACTIVE_PAGE_STORAGE_KEY = 'meuhub_active_page_id';
@@ -843,8 +847,33 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
   fetchNotes: async (userId?: string) => {
     const targetUserId = userId || useAuthStore.getState().user?.id || DEFAULT_USER_ID;
-    
-    // Instantly load specific user cached pages/sections/relations from localStorage & Dexie
+    const now = Date.now();
+
+    // 1. If an active fetch request for this user is already in flight, reuse it!
+    if (activeFetchPromiseMap.has(targetUserId)) {
+      return activeFetchPromiseMap.get(targetUserId)!;
+    }
+
+    // 2. Throttle repeated requests within FETCH_THROTTLE_MS if state already loaded
+    const lastFetch = lastFetchTimestampMap.get(targetUserId) || 0;
+    if (now - lastFetch < FETCH_THROTTLE_MS && get().pages.length > 0) {
+      trackEgressEvent({
+        type: 'fetch_notes',
+        sizeBytes: 0,
+        trigger: 'fetch_notes_throttled_cache',
+        cached: true,
+      }).catch(() => {});
+      return;
+    }
+
+    const fetchPromise = (async () => {
+      lastFetchTimestampMap.set(targetUserId, Date.now());
+      trackEgressEvent({
+        type: 'fetch_notes',
+        sizeBytes: 1500, // estimated query payload
+        trigger: 'fetch_notes_remote_query',
+        cached: false,
+      }).catch(() => {});
     const sectionsKey = getUserCacheKey(targetUserId, 'note_sections');
     const pagesKey = getUserCacheKey(targetUserId, 'note_pages');
     const relationsKey = getUserCacheKey(targetUserId, 'note_relations');
@@ -910,15 +939,17 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     if (initialPageId) saveActivePageId(initialPageId, targetUserId);
     if (initialSecId) saveActiveSectionId(initialSecId, targetUserId);
 
-    // Update state immediately with cached/local data so user sees their notes instantly without blank screen
-    set({
-      sections: immediateSections,
-      pages: immediatePages,
-      relations: cachedRelations,
-      activePageId: initialPageId,
-      activeSectionId: initialSecId,
-      isLoading: immediatePages.length === 0 && immediateSections.length === 0
-    });
+    // Update state immediately with cached/local data if in-memory store is empty
+    if (get().pages.length === 0) {
+      set({
+        sections: immediateSections,
+        pages: immediatePages,
+        relations: cachedRelations,
+        activePageId: initialPageId,
+        activeSectionId: initialSecId,
+        isLoading: immediatePages.length === 0 && immediateSections.length === 0
+      });
+    }
 
     try {
       // Use a timeout race so database queries never hang indefinitely
@@ -1153,13 +1184,43 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         setCached(pagesKey, sortedPages);
         if (relRes?.data) setCached(relationsKey, relRes.data);
 
+        const currentPages = get().pages;
+        const currentSections = get().sections;
+
+        // Check if pages or sections actually changed content-wise
+        const isPagesContentIdentical = currentPages.length === sortedPages.length &&
+          currentPages.every((cp, i) => {
+            const sp = sortedPages[i];
+            return cp.id === sp.id && 
+                   cp.titulo === sp.titulo && 
+                   cp.conteudo === sp.conteudo && 
+                   cp.section_id === sp.section_id &&
+                   cp.parent_id === sp.parent_id;
+          });
+
+        const isSectionsContentIdentical = currentSections.length === finalSections.length &&
+          currentSections.every((cs, i) => {
+            const fs = finalSections[i];
+            return cs.id === fs.id && cs.nome === fs.nome && cs.ordem === fs.ordem;
+          });
+
+        // Preserve active selection if valid
+        const preservedPageId = (get().activePageId && sortedPages.some(p => p.id === get().activePageId))
+          ? get().activePageId
+          : finalPageId;
+        const preservedSectionId = (get().activeSectionId && finalSections.some(s => s.id === get().activeSectionId))
+          ? get().activeSectionId
+          : finalSectionId;
+
+        console.log(`[NoteStore Audit] Reconciliation check: Pages identical? ${isPagesContentIdentical} | Sections identical? ${isSectionsContentIdentical}`);
+
         set({
-          sections: finalSections,
-          pages: sortedPages,
+          sections: isSectionsContentIdentical ? currentSections : finalSections,
+          pages: isPagesContentIdentical ? currentPages : sortedPages,
           relations: relRes?.data || get().relations,
           deletedItems: getStoredTrash(),
-          activePageId: finalPageId,
-          activeSectionId: finalSectionId,
+          activePageId: preservedPageId,
+          activeSectionId: preservedSectionId,
           pageSyncStatuses: initialSyncStatuses,
           isLoading: false
         });
@@ -1170,7 +1231,12 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       console.warn('Fetch notes network issue:', error);
     } finally {
       set({ isLoading: false });
+      activeFetchPromiseMap.delete(targetUserId);
     }
+    })();
+
+    activeFetchPromiseMap.set(targetUserId, fetchPromise);
+    return fetchPromise;
   },
 
   addSection: async (nome, userId) => {

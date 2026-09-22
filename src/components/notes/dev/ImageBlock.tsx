@@ -1,6 +1,7 @@
-import React, { useState, memo } from 'react';
+import React, { useState, useEffect, memo } from 'react';
 import { Rnd } from 'react-rnd';
 import { CanvasBlock } from '@/types/notes';
+import { getCachedImageUrl } from '@/lib/storage/imageBlobCache';
 import { 
   GripHorizontal, Trash2, Maximize2, Download, Copy, 
   Camera, Check, ZoomIn, Type, MessageSquare, 
@@ -49,9 +50,25 @@ export const ImageBlock = memo(function ImageBlock({
   const [showNotesPanel, setShowNotesPanel] = useState(!!block.imageNotes);
 
   const title = block.imageTitle || 'Captura de Tela';
-  const imageUrl = block.imageUrl || '';
+  const rawImageUrl = block.imageUrl || '';
+  const [displayUrl, setDisplayUrl] = useState(rawImageUrl);
+  const imageUrl = displayUrl || rawImageUrl;
   const dateStr = block.capturedAt || '';
   const notes = block.imageNotes || '';
+
+  useEffect(() => {
+    let active = true;
+    if (rawImageUrl) {
+      getCachedImageUrl(rawImageUrl, block.id, 'image_block_render').then((url) => {
+        if (active) setDisplayUrl(url);
+      });
+    } else {
+      setDisplayUrl('');
+    }
+    return () => {
+      active = false;
+    };
+  }, [rawImageUrl, block.id]);
 
   const handleCopyImage = async (e: React.MouseEvent) => {
     e.stopPropagation();

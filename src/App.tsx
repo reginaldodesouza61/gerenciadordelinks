@@ -27,7 +27,9 @@ interface ProtectedRouteProps {
 }
 
 function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { user, initialized } = useAuthStore();
+  console.count('[Render] ProtectedRoute');
+  const user = useAuthStore((state) => state.user);
+  const initialized = useAuthStore((state) => state.initialized);
   
   if (!initialized) {
     // Auth is still initializing, show loading
@@ -48,7 +50,9 @@ function ProtectedRoute({ children }: ProtectedRouteProps) {
 }
 
 const App = () => {
-  const { initialize, initialized } = useAuthStore();
+  console.count('[Render] App');
+  const initialize = useAuthStore((state) => state.initialize);
+  const initialized = useAuthStore((state) => state.initialized);
   const [isLoading, setIsLoading] = useState(!initialized);
   
   // Enterprise lifecycle & background sync manager

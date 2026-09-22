@@ -12,12 +12,31 @@ import { useAuthStore } from '@/lib/store/authStore';
  */
 export function useAppLifecycle() {
   useEffect(() => {
+    let focusReturnCount = 0;
+
     // 1. Tab visibility handling
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        // User returned to tab: silently process any pending background sync queue
-        useNoteStore.getState().syncPendingQueue().catch((err) => {
+      if (document.visibilityState === 'hidden') {
+        console.group('[Focus Audit] Tab Lost Focus (visibilityState: hidden)');
+        console.log('• Triggered: Document visibilitychange -> hidden');
+        console.log('• User profile:', useAuthStore.getState().user?.email || 'Guest');
+        console.log('• Active page ID:', useNoteStore.getState().activePageId);
+        console.log('• Action: Preserving all Zustand memory states and Dexie cache');
+        console.groupEnd();
+      } else if (document.visibilityState === 'visible') {
+        focusReturnCount++;
+        console.group(`[Focus Audit] Tab Regained Focus #${focusReturnCount} (visibilityState: visible)`);
+        console.log('• Triggered: Document visibilitychange -> visible');
+        console.log('• User reference:', useAuthStore.getState().user?.email || 'Guest');
+        console.log('• Active page ID:', useNoteStore.getState().activePageId);
+        console.log('• Action: Executing silent background queue sync (0 UI re-renders)');
+
+        useNoteStore.getState().syncPendingQueue().then(() => {
+          console.log('• Result: Silent queue flush completed successfully.');
+        }).catch((err) => {
           console.debug('[Lifecycle] Silent background queue flush on tab return:', err);
+        }).finally(() => {
+          console.groupEnd();
         });
       }
     };

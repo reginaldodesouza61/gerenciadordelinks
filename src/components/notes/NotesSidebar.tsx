@@ -21,20 +21,30 @@ interface NotesSidebarProps {
 }
 
 export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
-  const { user } = useAuthStore();
-  const { 
-    sections, pages, 
-    activeSectionId, activePageId, 
-    deletedItems,
-    setActiveSectionId, setActivePageId, 
-    addSection, updateSection, deleteSection, 
-    reorderSections, moveSection,
-    addPage, updatePage, deletePage,
-    reorderPages, movePage,
-    restoreLastDeleted,
-    pageSyncStatuses,
-    resolveConflict
-  } = useNoteStore();
+  console.count('[Render] NotesSidebar');
+  const user = useAuthStore((state) => state.user);
+
+  const sections = useNoteStore((state) => state.sections);
+  const pages = useNoteStore((state) => state.pages);
+  const activeSectionId = useNoteStore((state) => state.activeSectionId);
+  const activePageId = useNoteStore((state) => state.activePageId);
+  const deletedItems = useNoteStore((state) => state.deletedItems);
+  const pageSyncStatuses = useNoteStore((state) => state.pageSyncStatuses);
+
+  const setActiveSectionId = useNoteStore((state) => state.setActiveSectionId);
+  const setActivePageId = useNoteStore((state) => state.setActivePageId);
+  const addSection = useNoteStore((state) => state.addSection);
+  const updateSection = useNoteStore((state) => state.updateSection);
+  const deleteSection = useNoteStore((state) => state.deleteSection);
+  const reorderSections = useNoteStore((state) => state.reorderSections);
+  const moveSection = useNoteStore((state) => state.moveSection);
+  const addPage = useNoteStore((state) => state.addPage);
+  const updatePage = useNoteStore((state) => state.updatePage);
+  const deletePage = useNoteStore((state) => state.deletePage);
+  const reorderPages = useNoteStore((state) => state.reorderPages);
+  const movePage = useNoteStore((state) => state.movePage);
+  const restoreLastDeleted = useNoteStore((state) => state.restoreLastDeleted);
+  const resolveConflict = useNoteStore((state) => state.resolveConflict);
 
   const [expandedSections, setExpandedSections] = useState<string[]>(() => {
     try {
