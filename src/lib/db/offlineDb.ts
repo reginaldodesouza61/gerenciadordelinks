@@ -47,6 +47,13 @@ export interface EgressLogItem {
   cached: boolean;
 }
 
+export interface TombstoneItem {
+  id: string;
+  type: 'page' | 'section';
+  userId?: string;
+  deletedAt: number;
+}
+
 class OfflineDatabase extends Dexie {
   pages!: Table<LocalNotePage, string>;
   sections!: Table<NoteSection, string>;
@@ -54,6 +61,7 @@ class OfflineDatabase extends Dexie {
   revisions!: Table<PageRevision, number>;
   imageBlobCache!: Table<ImageBlobCacheItem, string>;
   egressLogs!: Table<EgressLogItem, number>;
+  tombstones!: Table<TombstoneItem, string>;
 
   constructor() {
     super('AtlasOfflineDB');
@@ -75,6 +83,15 @@ class OfflineDatabase extends Dexie {
       revisions: '++id, [pageId+version], timestamp',
       imageBlobCache: 'url, pageId, size, fetchedAt',
       egressLogs: '++id, timestamp, type, noteId, cached',
+    });
+    this.version(4).stores({
+      pages: 'id, section_id, user_id, syncStatus',
+      sections: 'id, user_id, nome',
+      syncQueue: '++id, pageId, action, timestamp',
+      revisions: '++id, [pageId+version], timestamp',
+      imageBlobCache: 'url, pageId, size, fetchedAt',
+      egressLogs: '++id, timestamp, type, noteId, cached',
+      tombstones: 'id, type, userId, deletedAt',
     });
   }
 }

@@ -906,21 +906,31 @@ export const useNoteStore = create<NoteState>((set, get) => ({
             const { error, count } = await supabase.from('note_pages').update(updatePayload).eq('id', cleanPageId);
             dbError = error;
 
-            // If updated 0 rows and no error, the page may have been created offline or missed insert. Upsert it!
-            if (!error && count === 0 && localPage) {
-              const upsertData = {
-                id: cleanPageId,
-                titulo: localPage.titulo,
-                conteudo: updatePayload.conteudo || (localPage.conteudo ? await sanitizeAndEncryptNoteContent(localPage.conteudo) : null),
-                section_id: sanitizeUuid(localPage.section_id),
-                parent_id: sanitizeUuidOrNull(localPage.parent_id),
-                user_id: activeUserId || localPage.user_id,
-                created_at: localPage.created_at || new Date().toISOString()
-              };
-              const { error: upsertErr } = await supabase.from('note_pages').upsert([upsertData]);
-              dbError = upsertErr;
+            // If updated 0 rows and no error, the page was removed from Supabase on another device.
+            // Do NOT resurrect it! Purge it from local Dexie and drop sync item.
+            if (!error && count === 0) {
+              if (id) await offlineDb.syncQueue.delete(id);
+              if (localPage) await offlineDb.pages.delete(localPage.id);
+              continue;
             }
           } else if (action === 'create') {
+            // Check if page was deleted locally before it could be synced
+            let isTombstoned = false;
+            try {
+              if (offlineDb.tombstones) {
+                const tomb = await offlineDb.tombstones.get(cleanPageId);
+                if (tomb) isTombstoned = true;
+              }
+            } catch (tombErr) {
+              console.debug('Failed to check tombstone in sync queue:', tombErr);
+            }
+
+            if (isTombstoned) {
+              if (id) await offlineDb.syncQueue.delete(id);
+              if (localPage) await offlineDb.pages.delete(localPage.id);
+              continue;
+            }
+
             if (activeUserId) {
               updatePayload.user_id = activeUserId;
             }
@@ -1047,6 +1057,24 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           });
         }
       }
+    }
+
+    // Load Dexie tombstones into trashed sets
+    try {
+      if (offlineDb.tombstones) {
+        const tombstones = await offlineDb.tombstones.toArray();
+        for (const t of tombstones) {
+          if (t.type === 'section') {
+            trashedSectionIds.add(t.id);
+            trashedSectionIds.add(sanitizeUuid(t.id));
+          } else {
+            trashedPageIds.add(t.id);
+            trashedPageIds.add(sanitizeUuid(t.id));
+          }
+        }
+      }
+    } catch (tombErr) {
+      console.debug('Failed to read Dexie tombstones:', tombErr);
     }
 
     const rawCachedSections = getCached<NoteSection[]>(sectionsKey, targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : []);
@@ -1291,32 +1319,35 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           }
         }
 
-        // Second, preserve any local Dexie pages that aren't on remote yet (e.g. created offline / pending sync)
+        // Second, preserve ONLY genuinely offline-created pages (action === 'create' in syncQueue)
+        const createdOfflinePageIds = new Set(
+          pendingQueue
+            .filter(item => item.action === 'create')
+            .map(item => item.pageId)
+            .concat(pendingQueue.filter(item => item.action === 'create').map(item => sanitizeUuid(item.pageId)))
+        );
+
         for (const localPage of localDexiePages) {
           if (localPage.user_id !== targetUserId && targetUserId !== DEFAULT_USER_ID) continue;
-          if (trashedPageIds.has(localPage.id) || trashedPageIds.has(sanitizeUuid(localPage.id)) || trashedSectionIds.has(localPage.section_id)) continue;
-          if (deletedPageIds.has(localPage.id)) continue;
-          if (!mergedPagesMap.has(localPage.id)) {
-            mergedPagesMap.set(localPage.id, localPage);
-            initialSyncStatuses[localPage.id] = pendingPageIds.has(localPage.id) ? 'pending' : (localPage.syncStatus || 'synced');
+          if (trashedPageIds.has(localPage.id) || trashedPageIds.has(sanitizeUuid(localPage.id)) || trashedSectionIds.has(localPage.section_id) || trashedSectionIds.has(sanitizeUuid(localPage.section_id))) {
+            await offlineDb.pages.delete(localPage.id);
+            continue;
           }
-        }
+          if (deletedPageIds.has(localPage.id) || deletedPageIds.has(sanitizeUuid(localPage.id))) {
+            await offlineDb.pages.delete(localPage.id);
+            continue;
+          }
 
-        // Third, preserve any local cached pages
-        for (const cachedPage of localCachedPages) {
-          if (cachedPage.user_id !== targetUserId && targetUserId !== DEFAULT_USER_ID) continue;
-          if (trashedPageIds.has(cachedPage.id) || trashedPageIds.has(sanitizeUuid(cachedPage.id)) || trashedSectionIds.has(cachedPage.section_id)) continue;
-          if (deletedPageIds.has(cachedPage.id)) continue;
-          if (!mergedPagesMap.has(cachedPage.id)) {
-            mergedPagesMap.set(cachedPage.id, cachedPage);
-            await offlineDb.pages.put({
-              ...cachedPage,
-              localVersion: 1,
-              remoteVersion: 0,
-              syncStatus: 'pending',
-              lastUpdatedAt: Date.now()
-            });
-            initialSyncStatuses[cachedPage.id] = 'pending';
+          if (!mergedPagesMap.has(localPage.id)) {
+            const isGenuinelyCreatedOffline = createdOfflinePageIds.has(localPage.id) || createdOfflinePageIds.has(sanitizeUuid(localPage.id));
+            if (isGenuinelyCreatedOffline) {
+              mergedPagesMap.set(localPage.id, localPage);
+              initialSyncStatuses[localPage.id] = 'pending';
+            } else if (rawPagesData.length > 0) {
+              // The page was synced previously but no longer exists on Supabase => DELETED REMOTELY!
+              // Purge it from local Dexie and do NOT resurrect!
+              await offlineDb.pages.delete(localPage.id);
+            }
           }
         }
 
@@ -1612,14 +1643,30 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       activePageId: isCurrentActivePage ? (remainingPages.length > 0 ? remainingPages[0].id : null) : st.activePageId
     }));
 
-    // IndexedDB removal
+    // IndexedDB removal & Tombstone registration
     try {
+      if (offlineDb.tombstones) {
+        await offlineDb.tombstones.put({
+          id: cleanId,
+          type: 'section',
+          userId: effectiveUserId,
+          deletedAt: Date.now()
+        });
+      }
       if (offlineDb.sections) {
         await offlineDb.sections.delete(cleanId);
         if (id !== cleanId) await offlineDb.sections.delete(id);
       }
       for (const p of pagesToDelete) {
         const pId = sanitizeUuid(p.id);
+        if (offlineDb.tombstones) {
+          await offlineDb.tombstones.put({
+            id: pId,
+            type: 'page',
+            userId: effectiveUserId,
+            deletedAt: Date.now()
+          });
+        }
         await offlineDb.pages.delete(p.id);
         if (pId !== p.id) await offlineDb.pages.delete(pId);
         await offlineDb.syncQueue.where('pageId').equals(p.id).delete();
@@ -2017,6 +2064,14 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     try {
       for (const p of allPagesToDelete) {
         const cId = sanitizeUuid(p.id);
+        if (offlineDb.tombstones) {
+          await offlineDb.tombstones.put({
+            id: cId,
+            type: 'page',
+            userId: effectiveUserId,
+            deletedAt: Date.now()
+          });
+        }
         await offlineDb.pages.delete(p.id);
         if (cId !== p.id) await offlineDb.pages.delete(cId);
         await offlineDb.syncQueue.where('pageId').equals(p.id).delete();
@@ -2129,7 +2184,15 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         if (offlineDb.sections) {
           await offlineDb.sections.put(section);
         }
+        if (offlineDb.tombstones) {
+          await offlineDb.tombstones.delete(sanitizeUuid(section.id));
+          await offlineDb.tombstones.delete(section.id);
+        }
         for (const p of pages) {
+          if (offlineDb.tombstones) {
+            await offlineDb.tombstones.delete(sanitizeUuid(p.id));
+            await offlineDb.tombstones.delete(p.id);
+          }
           await offlineDb.pages.put({
             ...p,
             localVersion: 1,
@@ -2194,6 +2257,10 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         setCached(getUserCacheKey(page.user_id || DEFAULT_USER_ID, 'note_pages'), updatedPages);
 
         for (const p of normalizedPages) {
+          if (offlineDb.tombstones) {
+            await offlineDb.tombstones.delete(sanitizeUuid(p.id));
+            await offlineDb.tombstones.delete(p.id);
+          }
           await offlineDb.pages.put({
             ...p,
             localVersion: 1,
