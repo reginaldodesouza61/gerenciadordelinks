@@ -1639,10 +1639,60 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     set({ sections: newSectionsWithOrder });
   },
 
-  addPage: async (titulo, sectionId, userId, parentId = null) => {
-    const fallbackUserId = userId || DEFAULT_USER_ID;
-    const cleanSectionId = sanitizeUuid(sectionId);
-    const cleanParentId = sanitizeUuidOrNull(parentId);
+  addPage: async (
+    tituloOrSectionId?: string,
+    sectionIdOrParentId?: string | null,
+    userIdOrTitle?: string,
+    parentIdOrUserId?: string | null
+  ) => {
+    const state = get();
+    const currentUserId = useAuthStore.getState().user?.id || DEFAULT_USER_ID;
+
+    let realTitle = 'Sem título';
+    let realSectionId = state.activeSectionId || (state.sections.length > 0 ? state.sections[0].id : DEFAULT_SECTION_ID);
+    let realUserId = currentUserId;
+    let realParentId: string | null = null;
+
+    // Detect parameter pattern:
+    // Pattern A: addPage('Sem título', sectionId, userId, parentId)
+    // Pattern B: addPage(sectionId, parentId, 'Sem título', userId)
+    // Pattern C: addPage(sectionId)
+    // Pattern D: addPage()
+
+    const allSections = state.sections;
+    const isFirstArgSection = tituloOrSectionId && allSections.some(s => s.id === tituloOrSectionId || s.id === sanitizeUuid(tituloOrSectionId));
+    const isSecondArgSection = sectionIdOrParentId && allSections.some(s => s.id === sectionIdOrParentId || s.id === sanitizeUuid(sectionIdOrParentId));
+
+    if (isFirstArgSection) {
+      realSectionId = sanitizeUuid(tituloOrSectionId!);
+      if (typeof userIdOrTitle === 'string' && userIdOrTitle && !isValidUuid(userIdOrTitle)) {
+        realTitle = userIdOrTitle;
+      }
+      if (sectionIdOrParentId && typeof sectionIdOrParentId === 'string' && !isSecondArgSection) {
+        realParentId = sanitizeUuidOrNull(sectionIdOrParentId);
+      }
+      if (parentIdOrUserId && isValidUuid(parentIdOrUserId)) {
+        realUserId = parentIdOrUserId;
+      }
+    } else if (isSecondArgSection) {
+      if (tituloOrSectionId) realTitle = tituloOrSectionId;
+      realSectionId = sanitizeUuid(sectionIdOrParentId!);
+      if (userIdOrTitle && isValidUuid(userIdOrTitle)) {
+        realUserId = userIdOrTitle;
+      }
+      if (parentIdOrUserId) {
+        realParentId = sanitizeUuidOrNull(parentIdOrUserId);
+      }
+    } else {
+      // Default standard order: (title, sectionId, userId, parentId)
+      if (tituloOrSectionId) realTitle = tituloOrSectionId;
+      if (sectionIdOrParentId) realSectionId = sanitizeUuid(sectionIdOrParentId);
+      if (userIdOrTitle) realUserId = userIdOrTitle;
+      if (parentIdOrUserId) realParentId = sanitizeUuidOrNull(parentIdOrUserId);
+    }
+
+    const cleanSectionId = sanitizeUuid(realSectionId);
+    const cleanParentId = sanitizeUuidOrNull(realParentId);
     const newPageId = generateUuid();
 
     const initialContent = JSON.stringify([
@@ -1659,21 +1709,23 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
     const newPage: NotePage = {
       id: newPageId,
-      titulo,
+      titulo: realTitle,
       conteudo: initialContent,
       section_id: cleanSectionId,
       parent_id: cleanParentId,
-      user_id: fallbackUserId,
+      user_id: realUserId,
       created_at: new Date().toISOString()
     };
 
-    saveActivePageId(newPage.id);
-    saveActiveSectionId(cleanSectionId);
+    saveActivePageId(newPage.id, realUserId);
+    saveActiveSectionId(cleanSectionId, realUserId);
 
     const currentPages = get().pages;
     const updatedPages = [...currentPages, newPage];
-    savePageOrder(updatedPages.map(p => p.id));
-    setCached(getUserCacheKey(fallbackUserId, 'note_pages'), updatedPages);
+    savePageOrder(updatedPages.map(p => p.id), realUserId);
+    setCached(getUserCacheKey(realUserId, 'note_pages'), updatedPages);
+    setCached(getUserCacheKey(currentUserId, 'note_pages'), updatedPages);
+    setCached(getUserCacheKey(DEFAULT_USER_ID, 'note_pages'), updatedPages);
 
     set({ pages: updatedPages, activePageId: newPage.id, activeSectionId: cleanSectionId });
     toast.success('Página criada!');
@@ -1701,18 +1753,18 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         action: 'create',
         payload: {
           id: newPage.id,
-          titulo,
+          titulo: realTitle,
           section_id: cleanSectionId,
           parent_id: cleanParentId,
-          user_id: fallbackUserId,
+          user_id: realUserId,
           conteudo: initialContent
         },
         timestamp: Date.now(),
         attempts: 0
       });
 
-      set((state) => ({
-        pageSyncStatuses: { ...state.pageSyncStatuses, [newPage.id]: 'pending' }
+      set((st) => ({
+        pageSyncStatuses: { ...st.pageSyncStatuses, [newPage.id]: 'pending' }
       }));
 
       get().syncPendingQueue().catch(console.error);

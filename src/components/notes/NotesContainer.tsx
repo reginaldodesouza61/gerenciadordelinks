@@ -292,7 +292,7 @@ export function NotesContainer() {
                 <div className="flex flex-wrap items-center justify-center gap-2">
                   {activeSection && (
                     <Button
-                      onClick={() => addPage(activeSection.id, null, 'Sem título', user?.id)}
+                      onClick={() => addPage('Sem título', activeSection.id, user?.id, null)}
                       className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-xs"
                     >
                       <Plus className="h-4 w-4" />

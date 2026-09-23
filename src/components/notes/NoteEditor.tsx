@@ -2086,8 +2086,11 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
 
     return () => {
       // Force immediate flush of any unsaved changes before page switches or unmounts
-      if (hasUnsavedChangesRef.current) {
-        const latestJson = JSON.stringify(blocksRef.current);
+      const currentBlocks = blocksRef.current;
+      const latestJson = JSON.stringify(currentBlocks);
+      const isDirty = hasUnsavedChangesRef.current || (currentBlocks.length > 0 && latestJson !== lastSavedContentRef.current);
+      
+      if (isDirty) {
         updatePage(pageId, { conteudo: latestJson }).catch((err) => {
           console.error('Error in unmount save:', err);
         });
