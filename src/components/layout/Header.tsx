@@ -195,11 +195,13 @@ export function Header({ activeTab = 'links', setActiveTab }: HeaderProps) {
               
               {/* User info */}
               {user && (
-                <div className="flex items-center space-x-2 px-3 py-1.5 bg-secondary/50 hover:bg-secondary dark:bg-zinc-800/80 rounded-full border border-border/50 transition-colors max-w-[180px] cursor-default ml-2">
+                <div className="flex items-center space-x-2 px-3 py-1.5 bg-secondary/50 hover:bg-secondary dark:bg-zinc-800/80 rounded-full border border-border/50 transition-colors max-w-[200px] cursor-default ml-2">
                   <div className="h-6 w-6 rounded-full bg-zinc-600 dark:bg-zinc-700 flex items-center justify-center text-[10px] text-white font-bold">
-                    {user.email?.charAt(0).toUpperCase()}
+                    {(user.email || 'A').charAt(0).toUpperCase()}
                   </div>
-                  <span className="text-xs font-medium truncate dark:text-zinc-200">{user.email}</span>
+                  <span className="text-xs font-medium truncate dark:text-zinc-200">
+                    {user.is_anonymous ? 'Convidado (Nuvem)' : (user.email || 'Convidado')}
+                  </span>
                 </div>
               )}
               

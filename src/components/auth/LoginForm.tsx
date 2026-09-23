@@ -19,8 +19,8 @@ export function LoginForm({ onToggleForm }: LoginFormProps) {
     await signIn(email, password);
   };
 
-  const handleGuestAccess = () => {
-    signInAsGuest();
+  const handleGuestAccess = async () => {
+    await signInAsGuest();
     window.location.href = '/';
   };
 

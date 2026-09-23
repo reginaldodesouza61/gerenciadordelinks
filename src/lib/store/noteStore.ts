@@ -540,6 +540,7 @@ interface NoteState {
   pageSyncStatuses: Record<string, 'synced' | 'pending' | 'conflict'>;
   resolveConflict: (pageId: string, resolution: 'local' | 'remote') => Promise<void>;
   syncPendingQueue: () => Promise<void>;
+  migrateLocalNotesToUser: (newUserId: string) => Promise<{ migratedPages: number; migratedSections: number }>;
   getLocalRevisions: (pageId: string) => Promise<unknown[]>;
   restoreRevision: (pageId: string, revisionId: number) => Promise<void>;
   
@@ -708,6 +709,101 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     }
   },
 
+  migrateLocalNotesToUser: async (newUserId: string) => {
+    console.log(`[Migration] Iniciando migração de notas locais do IndexedDB para o usuário autenticado: ${newUserId}`);
+    let migratedPages = 0;
+    let migratedSections = 0;
+
+    try {
+      // 1. Migrar seções locais para o novo UID e garantir presença em note_sections do Supabase
+      let localSections = await offlineDb.sections.toArray();
+      if (localSections.length === 0) {
+        localSections = DEFAULT_SECTIONS.map(s => ({ ...s, user_id: newUserId }));
+      }
+
+      for (const sec of localSections) {
+        const updatedSec = { ...sec, user_id: newUserId };
+        await offlineDb.sections.put(updatedSec);
+        
+        // Upsert na tabela remota note_sections com o JWT da sessão ativa
+        try {
+          const { error: secErr } = await supabase.from('note_sections').upsert([{
+            id: updatedSec.id,
+            nome: updatedSec.nome,
+            user_id: newUserId
+          }]);
+          if (!secErr) migratedSections++;
+        } catch (sErr) {
+          console.debug('[Migration] Erro ao sincronizar seção com Supabase:', sErr);
+        }
+      }
+
+      // 2. Migrar páginas locais para o novo UID e enfileirar para nuvem
+      let localPages = await offlineDb.pages.toArray();
+      if (localPages.length === 0) {
+        localPages = DEFAULT_PAGES.map(p => ({
+          ...p,
+          user_id: newUserId,
+          localVersion: 1,
+          remoteVersion: 0,
+          syncStatus: 'pending' as const,
+          lastUpdatedAt: Date.now()
+        }));
+      }
+
+      const updatedPages: NotePage[] = [];
+      for (const page of localPages) {
+        const cleanPageId = sanitizeUuid(page.id) || page.id;
+        const updatedPage = {
+          ...page,
+          id: cleanPageId,
+          user_id: newUserId,
+          syncStatus: 'pending' as const,
+          lastUpdatedAt: Date.now()
+        };
+        await offlineDb.pages.put(updatedPage);
+        updatedPages.push(updatedPage);
+
+        // Enfileira na syncQueue
+        await offlineDb.syncQueue.put({
+          pageId: cleanPageId,
+          action: 'create',
+          payload: {
+            id: cleanPageId,
+            titulo: updatedPage.titulo,
+            conteudo: updatedPage.conteudo,
+            section_id: sanitizeUuid(updatedPage.section_id),
+            parent_id: sanitizeUuidOrNull(updatedPage.parent_id),
+            user_id: newUserId,
+            created_at: updatedPage.created_at || new Date().toISOString()
+          },
+          timestamp: Date.now(),
+          attempts: 0
+        });
+        migratedPages++;
+      }
+
+      // Atualiza estado em memória e caches locais
+      set({
+        pages: updatedPages,
+        sections: localSections.map(s => ({ ...s, user_id: newUserId }))
+      });
+      setCached(getUserCacheKey(newUserId, 'note_pages'), updatedPages);
+      setCached(getUserCacheKey(newUserId, 'note_sections'), localSections);
+
+      // Dispara envio imediato da fila para o Supabase
+      await get().syncPendingQueue();
+
+      if (migratedPages > 0) {
+        toast.success(`${migratedPages} nota(s) vinculadas ao seu usuário e enviadas para a nuvem!`);
+      }
+      return { migratedPages, migratedSections };
+    } catch (err) {
+      console.error('[Migration] Falha na migração automática para Supabase:', err);
+      return { migratedPages, migratedSections };
+    }
+  },
+
   syncPendingQueue: async () => {
     if (!navigator.onLine) return;
 
@@ -720,6 +816,10 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
       const queue = await offlineDb.syncQueue.toArray();
       if (queue.length === 0) return;
+
+      // Obtém usuário ativo com sessão real no Supabase Auth
+      const { data: { session: activeSession } } = await supabase.auth.getSession();
+      const activeUserId = activeSession?.user?.id;
 
       for (const item of queue) {
         const { id, pageId, action, payload } = item;
@@ -747,6 +847,15 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           delete updatePayload.version;
           updatePayload.id = cleanPageId;
 
+          // Se há usuário autenticado, garante conformidade com RLS
+          if (activeUserId) {
+            updatePayload.user_id = activeUserId;
+            if (localPage && localPage.user_id !== activeUserId) {
+              localPage.user_id = activeUserId;
+              await offlineDb.pages.update(localPage.id, { user_id: activeUserId });
+            }
+          }
+
           if (updatePayload.section_id) {
             updatePayload.section_id = sanitizeUuid(updatePayload.section_id as string);
           }
@@ -756,6 +865,24 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
           if (updatePayload.conteudo) {
             updatePayload.conteudo = await sanitizeAndEncryptNoteContent(updatePayload.conteudo);
+          }
+
+          // Garantir integridade referencial: seção pai DEVE existir no Supabase antes de inserir nota
+          const targetSectionId = (updatePayload.section_id as string) || localPage?.section_id;
+          if (targetSectionId && activeUserId) {
+            try {
+              const localSec = (await offlineDb.sections.get(targetSectionId)) ||
+                get().sections.find(s => s.id === targetSectionId);
+              if (localSec) {
+                await supabase.from('note_sections').upsert([{
+                  id: targetSectionId,
+                  nome: localSec.nome || 'Geral',
+                  user_id: activeUserId
+                }]);
+              }
+            } catch (secErr) {
+              console.debug('[Sync] Verificação de seção pai:', secErr);
+            }
           }
 
           let dbError = null;
@@ -771,13 +898,16 @@ export const useNoteStore = create<NoteState>((set, get) => ({
                 conteudo: updatePayload.conteudo || (localPage.conteudo ? await sanitizeAndEncryptNoteContent(localPage.conteudo) : null),
                 section_id: sanitizeUuid(localPage.section_id),
                 parent_id: sanitizeUuidOrNull(localPage.parent_id),
-                user_id: localPage.user_id,
+                user_id: activeUserId || localPage.user_id,
                 created_at: localPage.created_at || new Date().toISOString()
               };
               const { error: upsertErr } = await supabase.from('note_pages').upsert([upsertData]);
               dbError = upsertErr;
             }
           } else if (action === 'create') {
+            if (activeUserId) {
+              updatePayload.user_id = activeUserId;
+            }
             const { error } = await supabase.from('note_pages').upsert([updatePayload]);
             dbError = error;
           } else if (action === 'delete') {

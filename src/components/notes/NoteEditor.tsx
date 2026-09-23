@@ -4,6 +4,13 @@ import { useAuthStore } from '@/lib/store/authStore';
 import { supabase } from '@/lib/supabase';
 import { uploadImageToStorage, isStorageBucketAvailable } from '@/lib/storage/imageStorage';
 import { cleanupOrphanedAssets, deleteAsset } from '@/lib/storage/storageCleanup';
+import { 
+  auditAllWorkspaceNotes, 
+  migrateAllWorkspaceNotes, 
+  WorkspaceImageAuditResult, 
+  BatchMigrationProgress, 
+  BatchMigrationResult 
+} from '@/lib/storage/imageMigration';
 import { decryptNoteContent, isFieldEncrypted } from '@/lib/encryption';
 import { CanvasBlock } from '@/types/notes';
 import { Link } from '@/types/supabase';
@@ -16,8 +23,10 @@ import {
   Code2, ShieldCheck, Link as LinkIcon, Type, Terminal, KeyRound, Sparkles, Wand2,
   Camera, Image as ImageIcon, Upload, Download, Copy, ChevronDown, Undo2, Redo2, PanelLeftOpen,
   Shapes, Pencil, Search, Network, Workflow, Maximize2, Minimize2, ChevronUp, PlusCircle, Layers, Clock, Globe, ExternalLink,
-  Check, RefreshCw, AlertCircle, Cloud, CloudOff, Database, History, AlertTriangle
+  Check, RefreshCw, AlertCircle, Cloud, CloudOff, Database, History, AlertTriangle,
+  HardDrive, FileText, CheckCircle2
 } from 'lucide-react';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { 
@@ -1409,6 +1418,14 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
   const [isCleaningOrphans, setIsCleaningOrphans] = useState(false);
   const [orphanedList, setOrphanedList] = useState<string[]>([]);
 
+  // Workspace-wide Audit and Batch Migration State
+  const [auditScope, setAuditScope] = useState<'current' | 'workspace'>('workspace');
+  const [workspaceAudit, setWorkspaceAudit] = useState<WorkspaceImageAuditResult | null>(null);
+  const [isScanningWorkspace, setIsScanningWorkspace] = useState(false);
+  const [isBatchMigrating, setIsBatchMigrating] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<BatchMigrationProgress | null>(null);
+  const [batchResult, setBatchResult] = useState<BatchMigrationResult | null>(null);
+
   const canvasRef = useRef<HTMLDivElement>(null);
   const viewportContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1515,6 +1532,19 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     }
   }, [pageId, restoreRevision]);
 
+  const handleScanWorkspace = useCallback(async () => {
+    setIsScanningWorkspace(true);
+    try {
+      const allPages = useNoteStore.getState().pages;
+      const res = await auditAllWorkspaceNotes(allPages);
+      setWorkspaceAudit(res);
+    } catch (e) {
+      console.error('Failed to audit workspace:', e);
+    } finally {
+      setIsScanningWorkspace(false);
+    }
+  }, []);
+
   const handleScanBase64Images = useCallback(() => {
     const detected: { id: string; blockId: string; blockType: string; base64DataUrl: string }[] = [];
     
@@ -1547,7 +1577,53 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     isStorageBucketAvailable(true).then((available) => {
       setIsBucketConfigured(available);
     });
-  }, [blocks]);
+    handleScanWorkspace();
+  }, [blocks, handleScanWorkspace]);
+
+  const handleBatchMigrateAllNotes = useCallback(async () => {
+    const userState = useAuthStore.getState();
+    const userId = userState.user?.id;
+    if (!userId) {
+      toast.error('Usuário não autenticado.');
+      return;
+    }
+    const allPages = useNoteStore.getState().pages;
+    setIsBatchMigrating(true);
+    setBatchProgress(null);
+    setBatchResult(null);
+
+    try {
+      const res = await migrateAllWorkspaceNotes(
+        allPages,
+        userId,
+        updatePage,
+        (progress) => setBatchProgress(progress)
+      );
+      setBatchResult(res);
+      if (res.totalMigrated > 0) {
+        toast.success(`Migração em lote concluída! ${res.totalMigrated} imagens migradas com sucesso em ${res.pagesUpdated} páginas.`);
+        setIsBucketConfigured(true);
+        // Refresh local blocks if current page was updated
+        const freshPage = useNoteStore.getState().pages.find(p => p.id === pageId);
+        if (freshPage?.conteudo) {
+          try {
+            const freshBlocks = JSON.parse(freshPage.conteudo);
+            setBlocks(freshBlocks);
+          } catch { /* ignore */ }
+        }
+        await handleScanWorkspace();
+      } else if (res.totalFailed > 0) {
+        toast.error(`A migração encontrou erros em ${res.totalFailed} imagens.`);
+      } else {
+        toast.info('Nenhuma imagem pendente para migrar.');
+      }
+    } catch (err) {
+      console.error('Batch migration failed:', err);
+      toast.error('Houve uma falha durante a migração em lote.');
+    } finally {
+      setIsBatchMigrating(false);
+    }
+  }, [updatePage, pageId, handleScanWorkspace]);
 
   const handleMigrateImages = useCallback(async () => {
     if (!pageId || detectedBase64Images.length === 0) return;
@@ -3573,148 +3649,342 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
       </Dialog>
 
       {/* Image Storage Audit Dialog */}
-      <Dialog open={isImageAuditOpen} onOpenChange={(open) => !open && !isMigratingImages && setIsImageAuditOpen(false)}>
-        <DialogContent className="max-w-lg">
+      <Dialog open={isImageAuditOpen} onOpenChange={(open) => !open && !isMigratingImages && !isBatchMigrating && setIsImageAuditOpen(false)}>
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-slate-800 dark:text-zinc-100">
-              <Database className="h-5 w-5 text-amber-500" />
-              Auditoria de Imagens
-            </DialogTitle>
+            <div className="flex items-center justify-between pr-6">
+              <DialogTitle className="flex items-center gap-2 text-slate-800 dark:text-zinc-100 text-base">
+                <Database className="h-5 w-5 text-amber-500" />
+                Auditoria e Migração de Imagens
+              </DialogTitle>
+              {isScanningWorkspace && (
+                <span className="flex items-center gap-1.5 text-xs text-indigo-600 dark:text-indigo-400 font-medium">
+                  <RefreshCw className="h-3 w-3 animate-spin" />
+                  Escaneando workspace...
+                </span>
+              )}
+            </div>
           </DialogHeader>
-          <div className="py-4 space-y-4">
-            <p className="text-xs text-slate-500 dark:text-zinc-400 leading-relaxed">
-              Analisa se esta página contém imagens inline em formato <strong>Base64</strong>. Imagens Base64 inflam o banco de dados PostgreSQL e degradam o tempo de sincronização e o consumo de banda. Recomendamos fortemente migrar esses arquivos para o <strong>Supabase Storage</strong> para mantê-los otimizados e acessíveis via URLs rápidas.
-            </p>
 
-            {detectedBase64Images.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 px-4 border border-dashed border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/20 dark:bg-emerald-950/10 rounded-xl text-center">
-                <Check className="h-10 w-10 text-emerald-500 mb-2" />
-                <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300">
-                  Nenhuma imagem em Base64 encontrada nesta página!
-                </p>
-                <p className="text-[11px] text-slate-400 dark:text-zinc-500 mt-1">
-                  Seu Atlas Workspace está 100% otimizado. Todas as imagens usam URLs do Storage.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200/60 rounded-lg flex items-start gap-2.5">
-                  <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5 animate-pulse" />
-                  <div>
-                    <p className="text-xs font-bold text-amber-800 dark:text-amber-400">
-                      Atenção: Encontradas {detectedBase64Images.length} {detectedBase64Images.length === 1 ? 'imagem' : 'imagens'} Base64!
-                    </p>
-                    <p className="text-[11px] text-slate-600 dark:text-zinc-400 mt-1">
-                      {isBucketConfigured === false 
-                        ? 'Essas imagens estão salvas diretamente na nota em formato Base64. Elas funcionam perfeitamente offline e sincronizam normalmente.'
-                        : 'Essas imagens estão salvas diretamente dentro do texto. Clique em "Migrar para o Supabase Storage" para convertê-las automaticamente.'}
-                    </p>
+          <Tabs value={auditScope} onValueChange={(val) => setAuditScope(val as 'current' | 'workspace')} className="w-full flex-1 flex flex-col overflow-hidden">
+            <TabsList className="grid grid-cols-2 w-full mb-3">
+              <TabsTrigger value="workspace" className="text-xs flex items-center gap-1.5">
+                <Layers className="h-3.5 w-3.5" />
+                Todas as Notas (Lote)
+                {workspaceAudit && workspaceAudit.totalBase64Images > 0 && (
+                  <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500 text-white">
+                    {workspaceAudit.totalBase64Images}
+                  </span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="current" className="text-xs flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5" />
+                Esta Nota Aberta
+                {detectedBase64Images.length > 0 && (
+                  <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-500 text-white">
+                    {detectedBase64Images.length}
+                  </span>
+                )}
+              </TabsTrigger>
+            </TabsList>
+
+            {/* TAB: WORKSPACE (LOTE) */}
+            <TabsContent value="workspace" className="flex-1 overflow-y-auto space-y-4 pr-1 mt-0">
+              {/* Summary Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="p-3 bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40 rounded-xl">
+                  <div className="flex items-center justify-between text-[11px] text-amber-700 dark:text-amber-400 font-medium mb-1">
+                    <span>Em Base64</span>
+                    <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
                   </div>
+                  <div className="text-xl font-bold text-amber-900 dark:text-amber-300">
+                    {workspaceAudit ? workspaceAudit.totalBase64Images : '...'}
+                  </div>
+                  <span className="text-[10px] text-amber-600 dark:text-amber-500">
+                    {workspaceAudit && workspaceAudit.totalBase64Images === 0 ? 'Tudo otimizado' : 'Requer migração'}
+                  </span>
                 </div>
 
-                {isBucketConfigured === false && (
-                  <div className="p-3 bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-900/40 rounded-lg flex items-start gap-2.5 text-blue-800 dark:text-blue-300">
-                    <CloudOff className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
-                    <div className="space-y-0.5 text-[11px]">
-                      <span className="font-semibold">Bucket "note-assets" não configurado no Supabase Storage</span>
-                      <p className="text-blue-600/90 dark:text-blue-400">
-                        O armazenamento em nuvem está desabilitado no momento. As imagens permanecem seguras em Base64. Para habilitar o envio remoto, crie o bucket público <code>note-assets</code> no painel do Supabase.
-                      </p>
-                    </div>
+                <div className="p-3 bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-900/40 rounded-xl">
+                  <div className="flex items-center justify-between text-[11px] text-emerald-700 dark:text-emerald-400 font-medium mb-1">
+                    <span>No Storage</span>
+                    <Cloud className="h-3.5 w-3.5 text-emerald-500" />
                   </div>
-                )}
-
-                <div className="max-h-40 overflow-y-auto space-y-1.5 border border-slate-150 dark:border-zinc-850 rounded-lg p-2 bg-slate-50/50 dark:bg-zinc-900/50">
-                  {detectedBase64Images.map((img, i) => (
-                    <div key={img.id} className="text-[11px] flex items-center justify-between text-slate-600 dark:text-zinc-400 p-1.5 bg-white dark:bg-zinc-900 rounded border border-slate-150 dark:border-zinc-850">
-                      <div className="flex items-center gap-1.5 truncate">
-                        <span className="font-bold text-slate-400">#{i + 1}</span>
-                        <span className="font-semibold px-1 rounded bg-slate-100 dark:bg-zinc-850 text-[10px] uppercase text-slate-500">
-                          {img.blockType === 'image' ? 'Bloco de Imagem' : 'Imagem Inline'}
-                        </span>
-                        <span className="truncate text-slate-400 font-mono">
-                          {img.base64DataUrl.substring(0, 30)}...
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-slate-400 shrink-0 font-medium">
-                        {(img.base64DataUrl.length / 1024).toFixed(1)} KB
-                      </span>
-                    </div>
-                  ))}
+                  <div className="text-xl font-bold text-emerald-900 dark:text-emerald-300">
+                    {workspaceAudit ? workspaceAudit.totalStorageImages : '...'}
+                  </div>
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-500">
+                    bucket note-assets
+                  </span>
                 </div>
 
-                {isMigratingImages && (
-                  <div className="p-3 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200/30 rounded-lg space-y-2">
-                    <div className="flex items-center gap-2 text-xs font-semibold text-indigo-700 dark:text-indigo-400">
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      <span>{migrationStatus}</span>
-                    </div>
-                    <div className="w-full bg-slate-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-                      <div className="bg-indigo-600 h-1.5 animate-pulse rounded-full" style={{ width: '100%' }} />
-                    </div>
+                <div className="p-3 bg-slate-50 dark:bg-zinc-900/80 border border-slate-200 dark:border-zinc-800 rounded-xl">
+                  <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-zinc-400 font-medium mb-1">
+                    <span>Tamanho Base64</span>
+                    <HardDrive className="h-3.5 w-3.5 text-slate-400" />
                   </div>
-                )}
+                  <div className="text-xl font-bold text-slate-800 dark:text-zinc-200">
+                    {workspaceAudit 
+                      ? workspaceAudit.totalBase64Bytes > 1024 * 1024 
+                        ? `${(workspaceAudit.totalBase64Bytes / (1024 * 1024)).toFixed(2)} MB`
+                        : `${(workspaceAudit.totalBase64Bytes / 1024).toFixed(1)} KB`
+                      : '...'}
+                  </div>
+                  <span className="text-[10px] text-slate-400">
+                    ocupado nas notas
+                  </span>
+                </div>
+
+                <div className="p-3 bg-indigo-50/70 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-900/40 rounded-xl">
+                  <div className="flex items-center justify-between text-[11px] text-indigo-700 dark:text-indigo-400 font-medium mb-1">
+                    <span>Economia</span>
+                    <Sparkles className="h-3.5 w-3.5 text-indigo-500" />
+                  </div>
+                  <div className="text-xl font-bold text-indigo-900 dark:text-indigo-300">
+                    {workspaceAudit ? `~${workspaceAudit.savingsPercentage}%` : '...'}
+                  </div>
+                  <span className="text-[10px] text-indigo-600 dark:text-indigo-400 truncate block">
+                    {workspaceAudit 
+                      ? workspaceAudit.estimatedSavingsBytes > 1024 * 1024
+                        ? `Economiza ${(workspaceAudit.estimatedSavingsBytes / (1024 * 1024)).toFixed(2)} MB`
+                        : `Economiza ${(workspaceAudit.estimatedSavingsBytes / 1024).toFixed(0)} KB`
+                      : '...'}
+                  </span>
+                </div>
               </div>
-            )}
 
-            {/* Separator and Orphan Assets section */}
-            <div className="border-t border-slate-150 dark:border-zinc-850 pt-4 space-y-3">
-              <h4 className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
-                <Trash2 className="h-3.5 w-3.5 text-rose-500" />
-                Auditoria de Arquivos Órfãos (Storage)
-              </h4>
-              <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-relaxed">
-                Quando você exclui um bloco de imagem, o arquivo correspondente continua no Storage. Use este escanear para identificar e limpar com segurança arquivos de imagem que não possuem referências ativas nesta nota.
-              </p>
-
-              {orphanedList.length > 0 && (
-                <div className="space-y-2">
-                  <div className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-200/30 rounded-lg flex items-start gap-2">
-                    <AlertCircle className="h-4 w-4 text-rose-500 shrink-0 mt-0.5" />
-                    <span className="text-[11px] font-medium text-rose-800 dark:text-rose-400">
-                      Identificados {orphanedList.length} arquivos órfãos sem referências nesta nota!
+              {/* Batch Migration Progress */}
+              {isBatchMigrating && batchProgress && (
+                <div className="p-3.5 bg-indigo-50/80 dark:bg-indigo-950/30 border border-indigo-200/60 dark:border-indigo-900/40 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between text-xs font-semibold text-indigo-900 dark:text-indigo-300">
+                    <span className="flex items-center gap-2">
+                      <RefreshCw className="h-4 w-4 animate-spin text-indigo-600" />
+                      {batchProgress.statusText}
                     </span>
+                    <span>{batchProgress.percent}%</span>
                   </div>
-                  <div className="max-h-24 overflow-y-auto space-y-1 p-2 bg-slate-50/50 dark:bg-zinc-900/50 rounded border border-slate-150 dark:border-zinc-850">
-                    {orphanedList.map((url, i) => (
-                      <div key={url} className="text-[10px] text-slate-500 truncate font-mono">
-                        #{i + 1}: {url}
-                      </div>
-                    ))}
+                  <div className="w-full bg-indigo-200/60 dark:bg-indigo-900/60 h-2 rounded-full overflow-hidden">
+                    <div 
+                      className="bg-indigo-600 h-2 transition-all duration-300 rounded-full"
+                      style={{ width: `${batchProgress.percent}%` }}
+                    />
                   </div>
                 </div>
               )}
 
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-xs h-8 border-slate-200 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800"
-                  onClick={handleScanOrphans}
-                  disabled={isCleaningOrphans}
-                >
-                  {isCleaningOrphans ? (
-                    <RefreshCw className="h-3 w-3 animate-spin mr-1" />
-                  ) : null}
-                  <span>{isCleaningOrphans ? 'Escaneando...' : 'Escanear Órfãos'}</span>
-                </Button>
+              {/* Batch Migration Result Card */}
+              {batchResult && !isBatchMigrating && (
+                <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 rounded-xl space-y-1.5">
+                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-800 dark:text-emerald-300">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                    Resultado da Migração em Lote
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-[11px] text-emerald-900 dark:text-emerald-200 pt-1">
+                    <div>
+                      <span className="text-emerald-600 dark:text-emerald-400 block text-[10px]">Migradas</span>
+                      <strong className="text-sm">{batchResult.totalMigrated} imagens</strong>
+                    </div>
+                    <div>
+                      <span className="text-emerald-600 dark:text-emerald-400 block text-[10px]">Páginas Salvas</span>
+                      <strong className="text-sm">{batchResult.pagesUpdated} páginas</strong>
+                    </div>
+                    <div>
+                      <span className="text-emerald-600 dark:text-emerald-400 block text-[10px]">Espaço Economizado</span>
+                      <strong className="text-sm">{(batchResult.savedBytes / 1024).toFixed(1)} KB</strong>
+                    </div>
+                  </div>
+                  {batchResult.errors.length > 0 && (
+                    <div className="mt-2 text-[11px] text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30 p-2 rounded border border-rose-200 dark:border-rose-900/30">
+                      <strong>Falhas ({batchResult.totalFailed}):</strong>
+                      <ul className="list-disc pl-4 mt-1 space-y-0.5">
+                        {batchResult.errors.slice(0, 3).map((err, i) => (
+                          <li key={i}>{err}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Pages Breakdown Table */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                  <span>Detalhamento por Página ({workspaceAudit?.totalPagesScanned || 0} notas)</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-[11px] px-2 text-slate-500 hover:text-slate-800"
+                    onClick={handleScanWorkspace}
+                    disabled={isScanningWorkspace}
+                  >
+                    <RefreshCw className={`h-3 w-3 mr-1 ${isScanningWorkspace ? 'animate-spin' : ''}`} />
+                    Recarregar
+                  </Button>
+                </div>
+
+                <div className="max-h-56 overflow-y-auto space-y-1.5 border border-slate-150 dark:border-zinc-850 rounded-xl p-2 bg-slate-50/50 dark:bg-zinc-900/50">
+                  {workspaceAudit?.pageDetails.map((p) => {
+                    const isFullyOptimized = p.base64Count === 0;
+                    return (
+                      <div
+                        key={p.pageId}
+                        className="text-xs flex items-center justify-between p-2 bg-white dark:bg-zinc-900 rounded-lg border border-slate-150 dark:border-zinc-850 hover:border-slate-300 dark:hover:border-zinc-700 transition-colors"
+                      >
+                        <div className="flex items-center gap-2 truncate max-w-[65%]">
+                          <FileText className={`h-4 w-4 shrink-0 ${isFullyOptimized ? 'text-emerald-500' : 'text-amber-500'}`} />
+                          <span className="font-medium text-slate-800 dark:text-zinc-200 truncate">
+                            {p.pageTitle}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {p.storageUrlCount > 0 && (
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-medium text-[10px] flex items-center gap-1">
+                              <Cloud className="h-3 w-3" />
+                              {p.storageUrlCount} Storage
+                            </span>
+                          )}
+                          {p.base64Count > 0 ? (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 font-semibold text-[10px] flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3" />
+                              {p.base64Count} Base64 ({(p.base64Bytes / 1024).toFixed(0)} KB)
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-0.5">
+                              <Check className="h-3 w-3" />
+                              Otimizada
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* TAB: NOTA ATUAL */}
+            <TabsContent value="current" className="flex-1 overflow-y-auto space-y-4 pr-1 mt-0">
+              <p className="text-xs text-slate-500 dark:text-zinc-400 leading-relaxed">
+                Analisa se esta página contém imagens inline em formato <strong>Base64</strong>. Imagens Base64 inflam o banco de dados PostgreSQL e degradam o tempo de sincronização e o consumo de banda. Recomendamos fortemente migrar esses arquivos para o <strong>Supabase Storage</strong> para mantê-los otimizados e acessíveis via URLs rápidas.
+              </p>
+
+              {detectedBase64Images.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 px-4 border border-dashed border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/20 dark:bg-emerald-950/10 rounded-xl text-center">
+                  <Check className="h-10 w-10 text-emerald-500 mb-2" />
+                  <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300">
+                    Nenhuma imagem em Base64 encontrada nesta página!
+                  </p>
+                  <p className="text-[11px] text-slate-400 dark:text-zinc-500 mt-1">
+                    Esta nota está 100% otimizada com URLs do Storage.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200/60 rounded-lg flex items-start gap-2.5">
+                    <AlertTriangle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5 animate-pulse" />
+                    <div>
+                      <p className="text-xs font-bold text-amber-800 dark:text-amber-400">
+                        Atenção: Encontradas {detectedBase64Images.length} {detectedBase64Images.length === 1 ? 'imagem' : 'imagens'} Base64 nesta nota!
+                      </p>
+                      <p className="text-[11px] text-slate-600 dark:text-zinc-400 mt-1">
+                        Clique em "Migrar para o Storage" para convertê-las automaticamente em WebP e salvar no bucket <code>note-assets</code>.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="max-h-40 overflow-y-auto space-y-1.5 border border-slate-150 dark:border-zinc-850 rounded-lg p-2 bg-slate-50/50 dark:bg-zinc-900/50">
+                    {detectedBase64Images.map((img, i) => (
+                      <div key={img.id} className="text-[11px] flex items-center justify-between text-slate-600 dark:text-zinc-400 p-1.5 bg-white dark:bg-zinc-900 rounded border border-slate-150 dark:border-zinc-850">
+                        <div className="flex items-center gap-1.5 truncate">
+                          <span className="font-bold text-slate-400">#{i + 1}</span>
+                          <span className="font-semibold px-1 rounded bg-slate-100 dark:bg-zinc-850 text-[10px] uppercase text-slate-500">
+                            {img.blockType === 'image' ? 'Bloco de Imagem' : 'Imagem Inline'}
+                          </span>
+                          <span className="truncate text-slate-400 font-mono">
+                            {img.base64DataUrl.substring(0, 30)}...
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 shrink-0 font-medium">
+                          {(img.base64DataUrl.length / 1024).toFixed(1)} KB
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {isMigratingImages && (
+                    <div className="p-3 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200/30 rounded-lg space-y-2">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-indigo-700 dark:text-indigo-400">
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                        <span>{migrationStatus}</span>
+                      </div>
+                      <div className="w-full bg-slate-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                        <div className="bg-indigo-600 h-1.5 animate-pulse rounded-full" style={{ width: '100%' }} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Orphan Assets Section */}
+              <div className="border-t border-slate-150 dark:border-zinc-850 pt-4 space-y-3">
+                <h4 className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
+                  <Trash2 className="h-3.5 w-3.5 text-rose-500" />
+                  Auditoria de Arquivos Órfãos (Storage)
+                </h4>
+                <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-relaxed">
+                  Identifica e remove arquivos no Storage que deixaram de ser referenciados após a exclusão de blocos desta página.
+                </p>
 
                 {orphanedList.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-200/30 rounded-lg flex items-start gap-2">
+                      <AlertCircle className="h-4 w-4 text-rose-500 shrink-0 mt-0.5" />
+                      <span className="text-[11px] font-medium text-rose-800 dark:text-rose-400">
+                        Identificados {orphanedList.length} arquivos órfãos sem referências nesta nota!
+                      </span>
+                    </div>
+                    <div className="max-h-24 overflow-y-auto space-y-1 p-2 bg-slate-50/50 dark:bg-zinc-900/50 rounded border border-slate-150 dark:border-zinc-850">
+                      {orphanedList.map((url, i) => (
+                        <div key={url} className="text-[10px] text-slate-500 truncate font-mono">
+                          #{i + 1}: {url}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-2">
                   <Button
-                    variant="destructive"
+                    variant="outline"
                     size="sm"
-                    className="text-xs h-8 bg-rose-600 hover:bg-rose-700 text-white gap-1"
-                    onClick={handleClearOrphans}
+                    className="text-xs h-8 border-slate-200 dark:border-zinc-700 hover:bg-slate-100 dark:hover:bg-zinc-800"
+                    onClick={handleScanOrphans}
                     disabled={isCleaningOrphans}
                   >
-                    <Trash2 size={12} />
-                    <span>Excluir Órfãos</span>
+                    {isCleaningOrphans ? (
+                      <RefreshCw className="h-3 w-3 animate-spin mr-1" />
+                    ) : null}
+                    <span>{isCleaningOrphans ? 'Escaneando...' : 'Escanear Órfãos'}</span>
                   </Button>
-                )}
+
+                  {orphanedList.length > 0 && (
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="text-xs h-8 bg-rose-600 hover:bg-rose-700 text-white gap-1"
+                      onClick={handleClearOrphans}
+                      disabled={isCleaningOrphans}
+                    >
+                      <Trash2 size={12} />
+                      <span>Excluir Órfãos</span>
+                    </Button>
+                  )}
+                </div>
               </div>
-            </div>
-          </div>
-          <DialogFooter className="flex gap-2">
+            </TabsContent>
+          </Tabs>
+
+          <DialogFooter className="flex items-center justify-between gap-2 border-t border-slate-150 dark:border-zinc-850 pt-3 mt-2">
             <Button 
               variant="outline" 
               className="text-xs h-8" 
@@ -3722,21 +3992,45 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
                 setIsImageAuditOpen(false);
                 setOrphanedList([]);
               }}
-              disabled={isMigratingImages || isCleaningOrphans}
+              disabled={isMigratingImages || isBatchMigrating || isCleaningOrphans}
             >
               Fechar
             </Button>
-            {detectedBase64Images.length > 0 && (
-              <Button 
-                className="text-xs h-8 bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 disabled:opacity-50"
-                onClick={handleMigrateImages}
-                disabled={isMigratingImages || isCleaningOrphans || isBucketConfigured === false}
-                title={isBucketConfigured === false ? 'Bucket note-assets não encontrado no Supabase Storage' : 'Migrar imagens para Supabase Storage'}
-              >
-                {isBucketConfigured === false ? <CloudOff size={13} /> : <Upload size={13} />}
-                <span>{isBucketConfigured === false ? 'Storage Indisponível' : 'Migrar para o Storage'}</span>
-              </Button>
-            )}
+
+            <div className="flex items-center gap-2">
+              {auditScope === 'workspace' && (
+                <Button 
+                  className="text-xs h-8 bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 disabled:opacity-50"
+                  onClick={handleBatchMigrateAllNotes}
+                  disabled={
+                    isBatchMigrating || 
+                    isScanningWorkspace || 
+                    !workspaceAudit || 
+                    workspaceAudit.totalBase64Images === 0
+                  }
+                >
+                  {isBatchMigrating ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Upload size={13} />}
+                  <span>
+                    {isBatchMigrating 
+                      ? 'Migrando Lote...' 
+                      : workspaceAudit && workspaceAudit.totalBase64Images > 0
+                        ? `Migrar Todas em Lote (${workspaceAudit.totalBase64Images})`
+                        : 'Todas Otimizadas'}
+                  </span>
+                </Button>
+              )}
+
+              {auditScope === 'current' && detectedBase64Images.length > 0 && (
+                <Button 
+                  className="text-xs h-8 bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 disabled:opacity-50"
+                  onClick={handleMigrateImages}
+                  disabled={isMigratingImages || isCleaningOrphans}
+                >
+                  {isMigratingImages ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Upload size={13} />}
+                  <span>{isMigratingImages ? 'Migrando...' : 'Migrar Esta Nota'}</span>
+                </Button>
+              )}
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

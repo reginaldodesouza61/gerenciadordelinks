@@ -37,9 +37,11 @@ interface AuthState {
   session: Session | null;
   loading: boolean;
   initialized: boolean;
+  isAnonymous: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
-  signInAsGuest: () => void;
+  signInAnonymously: () => Promise<boolean>;
+  signInAsGuest: () => Promise<void>;
   signOut: () => Promise<void>;
   initialize: () => Promise<void>;
 }
@@ -53,6 +55,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   session: null,
   loading: false,
   initialized: initialCachedUser !== null,
+  isAnonymous: initialCachedUser ? (Boolean((initialCachedUser as { is_anonymous?: boolean }).is_anonymous) || initialCachedUser.email === 'usuario@meuhub.local') : false,
   
   initialize: async () => {
     // Only set loading if we don't have any cached user to prevent UI flickers
@@ -61,23 +64,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
     
     try {
-      // Check if guest session was active
-      const isGuest = localStorage.getItem(GUEST_STORAGE_KEY) === 'true';
-      if (isGuest) {
-        const guest = createGuestUser();
-        set({ user: guest, session: null, initialized: true, loading: false });
-        return;
-      }
-
-      // Check supabase session with timeout race
+      // 1. Check supabase session with timeout race
       const sessionPromise = supabase.auth.getSession();
       const timeoutPromise = new Promise<{ data: { session: null } }>((resolve) => 
-        setTimeout(() => resolve({ data: { session: null } }), 2000)
+        setTimeout(() => resolve({ data: { session: null } }), 2500)
       );
 
       const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]);
       
       if (session?.user) {
+        localStorage.removeItem(GUEST_STORAGE_KEY);
         try {
           localStorage.setItem(AUTH_USER_CACHE_KEY, JSON.stringify(session.user));
         } catch {
@@ -85,23 +81,43 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         }
         
         const currentUser = get().user;
+        const isAnon = Boolean((session.user as { is_anonymous?: boolean }).is_anonymous);
         if (!currentUser || currentUser.id !== session.user.id || currentUser.email !== session.user.email) {
-          set({ user: session.user, session });
+          set({ user: session.user, session, isAnonymous: isAnon, initialized: true, loading: false });
         } else {
-          // Keep existing user reference to avoid re-render cascades
-          set({ session });
+          set({ session, isAnonymous: isAnon, initialized: true, loading: false });
         }
-      } else {
-        // If no active session found and not guest, keep cached user if present to prevent kick-out
-        if (!isGuest && !get().user) {
-          localStorage.removeItem(AUTH_USER_CACHE_KEY);
-          set({ user: null, session: null });
+
+        // Migrate any local IndexedDB notes to this authenticated user
+        try {
+          const { useNoteStore } = await import('@/lib/store/noteStore');
+          await useNoteStore.getState().migrateLocalNotesToUser(session.user.id);
+        } catch (migErr) {
+          console.debug('[AuthStore] Note migration check on init:', migErr);
         }
+        return;
+      }
+
+      // 2. Check if guest session was active or auto-access is needed
+      const isGuest = localStorage.getItem(GUEST_STORAGE_KEY) === 'true';
+      if (isGuest) {
+        // Attempt real Supabase anonymous sign-in to obtain genuine JWT and auth.uid()
+        const signedIn = await get().signInAnonymously();
+        if (!signedIn) {
+          // Fallback guest user was already set in signInAnonymously if provider was disabled
+        }
+        return;
+      }
+
+      // If no active session found and not guest, keep cached user if present to prevent kick-out
+      if (!isGuest && !get().user) {
+        localStorage.removeItem(AUTH_USER_CACHE_KEY);
+        set({ user: null, session: null, isAnonymous: false });
       }
     } catch (error) {
       console.error('Error initializing auth:', error);
       if (!get().user) {
-        set({ user: null, session: null });
+        set({ user: null, session: null, isAnonymous: false });
       }
     } finally {
       set({ loading: false, initialized: true });
@@ -110,13 +126,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Register singleton auth listener
     if (!isAuthListenerRegistered) {
       isAuthListenerRegistered = true;
-      supabase.auth.onAuthStateChange((event, session) => {
-        console.debug(`[AuthStore] Event: ${event} | User: ${session?.user?.email || 'None'}`);
+      supabase.auth.onAuthStateChange(async (event, session) => {
+        console.debug(`[AuthStore] Event: ${event} | User: ${session?.user?.email || session?.user?.id || 'None'}`);
 
         if (event === 'SIGNED_OUT') {
           localStorage.removeItem(GUEST_STORAGE_KEY);
           localStorage.removeItem(AUTH_USER_CACHE_KEY);
-          set({ user: null, session: null });
+          set({ user: null, session: null, isAnonymous: false });
           return;
         }
 
@@ -129,28 +145,110 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           }
 
           const currentUser = get().user;
-          // Only update user state if the user ID or email actually changed!
-          // TOKEN_REFRESHED should NOT cause user re-render
+          const isAnon = Boolean((session.user as { is_anonymous?: boolean }).is_anonymous);
           if (!currentUser || currentUser.id !== session.user.id || currentUser.email !== session.user.email) {
-            console.log(`[AuthStore Audit] User reference updated for new identity: ${session.user.email}`);
+            console.log(`[AuthStore Audit] User reference updated for new identity: ${session.user.email || session.user.id}`);
             set({ 
-              user: session.user,
-              session
+              user: session.user, 
+              session,
+              isAnonymous: isAnon
             });
+
+            // Automatically migrate local IndexedDB notes to the newly active user
+            try {
+              const { useNoteStore } = await import('@/lib/store/noteStore');
+              await useNoteStore.getState().migrateLocalNotesToUser(session.user.id);
+            } catch (migErr) {
+              console.debug('[AuthStore] Note migration on auth change:', migErr);
+            }
           } else {
-            console.log(`[AuthStore Audit] ${event}: User identity unchanged (${currentUser.email}). Preserving stable user object reference.`);
+            console.log(`[AuthStore Audit] ${event}: User identity unchanged. Preserving session.`);
+            set({ session, isAnonymous: isAnon });
           }
         }
       });
     }
   },
+
+  signInAnonymously: async (): Promise<boolean> => {
+    set({ loading: true });
+    try {
+      console.log('[AuthStore] Solicitando Supabase signInAnonymously() com emissão de JWT real...');
+      const { data, error } = await supabase.auth.signInAnonymously();
+
+      if (error) {
+        const errObj = error as { code?: string; status?: number; message?: string };
+        const isProviderDisabled = errObj.code === 'anonymous_provider_disabled' || 
+                                   String(errObj.message).includes('disabled') || 
+                                   errObj.status === 422;
+
+        if (isProviderDisabled) {
+          console.warn('[AuthStore] Anonymous sign-ins está desativado no painel do Supabase. Operando em modo offline/local com resiliência.');
+          localStorage.setItem(GUEST_STORAGE_KEY, 'true');
+          const guest = createGuestUser();
+          set({ user: guest, session: null, isAnonymous: true, initialized: true, loading: false });
+          toast.info('Modo Local ativo. (Para sincronização em nuvem, habilite Anonymous Sign-ins no painel do Supabase).');
+          return false;
+        }
+
+        throw error;
+      }
+
+      if (data.session && data.user) {
+        console.log(`[AuthStore] Autenticação anônima concedida com sucesso! UID: ${data.user.id}`);
+        localStorage.removeItem(GUEST_STORAGE_KEY);
+        try {
+          localStorage.setItem(AUTH_USER_CACHE_KEY, JSON.stringify(data.user));
+        } catch {
+          // ignore
+        }
+
+        set({
+          user: data.user,
+          session: data.session,
+          isAnonymous: true,
+          initialized: true,
+          loading: false
+        });
+
+        toast.success('Workspace anônimo autenticado com Supabase!');
+
+        // Migrar notas do IndexedDB imediatamente para o novo UID real
+        try {
+          const { useNoteStore } = await import('@/lib/store/noteStore');
+          await useNoteStore.getState().migrateLocalNotesToUser(data.user.id);
+        } catch (migErr) {
+          console.warn('[AuthStore] Erro ao migrar notas após anonymous login:', migErr);
+        }
+
+        return true;
+      }
+
+      return false;
+    } catch (err) {
+      console.error('[AuthStore] Erro ao executar signInAnonymously:', err);
+      // Fallback gracioso para modo convidado local
+      localStorage.setItem(GUEST_STORAGE_KEY, 'true');
+      const guest = createGuestUser();
+      set({ user: guest, session: null, isAnonymous: true, initialized: true, loading: false });
+      toast.error('Erro na autenticação anônima do Supabase. Iniciando em modo local.');
+      return false;
+    } finally {
+      set({ loading: false });
+    }
+  },
   
-  signInAsGuest: () => {
+  signInAsGuest: async () => {
     localStorage.setItem(GUEST_STORAGE_KEY, 'true');
     localStorage.removeItem(AUTH_USER_CACHE_KEY);
-    const guest = createGuestUser();
-    set({ user: guest, session: null, initialized: true, loading: false });
-    toast.success('Workspace aberto com sucesso!');
+    
+    // Tenta primeiro autenticação anônima oficial do Supabase para ter JWT e RLS funcional
+    const ok = await get().signInAnonymously();
+    if (!ok && !get().user) {
+      const guest = createGuestUser();
+      set({ user: guest, session: null, isAnonymous: true, initialized: true, loading: false });
+      toast.success('Workspace aberto com sucesso!');
+    }
   },
 
   signIn: async (email: string, password: string) => {
