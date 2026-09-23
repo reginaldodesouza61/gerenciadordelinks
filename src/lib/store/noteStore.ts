@@ -579,8 +579,9 @@ function getInitialNoteState() {
   const pagesKey = getUserCacheKey(currentUserId, 'note_pages');
   const relationsKey = getUserCacheKey(currentUserId, 'note_relations');
 
-  const rawCachedSections = getCached<NoteSection[]>(sectionsKey, currentUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : []);
-  const initialSections = sortSectionsByStoredOrder(rawCachedSections.length > 0 ? rawCachedSections : DEFAULT_SECTIONS, currentUserId);
+  const hasCachedSectionsKey = typeof localStorage !== 'undefined' && localStorage.getItem(sectionsKey) !== null;
+  const rawCachedSections = getCached<NoteSection[]>(sectionsKey, (currentUserId === DEFAULT_USER_ID && !hasCachedSectionsKey) ? DEFAULT_SECTIONS : []);
+  const initialSections = sortSectionsByStoredOrder(hasCachedSectionsKey ? rawCachedSections : (currentUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : rawCachedSections), currentUserId);
 
   const rawCachedPages = getCached<NotePage[]>(pagesKey, currentUserId === DEFAULT_USER_ID ? DEFAULT_PAGES : []);
   const validSectionIds = new Set(initialSections.map(s => s.id));
@@ -726,11 +727,19 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     let migratedSections = 0;
 
     try {
-      // 1. Migrar SOMENTE seções anônimas/convidado locais para o novo UID
+      // 1. Migrar SOMENTE seções personalizadas criadas localmente em modo visitante
       const localSections = await offlineDb.sections.toArray();
-      const unmigratedSections = localSections.filter(s => 
-        !s.user_id || s.user_id === DEFAULT_USER_ID || s.user_id === 'c72212e7-2b6a-4da7-8745-01eb33414af4'
-      );
+      const defaultTemplateIds = new Set([
+        DEFAULT_SECTION_ID,
+        '10000000-0000-0000-0000-000000000002',
+        '10000000-0000-0000-0000-000000000003'
+      ]);
+
+      const unmigratedSections = localSections.filter(s => {
+        const isGuest = !s.user_id || s.user_id === DEFAULT_USER_ID || s.user_id === 'c72212e7-2b6a-4da7-8745-01eb33414af4';
+        const isDefaultTemplate = defaultTemplateIds.has(s.id);
+        return isGuest && !isDefaultTemplate;
+      });
 
       if (unmigratedSections.length > 0) {
         for (const sec of unmigratedSections) {
