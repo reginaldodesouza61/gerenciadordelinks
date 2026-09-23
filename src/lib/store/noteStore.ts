@@ -356,16 +356,28 @@ function saveActiveSectionId(id: string | null, userId?: string) {
 
 function getStoredSectionOrder(userId?: string): string[] {
   try {
-    const effectiveUserId = userId || useAuthStore.getState().user?.id;
-    if (effectiveUserId) {
-      const userRaw = localStorage.getItem(`${SECTION_ORDER_STORAGE_KEY}_${effectiveUserId}`);
+    const authUser = useAuthStore.getState().user;
+    
+    if (userId) {
+      const userRaw = localStorage.getItem(`${SECTION_ORDER_STORAGE_KEY}_${userId}`);
       if (userRaw) {
         const parsed = JSON.parse(userRaw);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed.map(sanitizeUuid);
       }
     }
-    // Also check user_metadata from auth user if available
-    const metaOrder = useAuthStore.getState().user?.user_metadata?.note_section_order;
+    if (authUser?.id) {
+      const authRaw = localStorage.getItem(`${SECTION_ORDER_STORAGE_KEY}_${authUser.id}`);
+      if (authRaw) {
+        const parsed = JSON.parse(authRaw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed.map(sanitizeUuid);
+      }
+    }
+    const defaultRaw = localStorage.getItem(`${SECTION_ORDER_STORAGE_KEY}_${DEFAULT_USER_ID}`);
+    if (defaultRaw) {
+      const parsed = JSON.parse(defaultRaw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed.map(sanitizeUuid);
+    }
+    const metaOrder = authUser?.user_metadata?.note_section_order;
     if (Array.isArray(metaOrder) && metaOrder.length > 0) {
       return metaOrder.map(sanitizeUuid);
     }
@@ -382,12 +394,14 @@ function saveSectionOrder(ids: string[], userId?: string) {
   try {
     const cleanIds = ids.map(sanitizeUuid);
     const effectiveUserId = userId || useAuthStore.getState().user?.id || DEFAULT_USER_ID;
+    const authUser = useAuthStore.getState().user;
+
     localStorage.setItem(SECTION_ORDER_STORAGE_KEY, JSON.stringify(cleanIds));
+    localStorage.setItem(`${SECTION_ORDER_STORAGE_KEY}_${DEFAULT_USER_ID}`, JSON.stringify(cleanIds));
     if (effectiveUserId) {
       localStorage.setItem(`${SECTION_ORDER_STORAGE_KEY}_${effectiveUserId}`, JSON.stringify(cleanIds));
     }
-    const authUser = useAuthStore.getState().user;
-    if (authUser?.id && authUser.id !== effectiveUserId) {
+    if (authUser?.id) {
       localStorage.setItem(`${SECTION_ORDER_STORAGE_KEY}_${authUser.id}`, JSON.stringify(cleanIds));
     }
 
@@ -415,15 +429,28 @@ function saveSectionOrder(ids: string[], userId?: string) {
 
 function getStoredPageOrder(userId?: string): string[] {
   try {
-    const effectiveUserId = userId || useAuthStore.getState().user?.id;
-    if (effectiveUserId) {
-      const userRaw = localStorage.getItem(`${PAGE_ORDER_STORAGE_KEY}_${effectiveUserId}`);
+    const authUser = useAuthStore.getState().user;
+    
+    if (userId) {
+      const userRaw = localStorage.getItem(`${PAGE_ORDER_STORAGE_KEY}_${userId}`);
       if (userRaw) {
         const parsed = JSON.parse(userRaw);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed.map(sanitizeUuid);
       }
     }
-    const metaOrder = useAuthStore.getState().user?.user_metadata?.note_page_order;
+    if (authUser?.id) {
+      const authRaw = localStorage.getItem(`${PAGE_ORDER_STORAGE_KEY}_${authUser.id}`);
+      if (authRaw) {
+        const parsed = JSON.parse(authRaw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed.map(sanitizeUuid);
+      }
+    }
+    const defaultRaw = localStorage.getItem(`${PAGE_ORDER_STORAGE_KEY}_${DEFAULT_USER_ID}`);
+    if (defaultRaw) {
+      const parsed = JSON.parse(defaultRaw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed.map(sanitizeUuid);
+    }
+    const metaOrder = authUser?.user_metadata?.note_page_order;
     if (Array.isArray(metaOrder) && metaOrder.length > 0) {
       return metaOrder.map(sanitizeUuid);
     }
@@ -440,12 +467,14 @@ function savePageOrder(ids: string[], userId?: string) {
   try {
     const cleanIds = ids.map(sanitizeUuid);
     const effectiveUserId = userId || useAuthStore.getState().user?.id || DEFAULT_USER_ID;
+    const authUser = useAuthStore.getState().user;
+
     localStorage.setItem(PAGE_ORDER_STORAGE_KEY, JSON.stringify(cleanIds));
+    localStorage.setItem(`${PAGE_ORDER_STORAGE_KEY}_${DEFAULT_USER_ID}`, JSON.stringify(cleanIds));
     if (effectiveUserId) {
       localStorage.setItem(`${PAGE_ORDER_STORAGE_KEY}_${effectiveUserId}`, JSON.stringify(cleanIds));
     }
-    const authUser = useAuthStore.getState().user;
-    if (authUser?.id && authUser.id !== effectiveUserId) {
+    if (authUser?.id) {
       localStorage.setItem(`${PAGE_ORDER_STORAGE_KEY}_${authUser.id}`, JSON.stringify(cleanIds));
     }
 
@@ -482,11 +511,16 @@ function sortSectionsByStoredOrder(sections: NoteSection[], userId?: string): No
   }
 
   const orderMap = new Map<string, number>();
-  order.forEach((id, index) => orderMap.set(id, index));
+  order.forEach((id, index) => {
+    orderMap.set(id, index);
+    orderMap.set(sanitizeUuid(id), index);
+  });
 
   return [...sections].sort((a, b) => {
-    const indexA = orderMap.has(a.id) ? (orderMap.get(a.id) as number) : (a.ordem !== undefined ? a.ordem : 9999);
-    const indexB = orderMap.has(b.id) ? (orderMap.get(b.id) as number) : (b.ordem !== undefined ? b.ordem : 9999);
+    const cleanA = sanitizeUuid(a.id);
+    const cleanB = sanitizeUuid(b.id);
+    const indexA = orderMap.has(a.id) ? (orderMap.get(a.id) as number) : (orderMap.has(cleanA) ? (orderMap.get(cleanA) as number) : (a.ordem !== undefined ? a.ordem : 9999));
+    const indexB = orderMap.has(b.id) ? (orderMap.get(b.id) as number) : (orderMap.has(cleanB) ? (orderMap.get(cleanB) as number) : (b.ordem !== undefined ? b.ordem : 9999));
     if (indexA !== indexB) return indexA - indexB;
     return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
   });
@@ -494,14 +528,26 @@ function sortSectionsByStoredOrder(sections: NoteSection[], userId?: string): No
 
 function sortPagesByStoredOrder(pages: NotePage[], userId?: string): NotePage[] {
   const order = getStoredPageOrder(userId);
-  if (order.length === 0) return pages;
+  if (order.length === 0) {
+    return [...pages].sort((a, b) => {
+      if (a.ordem !== undefined && b.ordem !== undefined) {
+        return a.ordem - b.ordem;
+      }
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
+  }
 
   const orderMap = new Map<string, number>();
-  order.forEach((id, index) => orderMap.set(id, index));
+  order.forEach((id, index) => {
+    orderMap.set(id, index);
+    orderMap.set(sanitizeUuid(id), index);
+  });
 
   return [...pages].sort((a, b) => {
-    const indexA = orderMap.has(a.id) ? (orderMap.get(a.id) as number) : 9999;
-    const indexB = orderMap.has(b.id) ? (orderMap.get(b.id) as number) : 9999;
+    const cleanA = sanitizeUuid(a.id);
+    const cleanB = sanitizeUuid(b.id);
+    const indexA = orderMap.has(a.id) ? (orderMap.get(a.id) as number) : (orderMap.has(cleanA) ? (orderMap.get(cleanA) as number) : (a.ordem !== undefined ? a.ordem : 9999));
+    const indexB = orderMap.has(b.id) ? (orderMap.get(b.id) as number) : (orderMap.has(cleanB) ? (orderMap.get(cleanB) as number) : (b.ordem !== undefined ? b.ordem : 9999));
     if (indexA !== indexB) return indexA - indexB;
     return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
   });
@@ -722,6 +768,10 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   },
 
   migrateLocalNotesToUser: async (newUserId: string) => {
+    if (!newUserId || newUserId === DEFAULT_USER_ID || newUserId === 'c72212e7-2b6a-4da7-8745-01eb33414af4') {
+      return { migratedPages: 0, migratedSections: 0 };
+    }
+
     console.log(`[Migration] Verificando notas e seções locais para migração ao usuário: ${newUserId}`);
     let migratedPages = 0;
     let migratedSections = 0;
@@ -738,7 +788,8 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       const unmigratedSections = localSections.filter(s => {
         const isGuest = !s.user_id || s.user_id === DEFAULT_USER_ID || s.user_id === 'c72212e7-2b6a-4da7-8745-01eb33414af4';
         const isDefaultTemplate = defaultTemplateIds.has(s.id);
-        return isGuest && !isDefaultTemplate;
+        const alreadyMigrated = s.user_id === newUserId;
+        return isGuest && !isDefaultTemplate && !alreadyMigrated;
       });
 
       if (unmigratedSections.length > 0) {
@@ -752,14 +803,6 @@ export const useNoteStore = create<NoteState>((set, get) => ({
               nome: updatedSec.nome,
               user_id: newUserId
             }];
-            console.error('[AUDIT WRITE note_sections]', {
-              funcao: 'migrateLocalNotesToUser',
-              arquivo: 'src/lib/store/noteStore.ts',
-              linha: 741,
-              operacao: 'upsert',
-              payload,
-              stackTrace: new Error().stack
-            });
             const { error: secErr } = await supabase.from('note_sections').upsert(payload);
             if (!secErr) migratedSections++;
           } catch (sErr) {
@@ -770,9 +813,11 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
       // 2. Migrar SOMENTE páginas anônimas/convidado locais para o novo UID e enfileirar
       const localPages = await offlineDb.pages.toArray();
-      const unmigratedPages = localPages.filter(p => 
-        !p.user_id || p.user_id === DEFAULT_USER_ID || p.user_id === 'c72212e7-2b6a-4da7-8745-01eb33414af4'
-      );
+      const unmigratedPages = localPages.filter(p => {
+        const isGuest = !p.user_id || p.user_id === DEFAULT_USER_ID || p.user_id === 'c72212e7-2b6a-4da7-8745-01eb33414af4';
+        const alreadyMigrated = p.user_id === newUserId;
+        return isGuest && !alreadyMigrated;
+      });
 
       if (unmigratedPages.length > 0) {
         for (const page of unmigratedPages) {
@@ -1717,14 +1762,14 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const newSectionsWithOrder = newSections.map((s, idx) => ({ ...s, ordem: idx }));
     const ids = newSectionsWithOrder.map(s => s.id);
     const effectiveUserId = useAuthStore.getState().user?.id || DEFAULT_USER_ID;
+    const authUser = useAuthStore.getState().user;
     
     saveSectionOrder(ids, effectiveUserId);
     setCached(getUserCacheKey(effectiveUserId, 'note_sections'), newSectionsWithOrder);
-    newSectionsWithOrder.forEach(s => {
-      if (s.user_id && s.user_id !== effectiveUserId) {
-        setCached(getUserCacheKey(s.user_id, 'note_sections'), newSectionsWithOrder);
-      }
-    });
+    setCached(getUserCacheKey(DEFAULT_USER_ID, 'note_sections'), newSectionsWithOrder);
+    if (authUser?.id) {
+      setCached(getUserCacheKey(authUser.id, 'note_sections'), newSectionsWithOrder);
+    }
 
     if (offlineDb.sections) {
       for (const sec of newSectionsWithOrder) {
@@ -1747,25 +1792,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const [removed] = newSections.splice(index, 1);
     newSections.splice(targetIndex, 0, removed);
 
-    const newSectionsWithOrder = newSections.map((s, idx) => ({ ...s, ordem: idx }));
-    const ids = newSectionsWithOrder.map(s => s.id);
-    const effectiveUserId = useAuthStore.getState().user?.id || DEFAULT_USER_ID;
-
-    saveSectionOrder(ids, effectiveUserId);
-    setCached(getUserCacheKey(effectiveUserId, 'note_sections'), newSectionsWithOrder);
-    newSectionsWithOrder.forEach(s => {
-      if (s.user_id && s.user_id !== effectiveUserId) {
-        setCached(getUserCacheKey(s.user_id, 'note_sections'), newSectionsWithOrder);
-      }
-    });
-
-    if (offlineDb.sections) {
-      for (const sec of newSectionsWithOrder) {
-        offlineDb.sections.put(sec).catch(console.debug);
-      }
-    }
-
-    set({ sections: newSectionsWithOrder });
+    get().reorderSections(newSections);
   },
 
   addPage: async (
@@ -2133,16 +2160,32 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   },
 
   reorderPages: (newPages: NotePage[]) => {
-    const ids = newPages.map(p => p.id);
+    const newPagesWithOrder = newPages.map((p, idx) => ({ ...p, ordem: idx }));
+    const ids = newPagesWithOrder.map(p => p.id);
     const effectiveUserId = useAuthStore.getState().user?.id || DEFAULT_USER_ID;
+    const authUser = useAuthStore.getState().user;
+
     savePageOrder(ids, effectiveUserId);
-    setCached(getUserCacheKey(effectiveUserId, 'note_pages'), newPages);
-    newPages.forEach(p => {
-      if (p.user_id && p.user_id !== effectiveUserId) {
-        setCached(getUserCacheKey(p.user_id, 'note_pages'), newPages);
+    setCached(getUserCacheKey(effectiveUserId, 'note_pages'), newPagesWithOrder);
+    setCached(getUserCacheKey(DEFAULT_USER_ID, 'note_pages'), newPagesWithOrder);
+    if (authUser?.id) {
+      setCached(getUserCacheKey(authUser.id, 'note_pages'), newPagesWithOrder);
+    }
+
+    if (offlineDb.pages) {
+      for (const page of newPagesWithOrder) {
+        offlineDb.pages.put({
+          ...page,
+          id: sanitizeUuid(page.id),
+          localVersion: 1,
+          remoteVersion: 1,
+          syncStatus: 'synced',
+          lastUpdatedAt: Date.now()
+        }).catch(console.debug);
       }
-    });
-    set({ pages: newPages });
+    }
+
+    set({ pages: newPagesWithOrder });
   },
 
   movePage: (id: string, direction: 'up' | 'down') => {
@@ -2169,16 +2212,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const [removed] = newPages.splice(mainIndexA, 1);
     newPages.splice(mainIndexB, 0, removed);
 
-    const ids = newPages.map(p => p.id);
-    const effectiveUserId = useAuthStore.getState().user?.id || DEFAULT_USER_ID;
-    savePageOrder(ids, effectiveUserId);
-    setCached(getUserCacheKey(effectiveUserId, 'note_pages'), newPages);
-    newPages.forEach(p => {
-      if (p.user_id && p.user_id !== effectiveUserId) {
-        setCached(getUserCacheKey(p.user_id, 'note_pages'), newPages);
-      }
-    });
-    set({ pages: newPages });
+    get().reorderPages(newPages);
   },
 
   setActiveSectionId: (id) => {
