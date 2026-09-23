@@ -1069,7 +1069,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const userDefaultSections = DEFAULT_SECTIONS.map(s => ({ ...s, user_id: targetUserId }));
     const userDefaultPages = DEFAULT_PAGES.map(p => ({ ...p, user_id: targetUserId }));
 
-    const rawCachedSections = getCached<NoteSection[]>(sectionsKey, userDefaultSections);
+    const rawCachedSections = getCached<NoteSection[]>(sectionsKey, []);
     const localCachedSections = sortSectionsByStoredOrder(rawCachedSections, targetUserId);
     const rawCachedPages = getCached<NotePage[]>(pagesKey, []);
     const localCachedPages = sortPagesByStoredOrder(rawCachedPages, targetUserId);
@@ -1091,7 +1091,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
     // Merge immediate in-memory view
     const immediateSectionsMap = new Map<string, NoteSection>();
-    (localCachedSections.length > 0 ? localCachedSections : userDefaultSections).forEach(s => immediateSectionsMap.set(s.id, { ...s, user_id: targetUserId }));
+    localCachedSections.forEach(s => immediateSectionsMap.set(s.id, { ...s, user_id: targetUserId }));
     userDexieSections.forEach(s => immediateSectionsMap.set(s.id, { ...s, user_id: targetUserId }));
     const immediateSections = sortSectionsByStoredOrder(Array.from(immediateSectionsMap.values()), targetUserId);
 
@@ -1200,29 +1200,15 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           if (!mergedSectionsMap.has(s.id) && !mergedSectionsMap.has(cleanSecId)) {
             const secToKeep = { ...s, user_id: targetUserId };
             mergedSectionsMap.set(s.id, secToKeep);
-            // Backup missing section to Supabase
-            if (targetUserId !== DEFAULT_USER_ID) {
-              supabase.from('note_sections').upsert([{
-                id: cleanSecId,
-                nome: s.nome,
-                user_id: targetUserId
-              }]).catch(console.debug);
-            }
           }
         });
 
-        // Ensure at least default sections exist if map is empty
-        if (mergedSectionsMap.size === 0) {
-          userDefaultSections.forEach(ds => {
-            mergedSectionsMap.set(ds.id, ds);
-            if (targetUserId !== DEFAULT_USER_ID) {
-              supabase.from('note_sections').upsert([{
-                id: ds.id,
-                nome: ds.nome,
-                user_id: targetUserId
-              }]).catch(console.debug);
-            }
-          });
+        // Ensure at least "Geral" section exists if user has zero sections on fresh setup
+        if (mergedSectionsMap.size === 0 && localStorage.getItem(sectionsKey) === null) {
+          const defaultGeralSec = userDefaultSections[0];
+          if (defaultGeralSec) {
+            mergedSectionsMap.set(defaultGeralSec.id, defaultGeralSec);
+          }
         }
 
         const finalSections = sortSectionsByStoredOrder(
@@ -1719,6 +1705,15 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
     // Exclusão definitiva remota no Supabase
     try {
+      // 1. First claim ownership to guarantee Supabase RLS policy permits deletion
+      if (currentUserId && currentUserId !== DEFAULT_USER_ID) {
+        await supabase.from('note_sections').update({ user_id: currentUserId }).eq('id', cleanId);
+        if (id !== cleanId) await supabase.from('note_sections').update({ user_id: currentUserId }).eq('id', id);
+        await supabase.from('note_pages').update({ user_id: currentUserId }).eq('section_id', cleanId);
+        if (id !== cleanId) await supabase.from('note_pages').update({ user_id: currentUserId }).eq('section_id', id);
+      }
+
+      // 2. Perform deletion on pages and sections by cleanId and original id
       await supabase.from('note_pages').delete().eq('section_id', cleanId);
       if (id !== cleanId) await supabase.from('note_pages').delete().eq('section_id', id);
       await supabase.from('note_sections').delete().eq('id', cleanId);
@@ -2137,6 +2132,12 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         
         // Direct remote deletion in Supabase (deleting by primary key ID)
         try {
+          // Claim ownership first to guarantee RLS policy permits deletion
+          if (currentUserId && currentUserId !== DEFAULT_USER_ID) {
+            await supabase.from('note_pages').update({ user_id: currentUserId }).eq('id', cId);
+            if (cId !== p.id) await supabase.from('note_pages').update({ user_id: currentUserId }).eq('id', p.id);
+          }
+
           await supabase.from('note_pages').delete().eq('id', cId);
           if (cId !== p.id) {
             await supabase.from('note_pages').delete().eq('id', p.id);
