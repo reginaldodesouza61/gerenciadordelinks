@@ -69,7 +69,8 @@ export async function optimizeImageBlob(blob: Blob, maxDimension = 1920, quality
 
 /**
  * Checks if the Supabase Storage bucket 'note-assets' exists and is accessible.
- * Caches the result to avoid redundant network requests and prevent error spam.
+ * Client-compatible: avoids administrative getBucket() call which fails on client tokens.
+ * Uses cached upload results or a client-safe list probe.
  */
 export async function isStorageBucketAvailable(forceRefresh = false): Promise<boolean> {
   const now = Date.now();
@@ -83,14 +84,27 @@ export async function isStorageBucketAvailable(forceRefresh = false): Promise<bo
 
   bucketCheckPromise = (async () => {
     try {
-      const { data, error } = await supabase.storage.getBucket('note-assets');
-      if (error || !data) {
-        bucketAvailableCache = false;
+      // Client-safe check: list limit 1 does not require administrative getBucket privileges
+      const { error } = await supabase.storage.from('note-assets').list('', { limit: 1 });
+      if (error) {
+        const isBucketNotFound = 
+          error.message?.includes('not found') || 
+          error.message?.includes('NoSuchBucket') ||
+          (error as Record<string, unknown>).status === 404 ||
+          (error as Record<string, unknown>).statusCode === '404';
+
+        if (isBucketNotFound) {
+          bucketAvailableCache = false;
+        } else {
+          // If error is permission-related (e.g. 403 on root listing), bucket exists!
+          bucketAvailableCache = true;
+        }
       } else {
         bucketAvailableCache = true;
       }
     } catch {
-      bucketAvailableCache = false;
+      // Default to optimistic true to avoid prematurely blocking valid uploads
+      bucketAvailableCache = true;
     } finally {
       lastCheckTimestamp = Date.now();
       bucketCheckPromise = null;
@@ -99,6 +113,11 @@ export async function isStorageBucketAvailable(forceRefresh = false): Promise<bo
   })();
 
   return bucketCheckPromise;
+}
+
+export function setStorageBucketAvailable(available: boolean) {
+  bucketAvailableCache = available;
+  lastCheckTimestamp = Date.now();
 }
 
 /**
@@ -135,11 +154,6 @@ export async function uploadImageToStorage(
 ): Promise<string> {
   const bucketName = 'note-assets';
 
-  const isAvailable = await isStorageBucketAvailable();
-  if (!isAvailable) {
-    throw new Error('BUCKET_NOT_FOUND');
-  }
-
   let rawBlob: Blob;
   let contentType = 'image/png';
 
@@ -163,7 +177,7 @@ export async function uploadImageToStorage(
   const uniqueId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
   const filePath = `${userId}/${pageId}/${uniqueId}.${extension}`;
 
-  // Attempt the upload
+  // Attempt the upload directly without prior getBucket blocking
   const { error: uploadError } = await supabase.storage
     .from(bucketName)
     .upload(filePath, blob, {
@@ -173,18 +187,38 @@ export async function uploadImageToStorage(
     });
 
   if (uploadError) {
-    const isBucketError = 
-      uploadError.message?.includes('bucket') || 
-      uploadError.message?.includes('not found') || 
+    const isBucketNotFound = 
+      uploadError.message?.includes('NoSuchBucket') || 
+      uploadError.message?.includes('bucket not found') || 
+      uploadError.message?.includes('Bucket not found') || 
       (uploadError as Record<string, unknown>).status === 404 ||
       (uploadError as Record<string, unknown>).statusCode === '404';
 
-    if (isBucketError) {
+    if (isBucketNotFound) {
       bucketAvailableCache = false;
+      lastCheckTimestamp = Date.now();
       throw new Error('BUCKET_NOT_FOUND');
     }
+
+    const isRlsError = 
+      uploadError.message?.includes('row-level security') ||
+      uploadError.message?.includes('AccessDenied') ||
+      (uploadError as Record<string, unknown>).status === 403 ||
+      (uploadError as Record<string, unknown>).statusCode === '403';
+
+    if (isRlsError) {
+      bucketAvailableCache = true;
+      lastCheckTimestamp = Date.now();
+      console.warn('[Storage] Erro de política de segurança (RLS) ao enviar imagem:', uploadError.message);
+      throw new Error(`STORAGE_RLS_DENIED: ${uploadError.message}`);
+    }
+
     throw uploadError;
   }
+
+  // Upload succeeded: bucket is verified as active and accessible
+  bucketAvailableCache = true;
+  lastCheckTimestamp = Date.now();
 
   // Retrieve the public URL
   const { data } = supabase.storage.from(bucketName).getPublicUrl(filePath);

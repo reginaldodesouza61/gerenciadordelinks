@@ -1558,12 +1558,6 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
       return;
     }
 
-    const isBucketReady = await isStorageBucketAvailable(true);
-    if (!isBucketReady) {
-      toast.error('Bucket "note-assets" não encontrado no Supabase Storage. Crie o bucket "note-assets" como público no painel do Supabase.', { duration: 8000 });
-      return;
-    }
-
     setIsMigratingImages(true);
     setMigrationStatus('Iniciando upload de imagens para o Supabase Storage...');
 
@@ -1603,10 +1597,13 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
         }
       }
 
-      setBlocks(updatedBlocks);
-      await updatePage(pageId, { conteudo: JSON.stringify(updatedBlocks) });
-      toast.success(`${successCount} imagens migradas com sucesso para o Supabase Storage!`);
-      setIsImageAuditOpen(false);
+      if (successCount > 0) {
+        setBlocks(updatedBlocks);
+        await updatePage(pageId, { conteudo: JSON.stringify(updatedBlocks) });
+        setIsBucketConfigured(true);
+        toast.success(`${successCount} imagens migradas com sucesso para o Supabase Storage!`);
+        setIsImageAuditOpen(false);
+      }
     } catch (err) {
       const errMessage = (err as Error).message || '';
       console.error('Image migration failed:', err);
@@ -1811,14 +1808,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
 
     if (legacyImages.length === 0) return;
 
-    // Check if Supabase Storage bucket exists before attempting migration
-    const isBucketReady = await isStorageBucketAvailable();
-    if (!isBucketReady) {
-      // Storage bucket note-assets does not exist in Supabase. Images remain safely in Base64 without errors.
-      return;
-    }
-
-    console.debug(`[Auto-Migration] Detectadas ${legacyImages.length} imagens Base64 na página ${pageId}. Otimizando para o Supabase Storage...`);
+    console.debug(`[Auto-Migration] Detectadas ${legacyImages.length} imagens Base64 na página ${pageId}. Tentando otimização para Supabase Storage...`);
 
     try {
       const updatedBlocks = JSON.parse(JSON.stringify(blocksToCheck)) as CanvasBlock[];
@@ -1845,6 +1835,11 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
             }
           }
         } catch (uploadErr) {
+          const errMessage = (uploadErr as Error)?.message || '';
+          if (errMessage === 'BUCKET_NOT_FOUND') {
+            setIsBucketConfigured(false);
+            return; // Aborta silenciosamente se o bucket não existir
+          }
           console.debug('[Auto-Migration] Imagem individual mantida em Base64:', uploadErr);
         }
       }
@@ -1854,6 +1849,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
         const json = JSON.stringify(updatedBlocks);
         lastSavedContentRef.current = json;
         await updatePage(pageId, { conteudo: json });
+        setIsBucketConfigured(true);
         toast.success(`Otimização concluída! ${migrationCount} imagens migradas com sucesso para o note-assets.`);
       }
     } catch (err) {
@@ -2490,31 +2486,29 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     setSelectedBlockId(newBlock.id);
     saveNow(nextBlocks);
 
-    // Envio assíncrono em segundo plano para o Supabase Storage se for Base64 e o bucket estiver configurado
+    // Envio assíncrono em segundo plano para o Supabase Storage se for Base64 (execução direta sem bloqueio)
     if (dataUrl.startsWith('data:image/')) {
       const userState = useAuthStore.getState();
       const userId = userState.user?.id;
       if (userId && pageId) {
-        isStorageBucketAvailable().then((isReady) => {
-          if (!isReady) return;
-          uploadImageToStorage(dataUrl, pageId, userId)
-            .then((publicUrl) => {
-              setBlocks((prevBlocks) => {
-                const updated = prevBlocks.map((b) => {
-                  if (b.id === blockId) {
-                    return { ...b, imageUrl: publicUrl, conteudo: publicUrl };
-                  }
-                  return b;
-                });
-                saveNow(updated);
-                return updated;
+        uploadImageToStorage(dataUrl, pageId, userId)
+          .then((publicUrl) => {
+            setBlocks((prevBlocks) => {
+              const updated = prevBlocks.map((b) => {
+                if (b.id === blockId) {
+                  return { ...b, imageUrl: publicUrl, conteudo: publicUrl };
+                }
+                return b;
               });
-              console.debug(`[Storage] Imagem ${blockId} gravada com sucesso no bucket note-assets.`);
-            })
-            .catch((err) => {
-              console.debug('[Storage] Upload em segundo plano mantido em Base64:', err);
+              saveNow(updated);
+              return updated;
             });
-        });
+            setIsBucketConfigured(true);
+            console.debug(`[Storage] Imagem ${blockId} gravada com sucesso no bucket note-assets.`);
+          })
+          .catch((err) => {
+            console.debug('[Storage] Upload em segundo plano mantido em Base64:', err);
+          });
       }
     }
   }, [blocks, getSpawnPosition, purgeAndSave, saveNow, pageId]);
