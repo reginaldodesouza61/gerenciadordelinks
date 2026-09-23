@@ -738,11 +738,20 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           await offlineDb.sections.put(updatedSec);
           
           try {
-            const { error: secErr } = await supabase.from('note_sections').upsert([{
+            const payload = [{
               id: updatedSec.id,
               nome: updatedSec.nome,
               user_id: newUserId
-            }]);
+            }];
+            console.error('[AUDIT WRITE note_sections]', {
+              funcao: 'migrateLocalNotesToUser',
+              arquivo: 'src/lib/store/noteStore.ts',
+              linha: 741,
+              operacao: 'upsert',
+              payload,
+              stackTrace: new Error().stack
+            });
+            const { error: secErr } = await supabase.from('note_sections').upsert(payload);
             if (!secErr) migratedSections++;
           } catch (sErr) {
             console.debug('[Migration] Erro ao sincronizar seção com Supabase:', sErr);
@@ -1125,6 +1134,14 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         if (targetUserId !== DEFAULT_USER_ID) {
           rawSections.forEach(s => {
             if (s.user_id !== targetUserId) {
+              console.error('[AUDIT WRITE note_sections]', {
+                funcao: 'fetchNotes (background claim ownership)',
+                arquivo: 'src/lib/store/noteStore.ts',
+                linha: 1137,
+                operacao: 'update',
+                payload: { user_id: targetUserId, section_id: s.id },
+                stackTrace: new Error().stack
+              });
               supabase.from('note_sections').update({ user_id: targetUserId }).eq('id', s.id).then().catch(console.debug);
             }
           });
@@ -1523,9 +1540,18 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     });
 
     try {
+      const payload = [{ id: newSectionId, nome, user_id: fallbackUserId }];
+      console.error('[AUDIT WRITE note_sections]', {
+        funcao: 'addSection',
+        arquivo: 'src/lib/store/noteStore.ts',
+        linha: 1545,
+        operacao: 'insert',
+        payload,
+        stackTrace: new Error().stack
+      });
       const { data, error } = await supabase
         .from('note_sections')
-        .insert([{ id: newSectionId, nome, user_id: fallbackUserId }])
+        .insert(payload)
         .select()
         .single();
 
@@ -1552,7 +1578,16 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     set({ sections: updated });
 
     try {
-      await supabase.from('note_sections').update({ nome }).eq('id', cleanId);
+      const payload = { nome };
+      console.error('[AUDIT WRITE note_sections]', {
+        funcao: 'updateSection',
+        arquivo: 'src/lib/store/noteStore.ts',
+        linha: 1572,
+        operacao: 'update',
+        payload,
+        stackTrace: new Error().stack
+      });
+      await supabase.from('note_sections').update(payload).eq('id', cleanId);
     } catch (e) {
       console.debug('Section updated locally:', e);
     }
@@ -1643,6 +1678,14 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     try {
       // 1. First claim ownership to guarantee Supabase RLS policy permits deletion
       if (currentUserId && currentUserId !== DEFAULT_USER_ID) {
+        console.error('[AUDIT WRITE note_sections]', {
+          funcao: 'deleteSection (claim ownership before delete)',
+          arquivo: 'src/lib/store/noteStore.ts',
+          linha: 1681,
+          operacao: 'update',
+          payload: { user_id: currentUserId, section_id: cleanId },
+          stackTrace: new Error().stack
+        });
         await supabase.from('note_sections').update({ user_id: currentUserId }).eq('id', cleanId);
         if (id !== cleanId) await supabase.from('note_sections').update({ user_id: currentUserId }).eq('id', id);
         await supabase.from('note_pages').update({ user_id: currentUserId }).eq('section_id', cleanId);
@@ -2304,6 +2347,14 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     // 2. Claim all guest/default Supabase pages & sections
     if (authUid && authUid !== DEFAULT_USER_ID) {
       try {
+        console.error('[AUDIT WRITE note_sections]', {
+          funcao: 'repairAndRestoreNotes',
+          arquivo: 'src/lib/store/noteStore.ts',
+          linha: 2351,
+          operacao: 'update',
+          payload: { user_id: authUid },
+          stackTrace: new Error().stack
+        });
         await supabase.from('note_sections').update({ user_id: authUid }).eq('user_id', DEFAULT_USER_ID);
         await supabase.from('note_pages').update({ user_id: authUid }).eq('user_id', DEFAULT_USER_ID);
         await supabase.from('note_sections').update({ user_id: authUid }).is('user_id', null);
