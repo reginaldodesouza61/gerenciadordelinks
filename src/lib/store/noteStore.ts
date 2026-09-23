@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { supabase } from '../supabase';
-import { NoteSection, NotePage, NoteLinkRelation, DeletedNoteItem } from '@/types/notes';
+import { NoteSection, NotePage, NoteLinkRelation } from '@/types/notes';
 import { toast } from 'sonner';
 import { decryptNoteContent, sanitizeAndEncryptNoteContent } from '@/lib/encryption';
 import { offlineDb } from '@/lib/db/offlineDb';
@@ -14,7 +14,6 @@ const lastFetchTimestampMap = new Map<string, number>();
 const activeFetchPromiseMap = new Map<string, Promise<void>>();
 const FETCH_THROTTLE_MS = 10000; // 10 seconds throttle per user
 
-const TRASH_STORAGE_KEY = 'meuhub_deleted_notes_vault';
 const ACTIVE_PAGE_STORAGE_KEY = 'meuhub_active_page_id';
 const ACTIVE_SECTION_STORAGE_KEY = 'meuhub_active_section_id';
 const SECTION_ORDER_STORAGE_KEY = 'meuhub_section_order';
@@ -289,18 +288,6 @@ function setCached<T>(key: string, data: T) {
   }
 }
 
-function getStoredTrash(): DeletedNoteItem[] {
-  return [];
-}
-
-function saveTrashToStorage(_items: DeletedNoteItem[]) {
-  // No-op: Permanent deletion requested
-}
-
-async function syncTrashWithRemote(_currentUserId?: string): Promise<DeletedNoteItem[]> {
-  return [];
-}
-
 function getStoredActivePageId(userId?: string): string | null {
   try {
     const effectiveUserId = userId || useAuthStore.getState().user?.id;
@@ -540,7 +527,6 @@ interface NoteState {
   sections: NoteSection[];
   pages: NotePage[];
   relations: NoteLinkRelation[];
-  deletedItems: DeletedNoteItem[];
   activeSectionId: string | null;
   activePageId: string | null;
   isLoading: boolean;
@@ -569,12 +555,6 @@ interface NoteState {
   deletePage: (id: string) => Promise<void>;
   reorderPages: (newPages: NotePage[]) => void;
   movePage: (id: string, direction: 'up' | 'down') => void;
-  
-  // Trash and Recovery actions
-  restoreItem: (id: string) => Promise<void>;
-  restoreLastDeleted: () => Promise<void>;
-  permanentlyDelete: (id: string) => void;
-  emptyTrash: () => void;
   
   setActiveSectionId: (id: string | null) => void;
   setActivePageId: (id: string | null) => void;
@@ -652,7 +632,6 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   sections: initialNoteState.sections,
   pages: initialNoteState.pages,
   relations: initialNoteState.relations,
-  deletedItems: getStoredTrash(),
   activeSectionId: initialNoteState.activeSectionId,
   activePageId: initialNoteState.activePageId,
   isLoading: false,
@@ -934,23 +913,17 @@ export const useNoteStore = create<NoteState>((set, get) => ({
             if (!error && count === 0) {
               if (id) await offlineDb.syncQueue.delete(id);
               if (localPage) await offlineDb.pages.delete(localPage.id);
+              set(st => ({
+                pages: st.pages.filter(p => p.id !== cleanPageId && p.id !== pageId)
+              }));
               continue;
             }
           } else if (action === 'create') {
-            // Check if page was deleted locally before it could be synced
-            let isTombstoned = false;
-            try {
-              if (offlineDb.tombstones) {
-                const tomb = await offlineDb.tombstones.get(cleanPageId);
-                if (tomb) isTombstoned = true;
-              }
-            } catch (tombErr) {
-              console.debug('Failed to check tombstone in sync queue:', tombErr);
-            }
-
-            if (isTombstoned) {
+            // If page was deleted locally before it could sync, discard queue item
+            const currentPages = get().pages;
+            const pageStillExists = currentPages.some(p => p.id === cleanPageId || p.id === pageId) || !!localPage;
+            if (!pageStillExists) {
               if (id) await offlineDb.syncQueue.delete(id);
-              if (localPage) await offlineDb.pages.delete(localPage.id);
               continue;
             }
 
@@ -1186,22 +1159,34 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
         // 1. SECTIONS MERGING & RECONCILIATION
         const mergedSectionsMap = new Map<string, NoteSection>();
+        const remoteSectionIds = new Set<string>();
         
-        // Add remote sections
+        // Add remote sections from Supabase
         rawSections.forEach(s => {
           const cleanSec = { ...s, user_id: targetUserId };
           mergedSectionsMap.set(s.id, cleanSec);
           mergedSectionsMap.set(sanitizeUuid(s.id), cleanSec);
+          remoteSectionIds.add(s.id);
+          remoteSectionIds.add(sanitizeUuid(s.id));
         });
 
-        // Add immediate local/dexie sections that might not be on server yet
-        immediateSections.forEach(s => {
-          const cleanSecId = sanitizeUuid(s.id);
-          if (!mergedSectionsMap.has(s.id) && !mergedSectionsMap.has(cleanSecId)) {
-            const secToKeep = { ...s, user_id: targetUserId };
-            mergedSectionsMap.set(s.id, secToKeep);
+        // Reconcile local Dexie sections:
+        // Local sections not present in remote (and not default/pending) were deleted!
+        // Purge them from Dexie.
+        if (offlineDb.sections) {
+          try {
+            const dexieSecs = await offlineDb.sections.toArray();
+            for (const dSec of dexieSecs) {
+              const cleanSecId = sanitizeUuid(dSec.id);
+              if (!remoteSectionIds.has(dSec.id) && !remoteSectionIds.has(cleanSecId)) {
+                await offlineDb.sections.delete(dSec.id).catch(() => {});
+                if (cleanSecId !== dSec.id) await offlineDb.sections.delete(cleanSecId).catch(() => {});
+              }
+            }
+          } catch (e) {
+            console.debug('Failed to reconcile local Dexie sections:', e);
           }
-        });
+        }
 
         // Ensure at least "Geral" section exists if user has zero sections on fresh setup
         if (mergedSectionsMap.size === 0 && localStorage.getItem(sectionsKey) === null) {
@@ -1216,7 +1201,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           targetUserId
         );
 
-        // Also save sections to Dexie
+        // Save active sections to Dexie
         if (offlineDb.sections) {
           try {
             for (const sec of finalSections) {
@@ -1255,10 +1240,14 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         const initialSyncStatuses: Record<string, 'synced' | 'pending' | 'conflict'> = {};
 
         const mergedPagesMap = new Map<string, NotePage>();
+        const remotePageIds = new Set<string>();
 
         // Add decrypted remote pages
         for (const remotePage of decryptedRemotePages) {
           const cleanId = sanitizeUuid(remotePage.id);
+          remotePageIds.add(remotePage.id);
+          remotePageIds.add(cleanId);
+
           const localMatch = dexieMap.get(remotePage.id) || dexieMap.get(cleanId);
           const isPendingSync = pendingPageIds.has(remotePage.id) || pendingPageIds.has(cleanId);
 
@@ -1310,57 +1299,40 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           }
         }
 
-        // Add local Dexie pages that might not be on server yet and queue them
+        // Reconcile local Dexie pages:
+        // ONLY retain local pages if they exist in remote OR are pending newly created offline pages (action === 'create' in syncQueue).
+        // If a local page is NOT in remote and is NOT pending 'create', it was DELETED remotely or locally!
+        // We PURGE it from Dexie and local cache, and DO NOT add it to mergedPagesMap!
+        const pendingCreateQueue = pendingQueue.filter(item => item.action === 'create');
+        const pendingCreatePageIds = new Set(
+          pendingCreateQueue.map(item => item.pageId)
+            .concat(pendingCreateQueue.map(item => sanitizeUuid(item.pageId)))
+        );
+
         for (const localPage of localDexiePages) {
           const cleanId = sanitizeUuid(localPage.id);
-          if (!mergedPagesMap.has(cleanId) && !mergedPagesMap.has(localPage.id)) {
-            mergedPagesMap.set(cleanId, {
-              ...localPage,
-              id: cleanId,
-              user_id: targetUserId
-            });
-            initialSyncStatuses[cleanId] = 'pending';
-            
-            // Queue sync to Supabase so it's safely saved in the cloud
-            if (targetUserId !== DEFAULT_USER_ID) {
-              await offlineDb.syncQueue.put({
-                pageId: cleanId,
-                action: 'create',
-                payload: {
-                  id: cleanId,
-                  titulo: localPage.titulo,
-                  conteudo: localPage.conteudo,
-                  section_id: sanitizeUuid(localPage.section_id),
-                  parent_id: sanitizeUuidOrNull(localPage.parent_id),
-                  user_id: targetUserId,
-                  created_at: localPage.created_at || new Date().toISOString()
-                },
-                timestamp: Date.now(),
-                attempts: 0
-              }).catch(console.debug);
-            }
-          }
-        }
+          const isRemotePresent = remotePageIds.has(localPage.id) || remotePageIds.has(cleanId);
+          const isPendingCreate = pendingCreatePageIds.has(localPage.id) || pendingCreatePageIds.has(cleanId);
 
-        // Add local cached pages that might not be in Dexie or Supabase
-        for (const cachedPage of localCachedPages) {
-          const cleanId = sanitizeUuid(cachedPage.id);
-          if (!mergedPagesMap.has(cleanId) && !mergedPagesMap.has(cachedPage.id)) {
-            mergedPagesMap.set(cleanId, {
-              ...cachedPage,
-              id: cleanId,
-              user_id: targetUserId
-            });
-            initialSyncStatuses[cleanId] = 'pending';
-            await offlineDb.pages.put({
-              ...cachedPage,
-              id: cleanId,
-              user_id: targetUserId,
-              localVersion: 1,
-              remoteVersion: 0,
-              syncStatus: 'pending',
-              lastUpdatedAt: Date.now()
-            }).catch(() => {});
+          if (!isRemotePresent) {
+            if (isPendingCreate) {
+              if (!mergedPagesMap.has(cleanId)) {
+                mergedPagesMap.set(cleanId, {
+                  ...localPage,
+                  id: cleanId,
+                  user_id: targetUserId
+                });
+                initialSyncStatuses[cleanId] = 'pending';
+              }
+            } else {
+              // Page was deleted remotely or locally! PURGE IT DEFINITIVELY!
+              await offlineDb.pages.delete(localPage.id).catch(() => {});
+              if (cleanId !== localPage.id) await offlineDb.pages.delete(cleanId).catch(() => {});
+              await offlineDb.revisions.where('pageId').equals(localPage.id).delete().catch(() => {});
+              if (cleanId !== localPage.id) await offlineDb.revisions.where('pageId').equals(cleanId).delete().catch(() => {});
+              await offlineDb.syncQueue.where('pageId').equals(localPage.id).delete().catch(() => {});
+              if (cleanId !== localPage.id) await offlineDb.syncQueue.where('pageId').equals(cleanId).delete().catch(() => {});
+            }
           }
         }
 
@@ -1519,35 +1491,11 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           sections: isSectionsContentIdentical ? currentSections : finalSections,
           pages: isPagesContentIdentical ? currentPages : sortedPages,
           relations: relRes?.data || get().relations,
-          deletedItems: getStoredTrash(),
           activePageId: preservedPageId,
           activeSectionId: preservedSectionId,
           pageSyncStatuses: initialSyncStatuses,
           isLoading: false
         });
-
-        // Ensure user's sections and pages are permanently synced in Supabase
-        if (targetUserId !== DEFAULT_USER_ID) {
-          (async () => {
-            for (const sec of finalSections) {
-              await supabase.from('note_sections').upsert([{
-                id: sanitizeUuid(sec.id),
-                nome: sec.nome,
-                user_id: targetUserId
-              }]).catch(console.debug);
-            }
-            for (const p of sortedPages) {
-              await supabase.from('note_pages').upsert([{
-                id: sanitizeUuid(p.id),
-                titulo: p.titulo,
-                conteudo: p.conteudo,
-                section_id: sanitizeUuid(p.section_id),
-                parent_id: sanitizeUuidOrNull(p.parent_id),
-                user_id: targetUserId
-              }]).catch(console.debug);
-            }
-          })().catch(() => {});
-        }
 
         get().syncPendingQueue().catch(console.error);
       }
@@ -1642,18 +1590,6 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const effectiveUserId = sectionToDelete.user_id || currentUserId;
     const pagesToDelete = state.pages.filter(p => p.section_id === cleanId || p.section_id === id);
 
-    const trashItem: DeletedNoteItem = {
-      id: sectionToDelete.id,
-      type: 'section',
-      title: sectionToDelete.nome,
-      deletedAt: new Date().toISOString(),
-      sectionData: sectionToDelete,
-      sectionPages: pagesToDelete
-    };
-
-    const nextTrash = [trashItem, ...state.deletedItems.filter(item => item.id !== cleanId && item.id !== id)];
-    saveTrashToStorage(nextTrash);
-
     const remainingSections = state.sections.filter(s => s.id !== cleanId && s.id !== id);
     saveSectionOrder(remainingSections.map(s => s.id), currentUserId);
     setCached(getUserCacheKey(currentUserId, 'note_sections'), remainingSections);
@@ -1681,7 +1617,6 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     set(st => ({
       sections: remainingSections,
       pages: remainingPages,
-      deletedItems: [],
       activeSectionId: isCurrentActiveSection ? (remainingSections.length > 0 ? remainingSections[0].id : null) : st.activeSectionId,
       activePageId: isCurrentActivePage ? (remainingPages.length > 0 ? remainingPages[0].id : null) : st.activePageId
     }));
@@ -2016,28 +1951,20 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         const performUpdate = async () => {
           const { error, count } = await supabase.from('note_pages').update(directDbPayload).eq('id', cleanId);
           if (error || count === 0) {
+            let altCount = 0;
             if (id !== cleanId) {
-              await supabase.from('note_pages').update(directDbPayload).eq('id', id);
+              const res2 = await supabase.from('note_pages').update(directDbPayload).eq('id', id);
+              altCount = res2.count || 0;
             }
-            // If 0 rows were updated, upsert the full pageData to guarantee section_id and parent_id update on Supabase
-            let encryptedContent = pageData.conteudo;
-            if (pageData.conteudo) {
-              try {
-                encryptedContent = await sanitizeAndEncryptNoteContent(pageData.conteudo);
-              } catch {
-                encryptedContent = pageData.conteudo;
-              }
+            if (count === 0 && altCount === 0) {
+              // Row was deleted on Supabase! Do NOT resurrect it!
+              await offlineDb.syncQueue.where('pageId').equals(cleanId).delete().catch(() => {});
+              await offlineDb.pages.delete(cleanId).catch(() => {});
+              set(st => ({
+                pages: st.pages.filter(p => p.id !== cleanId && p.id !== id)
+              }));
+              return;
             }
-
-            await supabase.from('note_pages').upsert([{
-              id: cleanId,
-              titulo: pageData.titulo,
-              section_id: pageData.section_id,
-              parent_id: pageData.parent_id,
-              user_id: activeUserId,
-              conteudo: encryptedContent,
-              created_at: pageData.created_at
-            }]);
           }
 
           await offlineDb.pages.update(cleanId, { 
@@ -2106,7 +2033,6 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
     set({
       pages: remainingPages,
-      deletedItems: [],
       activePageId: isCurrentActivePage ? (remainingPages.length > 0 ? remainingPages[0].id : null) : state.activePageId
     });
 
@@ -2200,238 +2126,6 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       }
     });
     set({ pages: newPages });
-  },
-
-  restoreItem: async (id: string) => {
-    const state = get();
-    const itemToRestore = state.deletedItems.find(item => item.id === id);
-    if (!itemToRestore) {
-      toast.error('Item não encontrado na lixeira.');
-      return;
-    }
-
-    const currentUserId = useAuthStore.getState().user?.id || DEFAULT_USER_ID;
-
-    try {
-      if (itemToRestore.type === 'section' && itemToRestore.sectionData) {
-        const section = itemToRestore.sectionData;
-        const pages = itemToRestore.sectionPages || [];
-
-        const remainingTrash = state.deletedItems.filter(item => item.id !== id);
-        saveTrashToStorage(remainingTrash);
-        saveActiveSectionId(section.id, currentUserId);
-
-        const updatedSections = state.sections.some(s => s.id === section.id) ? state.sections : [...state.sections, section];
-        saveSectionOrder(updatedSections.map(s => s.id), currentUserId);
-        setCached(getUserCacheKey(currentUserId, 'note_sections'), updatedSections);
-        setCached(getUserCacheKey(section.user_id || DEFAULT_USER_ID, 'note_sections'), updatedSections);
-
-        const updatedPages = [
-          ...state.pages.filter(p => !pages.some(rp => rp.id === p.id)),
-          ...pages
-        ];
-        savePageOrder(updatedPages.map(p => p.id), currentUserId);
-        setCached(getUserCacheKey(currentUserId, 'note_pages'), updatedPages);
-        setCached(getUserCacheKey(section.user_id || DEFAULT_USER_ID, 'note_pages'), updatedPages);
-
-        if (offlineDb.sections) {
-          await offlineDb.sections.put(section);
-        }
-        if (offlineDb.tombstones) {
-          await offlineDb.tombstones.delete(sanitizeUuid(section.id));
-          await offlineDb.tombstones.delete(section.id);
-        }
-        for (const p of pages) {
-          if (offlineDb.tombstones) {
-            await offlineDb.tombstones.delete(sanitizeUuid(p.id));
-            await offlineDb.tombstones.delete(p.id);
-          }
-          await offlineDb.pages.put({
-            ...p,
-            localVersion: 1,
-            remoteVersion: 0,
-            syncStatus: 'pending',
-            lastUpdatedAt: Date.now()
-          });
-        }
-
-        set({
-          sections: updatedSections,
-          pages: updatedPages,
-          deletedItems: remainingTrash,
-          activeSectionId: section.id
-        });
-
-        toast.success(`Seção "${section.nome}" restaurada com sucesso!`);
-
-        try {
-          const cleanSection = { ...section, id: sanitizeUuid(section.id) };
-          await supabase.from('note_sections').upsert([cleanSection]);
-          if (pages.length > 0) {
-            const cleanPages = pages.map(p => ({
-              ...p,
-              id: sanitizeUuid(p.id),
-              section_id: sanitizeUuid(p.section_id),
-              parent_id: sanitizeUuidOrNull(p.parent_id)
-            }));
-            await supabase.from('note_pages').upsert(cleanPages);
-          }
-        } catch {
-          // ignore
-        }
-      } else if (itemToRestore.type === 'page' && itemToRestore.pageData) {
-        const page = itemToRestore.pageData;
-        const subpages = itemToRestore.subpages || [];
-        const allPages = [page, ...subpages];
-
-        let targetSectionId = page.section_id;
-        const sectionExists = state.sections.some(s => s.id === targetSectionId);
-        if (!sectionExists) {
-          targetSectionId = state.activeSectionId || (state.sections.length > 0 ? state.sections[0].id : DEFAULT_SECTION_ID);
-        }
-
-        const normalizedPages = allPages.map(p => ({
-          ...p,
-          section_id: targetSectionId
-        }));
-
-        const remainingTrash = state.deletedItems.filter(item => item.id !== id);
-        saveTrashToStorage(remainingTrash);
-
-        saveActivePageId(page.id, currentUserId);
-        saveActiveSectionId(targetSectionId, currentUserId);
-
-        const updatedPages = [
-          ...state.pages.filter(p => !normalizedPages.some(np => np.id === p.id)),
-          ...normalizedPages
-        ];
-        savePageOrder(updatedPages.map(p => p.id), currentUserId);
-        setCached(getUserCacheKey(currentUserId, 'note_pages'), updatedPages);
-        setCached(getUserCacheKey(page.user_id || DEFAULT_USER_ID, 'note_pages'), updatedPages);
-
-        for (const p of normalizedPages) {
-          if (offlineDb.tombstones) {
-            await offlineDb.tombstones.delete(sanitizeUuid(p.id));
-            await offlineDb.tombstones.delete(p.id);
-          }
-          await offlineDb.pages.put({
-            ...p,
-            localVersion: 1,
-            remoteVersion: 0,
-            syncStatus: 'pending',
-            lastUpdatedAt: Date.now()
-          });
-        }
-
-        set({
-          pages: updatedPages,
-          deletedItems: remainingTrash,
-          activeSectionId: targetSectionId,
-          activePageId: page.id
-        });
-
-        toast.success(`Anotação "${page.titulo}" restaurada com sucesso!`);
-
-        try {
-          const cleanUpsertPages = normalizedPages.map(p => ({
-            ...p,
-            id: sanitizeUuid(p.id),
-            section_id: sanitizeUuid(p.section_id),
-            parent_id: sanitizeUuidOrNull(p.parent_id)
-          }));
-          await supabase.from('note_pages').upsert(cleanUpsertPages);
-        } catch {
-          // ignore
-        }
-      }
-    } catch (err) {
-      console.error('Error restoring item:', err);
-      toast.error('Erro ao restaurar anotação.');
-    }
-  },
-
-  restoreLastDeleted: async () => {
-    const { deletedItems, restoreItem } = get();
-    if (deletedItems.length === 0) {
-      toast.info('Nenhum item recente para restaurar.');
-      return;
-    }
-    await restoreItem(deletedItems[0].id);
-  },
-
-  permanentlyDelete: async (id: string) => {
-    const state = get();
-    const itemToDelete = state.deletedItems.find(item => item.id === id);
-    const nextTrash = state.deletedItems.filter(item => item.id !== id);
-    saveTrashToStorage(nextTrash);
-    set({ deletedItems: nextTrash });
-
-    if (itemToDelete) {
-      const cleanId = sanitizeUuid(itemToDelete.id);
-      if (itemToDelete.type === 'section') {
-        if (offlineDb.sections) offlineDb.sections.delete(cleanId).catch(console.debug);
-        if (itemToDelete.sectionPages) {
-          for (const p of itemToDelete.sectionPages) {
-            offlineDb.pages.delete(p.id).catch(console.debug);
-          }
-        }
-        try {
-          await supabase.from('note_pages').delete().eq('section_id', cleanId);
-          await supabase.from('note_sections').delete().eq('id', cleanId);
-        } catch (e) {
-          console.debug('Permanently delete section error:', e);
-        }
-      } else if (itemToDelete.type === 'page') {
-        offlineDb.pages.delete(cleanId).catch(console.debug);
-        if (itemToDelete.subpages) {
-          for (const sub of itemToDelete.subpages) {
-            offlineDb.pages.delete(sub.id).catch(console.debug);
-          }
-        }
-        try {
-          await supabase.from('note_pages').delete().eq('id', cleanId);
-        } catch (e) {
-          console.debug('Permanently delete page error:', e);
-        }
-      }
-    }
-
-    toast.success('Item removido da lixeira permanentemente.');
-  },
-
-  emptyTrash: async () => {
-    const state = get();
-    const currentTrash = state.deletedItems;
-    saveTrashToStorage([]);
-    set({ deletedItems: [] });
-
-    for (const item of currentTrash) {
-      const cleanId = sanitizeUuid(item.id);
-      if (item.type === 'section') {
-        if (offlineDb.sections) offlineDb.sections.delete(cleanId).catch(console.debug);
-        if (item.sectionPages) {
-          for (const p of item.sectionPages) {
-            offlineDb.pages.delete(p.id).catch(console.debug);
-          }
-        }
-        try {
-          await supabase.from('note_pages').delete().eq('section_id', cleanId);
-          await supabase.from('note_sections').delete().eq('id', cleanId);
-        } catch { /* ignore */ }
-      } else if (item.type === 'page') {
-        offlineDb.pages.delete(cleanId).catch(console.debug);
-        if (item.subpages) {
-          for (const sub of item.subpages) {
-            offlineDb.pages.delete(sub.id).catch(console.debug);
-          }
-        }
-        try {
-          await supabase.from('note_pages').delete().eq('id', cleanId);
-        } catch { /* ignore */ }
-      }
-    }
-
-    toast.success('Lixeira esvaziada.');
   },
 
   setActiveSectionId: (id) => {

@@ -23,17 +23,6 @@ export interface NoteLinkRelation {
   user_id: string;
 }
 
-export interface DeletedNoteItem {
-  id: string;
-  type: 'page' | 'section';
-  title: string;
-  deletedAt: string;
-  pageData?: NotePage;
-  subpages?: NotePage[];
-  sectionData?: NoteSection;
-  sectionPages?: NotePage[];
-}
-
 export type BlockType = 'text' | 'script' | 'vault' | 'link' | 'image' | 'whiteboard' | 'drawio' | 'excalidraw';
 
 export type DrawingElementType = 

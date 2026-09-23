@@ -28,7 +28,6 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
   const pages = useNoteStore((state) => state.pages);
   const activeSectionId = useNoteStore((state) => state.activeSectionId);
   const activePageId = useNoteStore((state) => state.activePageId);
-  const deletedItems = useNoteStore((state) => state.deletedItems);
   const pageSyncStatuses = useNoteStore((state) => state.pageSyncStatuses);
 
   const setActiveSectionId = useNoteStore((state) => state.setActiveSectionId);
@@ -43,7 +42,6 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
   const deletePage = useNoteStore((state) => state.deletePage);
   const reorderPages = useNoteStore((state) => state.reorderPages);
   const movePage = useNoteStore((state) => state.movePage);
-  const restoreLastDeleted = useNoteStore((state) => state.restoreLastDeleted);
   const resolveConflict = useNoteStore((state) => state.resolveConflict);
 
   const [expandedSections, setExpandedSections] = useState<string[]>(() => {
@@ -111,7 +109,6 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isDiagnosticOpen, setIsDiagnosticOpen] = useState(false);
-  const [isTrashOpen, setIsTrashOpen] = useState(false);
   const [dialogType, setDialogType] = useState<'section' | 'page'>('section');
   const [deleteType, setDeleteType] = useState<'section' | 'page'>('page');
   const [dialogMode, setDialogMode] = useState<'create' | 'edit'>('create');
