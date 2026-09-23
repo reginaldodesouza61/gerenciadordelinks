@@ -1005,10 +1005,37 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const pagesKey = getUserCacheKey(targetUserId, 'note_pages');
     const relationsKey = getUserCacheKey(targetUserId, 'note_relations');
 
+    const storedTrash = getStoredTrash();
+    const trashedSectionIds = new Set<string>();
+    const trashedPageIds = new Set<string>();
+    for (const item of storedTrash) {
+      if (item.type === 'section') {
+        trashedSectionIds.add(item.id);
+        trashedSectionIds.add(sanitizeUuid(item.id));
+        if (item.sectionPages) {
+          item.sectionPages.forEach(p => {
+            trashedPageIds.add(p.id);
+            trashedPageIds.add(sanitizeUuid(p.id));
+          });
+        }
+      } else if (item.type === 'page') {
+        trashedPageIds.add(item.id);
+        trashedPageIds.add(sanitizeUuid(item.id));
+        if (item.subpages) {
+          item.subpages.forEach(sub => {
+            trashedPageIds.add(sub.id);
+            trashedPageIds.add(sanitizeUuid(sub.id));
+          });
+        }
+      }
+    }
+
     const rawCachedSections = getCached<NoteSection[]>(sectionsKey, targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : []);
-    const localCachedSections = sortSectionsByStoredOrder(rawCachedSections, targetUserId);
+    const localCachedSections = sortSectionsByStoredOrder(rawCachedSections, targetUserId)
+      .filter(s => !trashedSectionIds.has(s.id) && !trashedSectionIds.has(sanitizeUuid(s.id)));
     const rawCachedPages = getCached<NotePage[]>(pagesKey, targetUserId === DEFAULT_USER_ID ? DEFAULT_PAGES : []);
-    const localCachedPages = sortPagesByStoredOrder(rawCachedPages, targetUserId);
+    const localCachedPages = sortPagesByStoredOrder(rawCachedPages, targetUserId)
+      .filter(p => !trashedPageIds.has(p.id) && !trashedPageIds.has(sanitizeUuid(p.id)) && !trashedSectionIds.has(p.section_id) && !trashedSectionIds.has(sanitizeUuid(p.section_id)));
     const cachedRelations = getCached<NoteLinkRelation[]>(relationsKey, []);
 
     let dexiePages: LocalNotePage[] = [];
@@ -1022,17 +1049,21 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       console.debug('Failed to read Dexie storage during fetchNotes:', e);
     }
 
-    const userDexiePages = dexiePages.filter(p => p.user_id === targetUserId || targetUserId === DEFAULT_USER_ID);
-    const userDexieSections = dexieSections.filter(s => s.user_id === targetUserId || targetUserId === DEFAULT_USER_ID);
+    const userDexiePages = dexiePages
+      .filter(p => p.user_id === targetUserId || targetUserId === DEFAULT_USER_ID)
+      .filter(p => !trashedPageIds.has(p.id) && !trashedPageIds.has(sanitizeUuid(p.id)) && !trashedSectionIds.has(p.section_id) && !trashedSectionIds.has(sanitizeUuid(p.section_id)));
+    const userDexieSections = dexieSections
+      .filter(s => s.user_id === targetUserId || targetUserId === DEFAULT_USER_ID)
+      .filter(s => !trashedSectionIds.has(s.id) && !trashedSectionIds.has(sanitizeUuid(s.id)));
 
     // Merge immediate in-memory view
     const immediateSectionsMap = new Map<string, NoteSection>();
-    (localCachedSections.length > 0 ? localCachedSections : (targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : [])).forEach(s => immediateSectionsMap.set(s.id, s));
+    (localCachedSections.length > 0 ? localCachedSections : (targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS.filter(s => !trashedSectionIds.has(s.id)) : [])).forEach(s => immediateSectionsMap.set(s.id, s));
     userDexieSections.forEach(s => immediateSectionsMap.set(s.id, s));
     const immediateSections = sortSectionsByStoredOrder(Array.from(immediateSectionsMap.values()), targetUserId);
 
     const immediatePagesMap = new Map<string, NotePage>();
-    (localCachedPages.length > 0 ? localCachedPages : (targetUserId === DEFAULT_USER_ID ? DEFAULT_PAGES : [])).forEach(p => immediatePagesMap.set(p.id, p));
+    (localCachedPages.length > 0 ? localCachedPages : (targetUserId === DEFAULT_USER_ID ? DEFAULT_PAGES.filter(p => !trashedPageIds.has(p.id) && !trashedSectionIds.has(p.section_id)) : [])).forEach(p => immediatePagesMap.set(p.id, p));
     userDexiePages.forEach(p => immediatePagesMap.set(p.id, p));
     const immediatePages = sortPagesByStoredOrder(Array.from(immediatePagesMap.values()), targetUserId);
 
@@ -1102,10 +1133,17 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         const mergedSectionsMap = new Map<string, NoteSection>();
         // Populate with immediate local sections first to retain order information
         immediateSections.forEach(s => {
-          mergedSectionsMap.set(s.id, s);
+          if (!trashedSectionIds.has(s.id) && !trashedSectionIds.has(sanitizeUuid(s.id))) {
+            mergedSectionsMap.set(s.id, s);
+          }
         });
         // Merge remote sections, preserving local .ordem if present
         rawSections.forEach(s => {
+          if (trashedSectionIds.has(s.id) || trashedSectionIds.has(sanitizeUuid(s.id))) {
+            // Background cleanup of remote trashed section
+            supabase.from('note_sections').delete().eq('id', s.id).then().catch(console.debug);
+            return;
+          }
           const localSec = mergedSectionsMap.get(s.id);
           mergedSectionsMap.set(s.id, {
             ...s,
@@ -1116,7 +1154,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         const finalSections = sortSectionsByStoredOrder(
           Array.from(mergedSectionsMap.values()).length > 0 
             ? Array.from(mergedSectionsMap.values()) 
-            : (targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : []), 
+            : ((targetUserId === DEFAULT_USER_ID && storedTrash.length === 0) ? DEFAULT_SECTIONS : []), 
           targetUserId
         );
 
@@ -1125,6 +1163,10 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           try {
             for (const sec of finalSections) {
               await offlineDb.sections.put(sec);
+            }
+            // Clean any trashed sections from Dexie
+            for (const tSecId of trashedSectionIds) {
+              await offlineDb.sections.delete(tSecId);
             }
           } catch (dexSecErr) {
             console.debug('Failed to save sections to Dexie:', dexSecErr);
@@ -1161,12 +1203,26 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
         const mergedPagesMap = new Map<string, NotePage>();
 
-        // First, add all remote pages that aren't deleted in pending sync queue
+        // First, add all remote pages that aren't deleted in pending sync queue or trashed
         for (const remotePage of decryptedRemotePages) {
-          if (deletedPageIds.has(remotePage.id)) continue;
+          const isTrashed = trashedPageIds.has(remotePage.id) || 
+            trashedPageIds.has(sanitizeUuid(remotePage.id)) ||
+            trashedSectionIds.has(remotePage.section_id) ||
+            trashedSectionIds.has(sanitizeUuid(remotePage.section_id));
 
-          const localMatch = dexieMap.get(remotePage.id);
-          const isPendingSync = pendingPageIds.has(remotePage.id);
+          if (isTrashed) {
+            // Background cleanup of remote trashed page
+            supabase.from('note_pages').delete().eq('id', remotePage.id).then().catch(console.debug);
+            offlineDb.pages.delete(remotePage.id).catch(console.debug);
+            continue;
+          }
+
+          if (deletedPageIds.has(remotePage.id) || deletedPageIds.has(sanitizeUuid(remotePage.id))) {
+            continue;
+          }
+
+          const localMatch = dexieMap.get(remotePage.id) || dexieMap.get(sanitizeUuid(remotePage.id));
+          const isPendingSync = pendingPageIds.has(remotePage.id) || pendingPageIds.has(sanitizeUuid(remotePage.id));
 
           if (localMatch) {
             initialSyncStatuses[remotePage.id] = isPendingSync ? 'pending' : localMatch.syncStatus;
@@ -1219,6 +1275,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         // Second, preserve any local Dexie pages that aren't on remote yet (e.g. created offline / pending sync)
         for (const localPage of localDexiePages) {
           if (localPage.user_id !== targetUserId && targetUserId !== DEFAULT_USER_ID) continue;
+          if (trashedPageIds.has(localPage.id) || trashedPageIds.has(sanitizeUuid(localPage.id)) || trashedSectionIds.has(localPage.section_id)) continue;
           if (deletedPageIds.has(localPage.id)) continue;
           if (!mergedPagesMap.has(localPage.id)) {
             mergedPagesMap.set(localPage.id, localPage);
@@ -1229,6 +1286,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         // Third, preserve any local cached pages
         for (const cachedPage of localCachedPages) {
           if (cachedPage.user_id !== targetUserId && targetUserId !== DEFAULT_USER_ID) continue;
+          if (trashedPageIds.has(cachedPage.id) || trashedPageIds.has(sanitizeUuid(cachedPage.id)) || trashedSectionIds.has(cachedPage.section_id)) continue;
           if (deletedPageIds.has(cachedPage.id)) continue;
           if (!mergedPagesMap.has(cachedPage.id)) {
             mergedPagesMap.set(cachedPage.id, cachedPage);
@@ -1244,7 +1302,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         }
 
         let reconciledPages = Array.from(mergedPagesMap.values());
-        if (reconciledPages.length === 0 && targetUserId === DEFAULT_USER_ID) {
+        if (reconciledPages.length === 0 && targetUserId === DEFAULT_USER_ID && storedTrash.length === 0) {
           reconciledPages = DEFAULT_PAGES;
         }
 
@@ -1441,7 +1499,8 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const sectionToDelete = state.sections.find(s => s.id === cleanId || s.id === id);
     if (!sectionToDelete) return;
 
-    const userId = sectionToDelete.user_id;
+    const currentUserId = useAuthStore.getState().user?.id || DEFAULT_USER_ID;
+    const effectiveUserId = sectionToDelete.user_id || currentUserId;
     const pagesToDelete = state.pages.filter(p => p.section_id === cleanId || p.section_id === id);
 
     const trashItem: DeletedNoteItem = {
@@ -1457,23 +1516,27 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     saveTrashToStorage(nextTrash);
 
     const remainingSections = state.sections.filter(s => s.id !== cleanId && s.id !== id);
-    saveSectionOrder(remainingSections.map(s => s.id));
-    setCached(getUserCacheKey(userId, 'note_sections'), remainingSections);
+    saveSectionOrder(remainingSections.map(s => s.id), currentUserId);
+    setCached(getUserCacheKey(currentUserId, 'note_sections'), remainingSections);
+    setCached(getUserCacheKey(effectiveUserId, 'note_sections'), remainingSections);
+    setCached(getUserCacheKey(DEFAULT_USER_ID, 'note_sections'), remainingSections);
 
     const remainingPages = state.pages.filter(p => p.section_id !== cleanId && p.section_id !== id);
-    savePageOrder(remainingPages.map(p => p.id));
-    setCached(getUserCacheKey(userId, 'note_pages'), remainingPages);
+    savePageOrder(remainingPages.map(p => p.id), currentUserId);
+    setCached(getUserCacheKey(currentUserId, 'note_pages'), remainingPages);
+    setCached(getUserCacheKey(effectiveUserId, 'note_pages'), remainingPages);
+    setCached(getUserCacheKey(DEFAULT_USER_ID, 'note_pages'), remainingPages);
 
     const isCurrentActiveSection = state.activeSectionId === cleanId || state.activeSectionId === id;
     const isCurrentActivePage = pagesToDelete.some(p => p.id === state.activePageId);
 
     if (isCurrentActiveSection) {
       const nextSecId = remainingSections.length > 0 ? remainingSections[0].id : null;
-      saveActiveSectionId(nextSecId);
+      saveActiveSectionId(nextSecId, currentUserId);
     }
     if (isCurrentActivePage) {
       const nextPage = remainingPages.find(p => p.section_id === (remainingSections.length > 0 ? remainingSections[0].id : ''));
-      saveActivePageId(nextPage?.id || null);
+      saveActivePageId(nextPage?.id || null, currentUserId);
     }
 
     set(st => ({
@@ -1484,10 +1547,29 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       activePageId: isCurrentActivePage ? (remainingPages.length > 0 ? remainingPages[0].id : null) : st.activePageId
     }));
 
+    // IndexedDB removal
     try {
+      if (offlineDb.sections) {
+        await offlineDb.sections.delete(cleanId);
+        if (id !== cleanId) await offlineDb.sections.delete(id);
+      }
+      for (const p of pagesToDelete) {
+        const pId = sanitizeUuid(p.id);
+        await offlineDb.pages.delete(p.id);
+        if (pId !== p.id) await offlineDb.pages.delete(pId);
+        await offlineDb.syncQueue.where('pageId').equals(p.id).delete();
+        if (pId !== p.id) await offlineDb.syncQueue.where('pageId').equals(pId).delete();
+      }
+    } catch (e) {
+      console.debug('Dexie section delete error:', e);
+    }
+
+    // Remote Supabase removal: delete child pages first to satisfy foreign key constraints, then delete section
+    try {
+      await supabase.from('note_pages').delete().eq('section_id', cleanId);
       await supabase.from('note_sections').delete().eq('id', cleanId);
     } catch (e) {
-      console.debug('Section deleted locally:', e);
+      console.debug('Section deleted locally, background sync pending:', e);
     }
 
     toast('Seção enviada para a Lixeira', {
@@ -1771,7 +1853,8 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const pageToDelete = state.pages.find(p => p.id === cleanId || p.id === id);
     if (!pageToDelete) return;
 
-    const userId = pageToDelete.user_id;
+    const currentUserId = useAuthStore.getState().user?.id || DEFAULT_USER_ID;
+    const effectiveUserId = pageToDelete.user_id || currentUserId;
 
     const getSubpages = (pageId: string): NotePage[] => {
       const children = state.pages.filter(p => p.parent_id === pageId);
@@ -1797,13 +1880,15 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     saveTrashToStorage(nextTrash);
 
     const remainingPages = state.pages.filter(p => !allPagesToDelete.some(dp => dp.id === p.id));
-    savePageOrder(remainingPages.map(p => p.id));
-    setCached(getUserCacheKey(userId, 'note_pages'), remainingPages);
+    savePageOrder(remainingPages.map(p => p.id), currentUserId);
+    setCached(getUserCacheKey(currentUserId, 'note_pages'), remainingPages);
+    setCached(getUserCacheKey(effectiveUserId, 'note_pages'), remainingPages);
+    setCached(getUserCacheKey(DEFAULT_USER_ID, 'note_pages'), remainingPages);
 
     const isCurrentActivePage = state.activePageId === cleanId || state.activePageId === id || allPagesToDelete.some(dp => dp.id === state.activePageId);
     if (isCurrentActivePage) {
       const fallbackPage = remainingPages.find(p => p.section_id === pageToDelete.section_id) || (remainingPages.length > 0 ? remainingPages[0] : null);
-      saveActivePageId(fallbackPage?.id || null);
+      saveActivePageId(fallbackPage?.id || null, currentUserId);
     }
 
     set({
@@ -1817,15 +1902,16 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         const cId = sanitizeUuid(p.id);
         await offlineDb.pages.delete(p.id);
         if (cId !== p.id) await offlineDb.pages.delete(cId);
-        await offlineDb.syncQueue.add({
-          pageId: cId,
-          action: 'delete',
-          payload: { id: cId },
-          timestamp: Date.now(),
-          attempts: 0
-        });
+        await offlineDb.syncQueue.where('pageId').equals(p.id).delete();
+        if (cId !== p.id) await offlineDb.syncQueue.where('pageId').equals(cId).delete();
+        
+        // Exclusão remota imediata no Supabase
+        try {
+          await supabase.from('note_pages').delete().eq('id', cId);
+        } catch (subErr) {
+          console.debug('Supabase direct note delete error:', subErr);
+        }
       }
-      get().syncPendingQueue().catch(console.error);
     } catch (e) {
       console.error('Dexie queue delete failed:', e);
     }
@@ -1899,6 +1985,8 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       return;
     }
 
+    const currentUserId = useAuthStore.getState().user?.id || DEFAULT_USER_ID;
+
     try {
       if (itemToRestore.type === 'section' && itemToRestore.sectionData) {
         const section = itemToRestore.sectionData;
@@ -1906,18 +1994,33 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
         const remainingTrash = state.deletedItems.filter(item => item.id !== id);
         saveTrashToStorage(remainingTrash);
-        saveActiveSectionId(section.id);
+        saveActiveSectionId(section.id, currentUserId);
 
         const updatedSections = state.sections.some(s => s.id === section.id) ? state.sections : [...state.sections, section];
-        saveSectionOrder(updatedSections.map(s => s.id));
-        setCached(CACHE_KEYS.SECTIONS, updatedSections);
+        saveSectionOrder(updatedSections.map(s => s.id), currentUserId);
+        setCached(getUserCacheKey(currentUserId, 'note_sections'), updatedSections);
+        setCached(getUserCacheKey(section.user_id || DEFAULT_USER_ID, 'note_sections'), updatedSections);
 
         const updatedPages = [
           ...state.pages.filter(p => !pages.some(rp => rp.id === p.id)),
           ...pages
         ];
-        savePageOrder(updatedPages.map(p => p.id));
-        setCached(CACHE_KEYS.PAGES, updatedPages);
+        savePageOrder(updatedPages.map(p => p.id), currentUserId);
+        setCached(getUserCacheKey(currentUserId, 'note_pages'), updatedPages);
+        setCached(getUserCacheKey(section.user_id || DEFAULT_USER_ID, 'note_pages'), updatedPages);
+
+        if (offlineDb.sections) {
+          await offlineDb.sections.put(section);
+        }
+        for (const p of pages) {
+          await offlineDb.pages.put({
+            ...p,
+            localVersion: 1,
+            remoteVersion: 0,
+            syncStatus: 'pending',
+            lastUpdatedAt: Date.now()
+          });
+        }
 
         set({
           sections: updatedSections,
@@ -1962,15 +2065,26 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         const remainingTrash = state.deletedItems.filter(item => item.id !== id);
         saveTrashToStorage(remainingTrash);
 
-        saveActivePageId(page.id);
-        saveActiveSectionId(targetSectionId);
+        saveActivePageId(page.id, currentUserId);
+        saveActiveSectionId(targetSectionId, currentUserId);
 
         const updatedPages = [
           ...state.pages.filter(p => !normalizedPages.some(np => np.id === p.id)),
           ...normalizedPages
         ];
-        savePageOrder(updatedPages.map(p => p.id));
-        setCached(CACHE_KEYS.PAGES, updatedPages);
+        savePageOrder(updatedPages.map(p => p.id), currentUserId);
+        setCached(getUserCacheKey(currentUserId, 'note_pages'), updatedPages);
+        setCached(getUserCacheKey(page.user_id || DEFAULT_USER_ID, 'note_pages'), updatedPages);
+
+        for (const p of normalizedPages) {
+          await offlineDb.pages.put({
+            ...p,
+            localVersion: 1,
+            remoteVersion: 0,
+            syncStatus: 'pending',
+            lastUpdatedAt: Date.now()
+          });
+        }
 
         set({
           pages: updatedPages,
@@ -2008,17 +2122,78 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     await restoreItem(deletedItems[0].id);
   },
 
-  permanentlyDelete: (id: string) => {
+  permanentlyDelete: async (id: string) => {
     const state = get();
+    const itemToDelete = state.deletedItems.find(item => item.id === id);
     const nextTrash = state.deletedItems.filter(item => item.id !== id);
     saveTrashToStorage(nextTrash);
     set({ deletedItems: nextTrash });
+
+    if (itemToDelete) {
+      const cleanId = sanitizeUuid(itemToDelete.id);
+      if (itemToDelete.type === 'section') {
+        if (offlineDb.sections) offlineDb.sections.delete(cleanId).catch(console.debug);
+        if (itemToDelete.sectionPages) {
+          for (const p of itemToDelete.sectionPages) {
+            offlineDb.pages.delete(p.id).catch(console.debug);
+          }
+        }
+        try {
+          await supabase.from('note_pages').delete().eq('section_id', cleanId);
+          await supabase.from('note_sections').delete().eq('id', cleanId);
+        } catch (e) {
+          console.debug('Permanently delete section error:', e);
+        }
+      } else if (itemToDelete.type === 'page') {
+        offlineDb.pages.delete(cleanId).catch(console.debug);
+        if (itemToDelete.subpages) {
+          for (const sub of itemToDelete.subpages) {
+            offlineDb.pages.delete(sub.id).catch(console.debug);
+          }
+        }
+        try {
+          await supabase.from('note_pages').delete().eq('id', cleanId);
+        } catch (e) {
+          console.debug('Permanently delete page error:', e);
+        }
+      }
+    }
+
     toast.success('Item removido da lixeira permanentemente.');
   },
 
-  emptyTrash: () => {
+  emptyTrash: async () => {
+    const state = get();
+    const currentTrash = state.deletedItems;
     saveTrashToStorage([]);
     set({ deletedItems: [] });
+
+    for (const item of currentTrash) {
+      const cleanId = sanitizeUuid(item.id);
+      if (item.type === 'section') {
+        if (offlineDb.sections) offlineDb.sections.delete(cleanId).catch(console.debug);
+        if (item.sectionPages) {
+          for (const p of item.sectionPages) {
+            offlineDb.pages.delete(p.id).catch(console.debug);
+          }
+        }
+        try {
+          await supabase.from('note_pages').delete().eq('section_id', cleanId);
+          await supabase.from('note_sections').delete().eq('id', cleanId);
+        } catch { /* ignore */ }
+      } else if (item.type === 'page') {
+        offlineDb.pages.delete(cleanId).catch(console.debug);
+        if (item.subpages) {
+          for (const sub of item.subpages) {
+            offlineDb.pages.delete(sub.id).catch(console.debug);
+          }
+        }
+        try {
+          await supabase.from('note_pages').delete().eq('id', cleanId);
+        } catch { /* ignore */ }
+      }
+    }
+
     toast.success('Lixeira esvaziada.');
   },
 
