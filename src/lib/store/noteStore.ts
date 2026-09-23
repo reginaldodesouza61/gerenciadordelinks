@@ -303,8 +303,59 @@ function getStoredTrash(): DeletedNoteItem[] {
 function saveTrashToStorage(items: DeletedNoteItem[]) {
   try {
     localStorage.setItem(TRASH_STORAGE_KEY, JSON.stringify(items));
+    const effectiveUserId = useAuthStore.getState().user?.id;
+    if (effectiveUserId && effectiveUserId !== DEFAULT_USER_ID) {
+      supabase.auth.updateUser({
+        data: { atlas_notes_trash: items }
+      }).catch((err) => {
+        console.debug('Failed to sync trash to Supabase user metadata:', err);
+      });
+    }
   } catch (e) {
     console.error('Error saving trash to storage:', e);
+  }
+}
+
+async function syncTrashWithRemote(currentUserId?: string): Promise<DeletedNoteItem[]> {
+  const localTrash = getStoredTrash();
+  const effectiveUserId = currentUserId || useAuthStore.getState().user?.id;
+  if (!effectiveUserId || effectiveUserId === DEFAULT_USER_ID) {
+    return localTrash;
+  }
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const remoteTrash = (session?.user?.user_metadata?.atlas_notes_trash as DeletedNoteItem[]) || [];
+
+    if (!Array.isArray(remoteTrash)) return localTrash;
+
+    // Merge remote and local trash (union by ID)
+    const trashMap = new Map<string, DeletedNoteItem>();
+    remoteTrash.forEach(item => trashMap.set(item.id, item));
+    localTrash.forEach(item => {
+      if (!trashMap.has(item.id)) {
+        trashMap.set(item.id, item);
+      }
+    });
+
+    const mergedTrash = Array.from(trashMap.values());
+    try {
+      localStorage.setItem(TRASH_STORAGE_KEY, JSON.stringify(mergedTrash));
+    } catch {
+      // ignore
+    }
+
+    // If local had new items not yet in remote user_metadata, upload them
+    if (mergedTrash.length > remoteTrash.length) {
+      supabase.auth.updateUser({
+        data: { atlas_notes_trash: mergedTrash }
+      }).catch(console.debug);
+    }
+
+    return mergedTrash;
+  } catch (err) {
+    console.debug('Failed to sync trash with remote metadata:', err);
+    return localTrash;
   }
 }
 
@@ -1044,7 +1095,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const pagesKey = getUserCacheKey(targetUserId, 'note_pages');
     const relationsKey = getUserCacheKey(targetUserId, 'note_relations');
 
-    const storedTrash = getStoredTrash();
+    const storedTrash = await syncTrashWithRemote(targetUserId);
     const trashedSectionIds = new Set<string>();
     const trashedPageIds = new Set<string>();
     for (const item of storedTrash) {
@@ -1069,9 +1120,26 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       }
     }
 
-    // Load Dexie tombstones into trashed sets
+    // Load Dexie tombstones into trashed sets & save remote trash to local tombstones
     try {
       if (offlineDb.tombstones) {
+        for (const tSecId of trashedSectionIds) {
+          await offlineDb.tombstones.put({
+            id: sanitizeUuid(tSecId),
+            type: 'section',
+            userId: targetUserId,
+            deletedAt: Date.now()
+          });
+        }
+        for (const tPageId of trashedPageIds) {
+          await offlineDb.tombstones.put({
+            id: sanitizeUuid(tPageId),
+            type: 'page',
+            userId: targetUserId,
+            deletedAt: Date.now()
+          });
+        }
+
         const tombstones = await offlineDb.tombstones.toArray();
         for (const t of tombstones) {
           if (t.type === 'section') {
@@ -1084,7 +1152,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         }
       }
     } catch (tombErr) {
-      console.debug('Failed to read Dexie tombstones:', tombErr);
+      console.debug('Failed to read/write Dexie tombstones:', tombErr);
     }
 
     const rawCachedSections = getCached<NoteSection[]>(sectionsKey, targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : []);
@@ -1194,10 +1262,17 @@ export const useNoteStore = create<NoteState>((set, get) => ({
             mergedSectionsMap.set(s.id, s);
           }
         });
+
+        const pendingQueue = await offlineDb.syncQueue.toArray();
+        const pendingPageIds = new Set(pendingQueue.map(item => item.pageId));
+        const offlineCreatedPageIds = new Set(pendingQueue.filter(item => item.action === 'create').map(item => item.pageId));
+        const deletedPageIds = new Set(pendingQueue.filter(item => item.action === 'delete').map(item => item.pageId));
+
         // Merge remote sections, preserving local .ordem if present
         rawSections.forEach(s => {
           if (trashedSectionIds.has(s.id) || trashedSectionIds.has(sanitizeUuid(s.id))) {
             // Background cleanup of remote trashed section
+            supabase.from('note_pages').delete().eq('section_id', s.id).then().catch(console.debug);
             supabase.from('note_sections').delete().eq('id', s.id).then().catch(console.debug);
             return;
           }
@@ -1207,6 +1282,17 @@ export const useNoteStore = create<NoteState>((set, get) => ({
             ordem: (localSec && localSec.ordem !== undefined) ? localSec.ordem : s.ordem
           });
         });
+
+        // If we fetched sections from Supabase, purge any local sections that no longer exist on server and are not pending creation
+        if (rawSections.length > 0) {
+          const remoteSectionIds = new Set(rawSections.map(s => s.id).concat(rawSections.map(s => sanitizeUuid(s.id))));
+          for (const [secId, sec] of mergedSectionsMap.entries()) {
+            if (!remoteSectionIds.has(secId) && !remoteSectionIds.has(sanitizeUuid(secId))) {
+              mergedSectionsMap.delete(secId);
+              if (offlineDb.sections) offlineDb.sections.delete(secId).catch(console.debug);
+            }
+          }
+        }
 
         const finalSections = sortSectionsByStoredOrder(
           Array.from(mergedSectionsMap.values()).length > 0 
@@ -1253,9 +1339,6 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         // Reconcile and merge fetched Supabase pages with Dexie IndexedDB & local cache
         const localDexiePages = await offlineDb.pages.toArray();
         const dexieMap = new Map(localDexiePages.map(p => [p.id, p]));
-        const pendingQueue = await offlineDb.syncQueue.toArray();
-        const pendingPageIds = new Set(pendingQueue.map(item => item.pageId));
-        const deletedPageIds = new Set(pendingQueue.filter(item => item.action === 'delete').map(item => item.pageId));
         const initialSyncStatuses: Record<string, 'synced' | 'pending' | 'conflict'> = {};
 
         const mergedPagesMap = new Map<string, NotePage>();
@@ -1329,7 +1412,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           }
         }
 
-        // Second, preserve all local Dexie pages that are not in trash/tombstones
+        // Second, preserve ONLY genuinely offline-created local Dexie pages that have not yet been synced
         for (const localPage of localDexiePages) {
           if (trashedPageIds.has(localPage.id) || trashedPageIds.has(sanitizeUuid(localPage.id)) || trashedSectionIds.has(localPage.section_id) || trashedSectionIds.has(sanitizeUuid(localPage.section_id))) {
             await offlineDb.pages.delete(localPage.id);
@@ -1341,48 +1424,23 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           }
 
           if (!mergedPagesMap.has(localPage.id) && !mergedPagesMap.has(sanitizeUuid(localPage.id))) {
-            // Check if page was previously synced with server but deleted remotely
-            const wasDeletedRemotely = rawPagesData.length > 0 && 
-              localPage.syncStatus === 'synced' && 
-              (localPage.remoteVersion || 0) > 0 && 
-              !pendingPageIds.has(localPage.id);
-
-            if (wasDeletedRemotely) {
-              await offlineDb.pages.delete(localPage.id);
-            } else {
-              // Valid local page (created offline, pending sync, or from local cache)
-              const isPendingInQueue = pendingPageIds.has(localPage.id) || pendingPageIds.has(sanitizeUuid(localPage.id));
-              const isLocalPending = localPage.syncStatus === 'pending';
-              const needsSync = isPendingInQueue || isLocalPending;
-
+            const isCreatedOffline = offlineCreatedPageIds.has(localPage.id) || offlineCreatedPageIds.has(sanitizeUuid(localPage.id));
+            
+            if (isCreatedOffline) {
+              // Valid page created offline on this device waiting to be synced to Supabase
               mergedPagesMap.set(localPage.id, {
                 ...localPage,
                 user_id: targetUserId
               });
-              initialSyncStatuses[localPage.id] = needsSync ? 'pending' : (localPage.syncStatus || 'synced');
-
-              // If it needs sync and isn't queued yet, enqueue it so syncPendingQueue pushes it to server
-              if (needsSync && !isPendingInQueue) {
-                await offlineDb.syncQueue.put({
-                  pageId: localPage.id,
-                  action: 'create',
-                  payload: {
-                    id: sanitizeUuid(localPage.id),
-                    titulo: localPage.titulo,
-                    conteudo: localPage.conteudo,
-                    section_id: sanitizeUuid(localPage.section_id),
-                    parent_id: sanitizeUuidOrNull(localPage.parent_id),
-                    user_id: targetUserId
-                  },
-                  timestamp: Date.now(),
-                  attempts: 0
-                });
-              }
+              initialSyncStatuses[localPage.id] = 'pending';
+            } else {
+              // Page was deleted remotely on another browser/device - purge it locally
+              await offlineDb.pages.delete(localPage.id);
             }
           }
         }
 
-        // Third, preserve any local cached pages from localStorage
+        // Third, preserve ONLY genuinely offline-created cached pages
         for (const cachedPage of localCachedPages) {
           if (trashedPageIds.has(cachedPage.id) || trashedPageIds.has(sanitizeUuid(cachedPage.id)) || trashedSectionIds.has(cachedPage.section_id) || trashedSectionIds.has(sanitizeUuid(cachedPage.section_id))) {
             continue;
@@ -1391,20 +1449,14 @@ export const useNoteStore = create<NoteState>((set, get) => ({
             continue;
           }
           if (!mergedPagesMap.has(cachedPage.id) && !mergedPagesMap.has(sanitizeUuid(cachedPage.id))) {
-            const isPendingInQueue = pendingPageIds.has(cachedPage.id) || pendingPageIds.has(sanitizeUuid(cachedPage.id));
-            mergedPagesMap.set(cachedPage.id, {
-              ...cachedPage,
-              user_id: targetUserId
-            });
-            await offlineDb.pages.put({
-              ...cachedPage,
-              user_id: targetUserId,
-              localVersion: 1,
-              remoteVersion: 0,
-              syncStatus: isPendingInQueue ? 'pending' : 'synced',
-              lastUpdatedAt: Date.now()
-            });
-            initialSyncStatuses[cachedPage.id] = isPendingInQueue ? 'pending' : 'synced';
+            const isCreatedOffline = offlineCreatedPageIds.has(cachedPage.id) || offlineCreatedPageIds.has(sanitizeUuid(cachedPage.id));
+            if (isCreatedOffline) {
+              mergedPagesMap.set(cachedPage.id, {
+                ...cachedPage,
+                user_id: targetUserId
+              });
+              initialSyncStatuses[cachedPage.id] = 'pending';
+            }
           }
         }
 
