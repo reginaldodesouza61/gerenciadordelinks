@@ -794,9 +794,6 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       // Dispara envio imediato da fila para o Supabase
       await get().syncPendingQueue();
 
-      if (migratedPages > 0) {
-        toast.success(`${migratedPages} nota(s) vinculadas ao seu usuário e enviadas para a nuvem!`);
-      }
       return { migratedPages, migratedSections };
     } catch (err) {
       console.error('[Migration] Falha na migração automática para Supabase:', err);
@@ -1370,7 +1367,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   },
 
   addSection: async (nome, userId) => {
-    const fallbackUserId = userId || DEFAULT_USER_ID;
+    const fallbackUserId = userId || useAuthStore.getState().user?.id || DEFAULT_USER_ID;
     const newSectionId = generateUuid();
     const newSection: NoteSection = {
       id: newSectionId,
@@ -1384,9 +1381,23 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     saveSectionOrder(updatedSections.map(s => s.id), fallbackUserId);
     setCached(getUserCacheKey(fallbackUserId, 'note_sections'), updatedSections);
 
-    set({ sections: updatedSections });
-    get().setActiveSectionId(newSection.id);
-    toast.success('Seção criada!');
+    // Salvar seção no IndexedDB
+    try {
+      if (offlineDb.sections) {
+        await offlineDb.sections.put(newSection);
+      }
+    } catch (e) {
+      console.debug('[Dexie] Erro ao gravar seção local:', e);
+    }
+
+    saveActiveSectionId(newSection.id, fallbackUserId);
+    saveActivePageId(null, fallbackUserId);
+
+    set({ 
+      sections: updatedSections,
+      activeSectionId: newSection.id,
+      activePageId: null
+    });
 
     try {
       const { data, error } = await supabase
@@ -1400,11 +1411,11 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         saveSectionOrder(syncedSections.map(s => s.id), fallbackUserId);
         setCached(getUserCacheKey(fallbackUserId, 'note_sections'), syncedSections);
         set({ sections: syncedSections, activeSectionId: data.id });
-        return data;
       }
     } catch (e) {
       console.debug('Section saved locally, background sync pending:', e);
     }
+
     return newSection;
   },
 
@@ -2014,6 +2025,32 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   setActiveSectionId: (id) => {
     const userId = useAuthStore.getState().user?.id;
     saveActiveSectionId(id, userId);
+
+    if (id) {
+      const allPages = get().pages;
+      const currentActivePage = allPages.find(p => p.id === get().activePageId);
+
+      // Se a página atualmente ativa já pertence a esta seção, mantém
+      if (currentActivePage && currentActivePage.section_id === id) {
+        set({ activeSectionId: id });
+        return;
+      }
+
+      // Procura páginas pertencentes a esta seção
+      const sectionPages = allPages.filter(p => p.section_id === id);
+      if (sectionPages.length > 0) {
+        const rootPage = sectionPages.find(p => !p.parent_id) || sectionPages[0];
+        saveActivePageId(rootPage.id, userId);
+        set({ activeSectionId: id, activePageId: rootPage.id });
+        return;
+      } else {
+        // Se a seção não tem páginas ainda, limpa o activePageId
+        saveActivePageId(null, userId);
+        set({ activeSectionId: id, activePageId: null });
+        return;
+      }
+    }
+
     set({ activeSectionId: id });
   },
 

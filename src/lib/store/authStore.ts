@@ -187,7 +187,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           localStorage.setItem(GUEST_STORAGE_KEY, 'true');
           const guest = createGuestUser();
           set({ user: guest, session: null, isAnonymous: true, initialized: true, loading: false });
-          toast.info('Modo Local ativo. (Para sincronização em nuvem, habilite Anonymous Sign-ins no painel do Supabase).');
           return false;
         }
 
@@ -211,8 +210,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           loading: false
         });
 
-        toast.success('Workspace anônimo autenticado com Supabase!');
-
         // Migrar notas do IndexedDB imediatamente para o novo UID real
         try {
           const { useNoteStore } = await import('@/lib/store/noteStore');
@@ -231,7 +228,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       localStorage.setItem(GUEST_STORAGE_KEY, 'true');
       const guest = createGuestUser();
       set({ user: guest, session: null, isAnonymous: true, initialized: true, loading: false });
-      toast.error('Erro na autenticação anônima do Supabase. Iniciando em modo local.');
       return false;
     } finally {
       set({ loading: false });
@@ -247,7 +243,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (!ok && !get().user) {
       const guest = createGuestUser();
       set({ user: guest, session: null, isAnonymous: true, initialized: true, loading: false });
-      toast.success('Workspace aberto com sucesso!');
     }
   },
 

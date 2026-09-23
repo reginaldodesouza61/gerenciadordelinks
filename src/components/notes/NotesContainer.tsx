@@ -6,7 +6,7 @@ import { NoteEditor } from './NoteEditor';
 import { GlobalNotesSearchModal } from './GlobalNotesSearchModal';
 import { 
   Menu, X, ChevronLeft, ChevronRight, PanelLeftOpen, PanelLeftClose, 
-  Folder, FileText, Search 
+  Folder, FileText, Search, Plus 
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -20,8 +20,11 @@ export function NotesContainer() {
   const initialized = useAuthStore((state) => state.initialized);
   
   const fetchNotes = useNoteStore((state) => state.fetchNotes);
+  const sections = useNoteStore((state) => state.sections);
+  const activeSectionId = useNoteStore((state) => state.activeSectionId);
   const activePageId = useNoteStore((state) => state.activePageId);
   const setActivePageId = useNoteStore((state) => state.setActivePageId);
+  const addPage = useNoteStore((state) => state.addPage);
   const isLoading = useNoteStore((state) => state.isLoading);
   const pages = useNoteStore((state) => state.pages);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
@@ -59,16 +62,31 @@ export function NotesContainer() {
 
   const [isResizing, setIsResizing] = useState(false);
 
-  // Derive effective active page without prematurely overwriting user position
-  const effectiveActivePageId = activePageId && pages.some(p => p.id === activePageId)
-    ? activePageId
-    : (pages.length > 0 ? pages[0].id : activePageId);
+  // Active section entity
+  const activeSection = sections.find((s) => s.id === activeSectionId);
+
+  // Filter pages that belong to the active section (or all pages if no section selected)
+  const currentSectionPages = activeSectionId
+    ? pages.filter((p) => p.section_id === activeSectionId)
+    : pages;
+
+  // Derive effective active page strictly scoped to the active section
+  const effectiveActivePageId = (() => {
+    if (activePageId && currentSectionPages.some((p) => p.id === activePageId)) {
+      return activePageId;
+    }
+    if (currentSectionPages.length > 0) {
+      const rootPage = currentSectionPages.find((p) => !p.parent_id) || currentSectionPages[0];
+      return rootPage.id;
+    }
+    return null;
+  })();
 
   useEffect(() => {
-    if (!isLoading && pages.length > 0 && effectiveActivePageId && effectiveActivePageId !== activePageId) {
+    if (!isLoading && effectiveActivePageId && effectiveActivePageId !== activePageId) {
       setActivePageId(effectiveActivePageId);
     }
-  }, [pages, effectiveActivePageId, activePageId, setActivePageId, isLoading]);
+  }, [effectiveActivePageId, activePageId, setActivePageId, isLoading]);
 
   // Global keyboard shortcut for Ctrl+K
   useEffect(() => {
@@ -249,6 +267,7 @@ export function NotesContainer() {
         ) : effectiveActivePageId ? (
           <div className="flex-1 overflow-hidden h-full w-full">
             <NoteEditor 
+              key={effectiveActivePageId}
               pageId={effectiveActivePageId} 
               isSidebarCollapsed={isDesktopSidebarCollapsed}
               onToggleSidebar={() => toggleSidebarCollapse(!isDesktopSidebarCollapsed)}
@@ -262,11 +281,24 @@ export function NotesContainer() {
                 <div className="h-14 w-14 bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 rounded-2xl flex items-center justify-center mb-4 shadow-xs">
                   <FileText className="h-7 w-7" />
                 </div>
-                <h3 className="text-lg font-bold text-gray-900 dark:text-zinc-100 mb-2">Espaço de Anotações</h3>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-zinc-100 mb-2">
+                  {activeSection ? activeSection.nome : 'Espaço de Anotações'}
+                </h3>
                 <p className="text-gray-500 dark:text-zinc-400 text-sm mb-5 leading-relaxed">
-                  Selecione uma anotação no menu lateral ou crie uma nova para começar a editar no quadro livre.
+                  {activeSection 
+                    ? 'Esta seção ainda não possui anotações. Crie a primeira página para começar.'
+                    : 'Selecione uma anotação no menu lateral ou crie uma nova para começar a editar no quadro livre.'}
                 </p>
                 <div className="flex flex-wrap items-center justify-center gap-2">
+                  {activeSection && (
+                    <Button
+                      onClick={() => addPage(activeSection.id, null, 'Sem título', user?.id)}
+                      className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-xs"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Criar Nova Nota nesta Seção
+                    </Button>
+                  )}
                   <Button
                     onClick={() => setIsSearchModalOpen(true)}
                     variant="outline"
