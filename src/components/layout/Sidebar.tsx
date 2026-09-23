@@ -48,6 +48,22 @@ export function Sidebar() {
     return [];
   });
 
+  // Ensure categories start expanded by default if user hasn't saved preferences yet
+  useEffect(() => {
+    if (categorias && categorias.length > 0) {
+      try {
+        const saved = localStorage.getItem('meuhub_links_expanded_categories');
+        if (!saved) {
+          const allIds = categorias.map(c => c.id);
+          setExpandedCategories(allIds);
+          localStorage.setItem('meuhub_links_expanded_categories', JSON.stringify(allIds));
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }, [categorias]);
+
   // Category Dialog State
   const [isCategoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [isEditingCategory, setIsEditingCategory] = useState(false);
@@ -105,7 +121,18 @@ export function Sidebar() {
     if (isEditingCategory && currentCategoryId) {
       await updateCategoria(currentCategoryId, categoryName);
     } else {
-      await addCategoria(categoryName);
+      const newCat = await addCategoria(categoryName);
+      if (newCat && newCat.id) {
+        setExpandedCategories(prev => {
+          const next = Array.from(new Set([...prev, newCat.id]));
+          try {
+            localStorage.setItem('meuhub_links_expanded_categories', JSON.stringify(next));
+          } catch {
+            // ignore
+          }
+          return next;
+        });
+      }
     }
 
     setCategoryDialogOpen(false);
@@ -223,7 +250,7 @@ export function Sidebar() {
               <div key={categoria.id} className="group">
                 <div
                   className={cn(
-                    "flex items-center justify-between rounded-xl px-2 py-2 hover:bg-muted/50 transition-all cursor-pointer",
+                    "flex items-start justify-between rounded-xl px-2 py-2 hover:bg-muted/50 transition-all cursor-pointer gap-1",
                     selectedCategoryId === categoria.id && "bg-primary/5 text-primary ring-1 ring-primary/10"
                   )}
                   onClick={() => {
@@ -234,13 +261,14 @@ export function Sidebar() {
                     }
                   }}
                 >
-                  <div className="flex items-center text-left flex-1 min-w-0">
+                  <div className="flex items-start text-left flex-1 min-w-0">
                     <button
-                      className="p-1 hover:bg-primary/10 rounded-md mr-1 transition-colors"
+                      className="p-1 hover:bg-primary/10 rounded-md mr-1 transition-colors shrink-0 mt-0.5"
                       onClick={(e) => {
                         e.stopPropagation();
                         toggleCategory(categoria.id);
                       }}
+                      title={expandedCategories.includes(categoria.id) ? "Recolher categoria" : "Expandir categoria"}
                     >
                       {expandedCategories.includes(categoria.id) ? (
                         <ChevronDown className="h-3.5 w-3.5" />
@@ -248,10 +276,15 @@ export function Sidebar() {
                         <ChevronRight className="h-3.5 w-3.5" />
                       )}
                     </button>
-                    <span className="text-sm font-bold truncate dark:text-zinc-200 group-hover:dark:text-white transition-colors">{categoria.nome}</span>
+                    <span 
+                      className="text-sm font-bold break-words leading-snug flex-1 dark:text-zinc-200 group-hover:dark:text-white transition-colors"
+                      title={categoria.nome}
+                    >
+                      {categoria.nome}
+                    </span>
                   </div>
 
-                  <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity shrink-0 self-start mt-0.5">
                     <Button
                       variant="ghost"
                       size="icon"
@@ -285,14 +318,19 @@ export function Sidebar() {
                         <div
                           key={subcategoria.id}
                           className={cn(
-                            "flex items-center justify-between rounded-lg px-2 py-1.5 text-sm transition-all cursor-pointer group/sub",
+                            "flex items-start justify-between rounded-lg px-2 py-1.5 text-sm transition-all cursor-pointer group/sub gap-1",
                             selectedSubcategoryId === subcategoria.id ? "text-primary bg-primary/5 font-medium" : "text-muted-foreground hover:bg-muted/30"
                           )}
                           onClick={() => setSelectedSubcategoryId(subcategoria.id)}
                         >
-                          <span className="flex-1 truncate text-xs dark:text-zinc-400 dark:group-hover/sub:text-zinc-200 transition-colors">{subcategoria.nome}</span>
+                          <span 
+                            className="flex-1 break-words leading-snug text-xs dark:text-zinc-400 dark:group-hover/sub:text-zinc-200 transition-colors"
+                            title={subcategoria.nome}
+                          >
+                            {subcategoria.nome}
+                          </span>
 
-                          <div className="flex items-center opacity-0 group-hover/sub:opacity-100 transition-opacity">
+                          <div className="flex items-center opacity-0 group-hover/sub:opacity-100 transition-opacity shrink-0 self-start mt-0.5">
                             <Button
                               variant="ghost"
                               size="icon"

@@ -56,6 +56,15 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
     } catch {
       // ignore
     }
+    // Default initial sections expanded as preferred by user
+    try {
+      const initSecs = useNoteStore.getState().sections;
+      if (initSecs && initSecs.length > 0) {
+        return initSecs.map(s => s.id);
+      }
+    } catch {
+      // ignore
+    }
     return [];
   });
   const [expandedPages, setExpandedPages] = useState<string[]>(() => {
@@ -110,29 +119,27 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
   const [parentPageId, setParentPageId] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState('');
 
-  // Expand all sections automatically on load so pages are immediately visible if none expanded
+  // Expand all sections by default if user hasn't saved custom preferences yet,
+  // and keep any new sections or the active section expanded
   useEffect(() => {
-    if (sections.length > 0) {
-      setExpandedSections(prev => {
-        const allSectionIds = sections.map(s => s.id);
-        const setIds = new Set([...prev, ...allSectionIds]);
-        const next = Array.from(setIds);
-        saveExpandedSections(next);
-        return next;
-      });
+    if (sections.length === 0) return;
+    try {
+      const savedRaw = localStorage.getItem('meuhub_notes_expanded_sections');
+      if (!savedRaw) {
+        const allIds = sections.map(s => s.id);
+        setExpandedSections(allIds);
+        saveExpandedSections(allIds);
+      } else if (activeSectionId && !expandedSections.includes(activeSectionId)) {
+        setExpandedSections(prev => {
+          const next = [...prev, activeSectionId];
+          saveExpandedSections(next);
+          return next;
+        });
+      }
+    } catch {
+      // ignore
     }
-  }, [sections]);
-
-  // Expand active section automatically
-  useEffect(() => {
-    if (activeSectionId && !expandedSections.includes(activeSectionId)) {
-      setExpandedSections(prev => {
-        const next = [...prev, activeSectionId];
-        saveExpandedSections(next);
-        return next;
-      });
-    }
-  }, [activeSectionId, expandedSections]);
+  }, [sections, activeSectionId]);
 
   // Expand parent pages recursively if active page is inside a subpage
   useEffect(() => {
@@ -193,7 +200,14 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
     
     if (dialogType === 'section') {
       if (dialogMode === 'create') {
-        await addSection(inputValue, userId);
+        const newSec = await addSection(inputValue, userId);
+        if (newSec?.id) {
+          setExpandedSections(prev => {
+            const next = Array.from(new Set([...prev, newSec.id]));
+            saveExpandedSections(next);
+            return next;
+          });
+        }
       } else {
         await updateSection(targetId, inputValue);
       }
@@ -415,7 +429,7 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
       >
         <div 
           className={cn(
-            "group/page flex items-center justify-between rounded-md px-1.5 py-1 cursor-pointer transition-colors text-sm w-full select-none",
+            "group/page flex items-start justify-between rounded-md px-1.5 py-1.5 cursor-pointer transition-colors text-sm w-full select-none gap-1",
             isActive 
               ? "bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-300 font-medium" 
               : "hover:bg-gray-100 dark:hover:bg-zinc-800/60 text-gray-600 dark:text-zinc-300"
@@ -426,10 +440,10 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
             setActivePageId(page.id); 
           }}
         >
-          <div className="flex items-center gap-1 flex-1 min-w-0 mr-1">
+          <div className="flex items-start gap-1 flex-1 min-w-0 mr-1">
             {/* Grip handle for page drag */}
             <span
-              className="cursor-grab active:cursor-grabbing text-slate-300 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-300 p-0.5 rounded transition-colors shrink-0"
+              className="cursor-grab active:cursor-grabbing text-slate-300 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-300 p-0.5 rounded transition-colors shrink-0 mt-0.5"
               title="Arraste para reordenar esta anotação"
               onClick={(e) => e.stopPropagation()}
             >
@@ -439,7 +453,7 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
             {hasSubpages ? (
               <button
                 type="button"
-                className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-zinc-700 shrink-0 text-slate-500 dark:text-zinc-400"
+                className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-zinc-700 shrink-0 text-slate-500 dark:text-zinc-400 mt-0.5"
                 onClick={(e) => {
                   e.stopPropagation();
                   togglePage(page.id);
@@ -450,10 +464,10 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
             ) : (
               <div className="w-[15px] shrink-0" />
             )}
-            <FileText size={13} className={isActive ? "text-indigo-500 shrink-0" : "text-gray-400 dark:text-zinc-500 shrink-0"} />
-            <span className="text-[13px] truncate flex-1" title={page.titulo}>{page.titulo}</span>
+            <FileText size={13} className={cn("shrink-0 mt-1", isActive ? "text-indigo-500" : "text-gray-400 dark:text-zinc-500")} />
+            <span className="text-[13px] break-words leading-snug flex-1 select-text" title={page.titulo}>{page.titulo}</span>
             {pageSyncStatuses[page.id] === 'pending' && (
-              <RefreshCw size={10} className="text-amber-500 animate-spin shrink-0 ml-1" title="Alterações locais pendentes de sincronização" />
+              <RefreshCw size={10} className="text-amber-500 animate-spin shrink-0 ml-1 mt-1" title="Alterações locais pendentes de sincronização" />
             )}
             {pageSyncStatuses[page.id] === 'conflict' && (
               <button
@@ -462,7 +476,7 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
                   e.stopPropagation();
                   setConflictPageId(page.id);
                 }}
-                className="p-0.5 rounded hover:bg-rose-100 dark:hover:bg-rose-950/40 shrink-0 ml-1"
+                className="p-0.5 rounded hover:bg-rose-100 dark:hover:bg-rose-950/40 shrink-0 ml-1 mt-0.5"
                 title="Clique para resolver conflito de sincronização corporativo"
               >
                 <AlertTriangle size={11} className="text-rose-500 animate-pulse shrink-0" />
@@ -470,7 +484,7 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
             )}
           </div>
 
-          <div className="flex items-center shrink-0 gap-0.5 opacity-0 group-hover/page:opacity-100 focus-within:opacity-100 transition-opacity">
+          <div className="flex items-center shrink-0 gap-0.5 opacity-0 group-hover/page:opacity-100 focus-within:opacity-100 transition-opacity self-start mt-0.5">
             {/* Move Up / Down Buttons for Pages */}
             <button 
               type="button"
@@ -613,9 +627,9 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
                     onDrop={(e) => handleSectionDrop(e, section.id)}
                     onDragEnd={handleSectionDragEnd}
                     className={cn(
-                      "group flex items-center justify-between rounded-lg px-1.5 py-1.5 cursor-pointer transition-all w-full select-none relative",
+                      "group flex items-start justify-between rounded-lg px-2 py-2 cursor-pointer transition-all w-full select-none relative gap-1.5",
                       activeSectionId === section.id 
-                        ? "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300" 
+                        ? "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 ring-1 ring-indigo-200/60 dark:ring-indigo-800/60" 
                         : "hover:bg-gray-100 dark:hover:bg-zinc-800/60 text-gray-700 dark:text-zinc-200",
                       isOverThis && dropSectionPosition === 'before' && "border-t-2 border-indigo-500 rounded-t-none",
                       isOverThis && dropSectionPosition === 'after' && "border-b-2 border-indigo-500 rounded-b-none"
@@ -625,10 +639,10 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
                       toggleSection(section.id);
                     }}
                   >
-                    <div className="flex items-center gap-1.5 flex-1 min-w-0 mr-1">
+                    <div className="flex items-start gap-1.5 flex-1 min-w-0 mr-1">
                       {/* Drag Handle Grip */}
                       <span
-                        className="cursor-grab active:cursor-grabbing text-slate-300 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-300 group-hover:opacity-100 p-0.5 -ml-0.5 rounded transition-colors"
+                        className="cursor-grab active:cursor-grabbing text-slate-300 dark:text-zinc-600 hover:text-slate-600 dark:hover:text-zinc-300 group-hover:opacity-100 p-0.5 -ml-0.5 rounded transition-colors shrink-0 mt-0.5"
                         title="Arraste para reordenar esta seção"
                         onClick={(e) => e.stopPropagation()}
                       >
@@ -637,11 +651,12 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
 
                       <button
                         type="button"
-                        className="p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200"
+                        className="p-0.5 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 shrink-0 mt-0.5"
                         onClick={(e) => {
                           e.stopPropagation();
                           toggleSection(section.id);
                         }}
+                        title={expandedSections.includes(section.id) ? "Recolher seção" : "Expandir seção"}
                       >
                         {expandedSections.includes(section.id) ? (
                           <ChevronDown size={14} className="shrink-0" />
@@ -650,11 +665,11 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
                         )}
                       </button>
 
-                      <Folder size={14} className={activeSectionId === section.id ? "text-indigo-500 shrink-0" : "text-gray-400 dark:text-zinc-500 shrink-0"} />
-                      <span className="text-sm font-semibold truncate" title={section.nome}>{section.nome}</span>
+                      <Folder size={15} className={cn("shrink-0 mt-0.5", activeSectionId === section.id ? "text-indigo-500" : "text-gray-400 dark:text-zinc-500")} />
+                      <span className="text-sm font-semibold break-words leading-snug flex-1 select-text" title={section.nome}>{section.nome}</span>
                     </div>
 
-                    <div className="flex items-center shrink-0 gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                    <div className="flex items-center shrink-0 gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity self-start mt-0.5">
                       {/* Move Up / Down Buttons */}
                       <button 
                         type="button"
@@ -722,16 +737,14 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
                   {expandedSections.includes(section.id) && (
                     <div className="ml-5 space-y-0.5 border-l-2 border-gray-100 dark:border-zinc-800 pl-1 overflow-hidden">
                       {rootPages.length === 0 ? (
-                        <div 
-                          onDragOver={(e) => {
-                            if (draggedPageId) {
+                        draggedPageId ? (
+                          <div 
+                            onDragOver={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
                               e.dataTransfer.dropEffect = 'move';
-                            }
-                          }}
-                          onDrop={(e) => {
-                            if (draggedPageId) {
+                            }}
+                            onDrop={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
                               const draggedPage = pages.find(p => p.id === draggedPageId);
@@ -741,12 +754,10 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
                               }
                               setDraggedPageId(null);
                               setDragOverPageId(null);
-                            }
-                          }}
-                          className="text-[11px] text-gray-400 dark:text-zinc-500 italic px-2 py-1.5 rounded hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 hover:text-indigo-600 transition-colors"
-                        >
-                          Sem páginas (arraste uma página aqui)
-                        </div>
+                            }}
+                            className="h-6 border border-dashed border-indigo-300 dark:border-indigo-800/80 rounded my-1 bg-indigo-50/20 dark:bg-indigo-950/20 transition-colors"
+                          />
+                        ) : null
                       ) : (
                         rootPages.map(page => renderPage(page, 0, rootPages))
                       )}

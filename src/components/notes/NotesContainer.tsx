@@ -11,6 +11,8 @@ import {
 import { Button } from '@/components/ui/button';
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'meuhub_notes_sidebar_collapsed';
+const SIDEBAR_WIDTH_STORAGE_KEY = 'meuhub_notes_sidebar_width';
+const DEFAULT_SIDEBAR_WIDTH = 320; // 320px gives comfortable space so section names aren't cut off
 
 export function NotesContainer() {
   console.count('[Render] NotesContainer');
@@ -27,12 +29,34 @@ export function NotesContainer() {
   const lastFetchedUserIdRef = useRef<string | null>(null);
   const [isDesktopSidebarCollapsed, setIsDesktopSidebarCollapsed] = useState<boolean>(() => {
     try {
-      return localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === 'true';
+      const saved = localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY);
+      if (saved !== null) {
+        return saved === 'true';
+      }
+      return false; // Default: expanded as preferred by user
     } catch {
       return false;
     }
   });
-  const [sidebarWidth, setSidebarWidth] = useState(288); // Default 288px (w-72)
+
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed >= 240 && parsed <= 800) {
+          return parsed;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return DEFAULT_SIDEBAR_WIDTH;
+  });
+
+  const sidebarWidthRef = useRef(sidebarWidth);
+  sidebarWidthRef.current = sidebarWidth;
+
   const [isResizing, setIsResizing] = useState(false);
 
   // Derive effective active page without prematurely overwriting user position
@@ -80,14 +104,19 @@ export function NotesContainer() {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return;
       e.preventDefault();
-      const newWidth = e.clientX;
-      if (newWidth >= 200 && newWidth <= 800) {
-        setSidebarWidth(newWidth);
-      }
+      const newWidth = Math.max(240, Math.min(800, e.clientX));
+      setSidebarWidth(newWidth);
     };
 
     const handleMouseUp = () => {
-      setIsResizing(false);
+      if (isResizing) {
+        setIsResizing(false);
+        try {
+          localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidthRef.current));
+        } catch (err) {
+          console.debug('Failed to save sidebar width', err);
+        }
+      }
     };
 
     if (isResizing) {
@@ -136,7 +165,16 @@ export function NotesContainer() {
         <div 
           className="hidden md:block w-1.5 hover:w-2.5 -ml-1 hover:-ml-1.5 z-30 cursor-col-resize hover:bg-indigo-400 transition-all shrink-0 active:bg-indigo-600 group relative"
           onMouseDown={() => setIsResizing(true)}
-          title="Arraste para redimensionar a largura do menu"
+          onDoubleClick={() => {
+            const nextWidth = sidebarWidthRef.current === DEFAULT_SIDEBAR_WIDTH ? 420 : DEFAULT_SIDEBAR_WIDTH;
+            setSidebarWidth(nextWidth);
+            try {
+              localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(nextWidth));
+            } catch {
+              // ignore
+            }
+          }}
+          title="Arraste para redimensionar a largura do menu (clique duplo para alternar largura)"
         />
       )}
 

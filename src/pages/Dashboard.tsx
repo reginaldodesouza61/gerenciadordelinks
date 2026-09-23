@@ -92,7 +92,7 @@ export default function Dashboard() {
         {activeTab === 'links' ? (
           <>
             {/* Desktop Sidebar */}
-            <div className="hidden md:block h-full">
+            <div className="hidden md:block h-full w-72 shrink-0 border-r border-border">
               <Sidebar />
             </div>
             
