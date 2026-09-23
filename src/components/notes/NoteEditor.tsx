@@ -884,6 +884,8 @@ const TextBlock = memo(function TextBlock({
   return (
     <>
       <Rnd
+        id={`block-rnd-${block.id}`}
+        data-block-id={block.id}
         size={{ 
           width: typeof block.width === 'number' ? block.width : parseInt(String(block.width), 10) || 400, 
           height: 'auto',
@@ -1427,6 +1429,7 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     handleCanvasMouseMove,
     handleCanvasMouseUp,
   } = useCanvasDragAutoScroll(viewportContainerRef, blocks, {
+    canvasRef,
     onUpdateBlockPosition: updateBlock,
   });
 
@@ -2789,17 +2792,19 @@ export function NoteEditor({ pageId, isSidebarCollapsed, onToggleSidebar, onOpen
     }
   };
 
-  // Dynamically calculate canvas dimensions based on blocks position + real-time extra margin during dragging
+  // Dynamically calculate canvas dimensions with generous OneNote infinite workspace
   const canvasWidth = useMemo(() => {
-    if (blocks.length === 0) return '100%';
-    const maxX = Math.max(...blocks.map((b) => b.x + (typeof b.width === 'number' ? b.width : parseInt(String(b.width), 10) || 450)));
-    return Math.max(1400, maxX + 700 + (canvasExtraWidth || 0));
+    const maxX = blocks.length > 0 
+      ? Math.max(...blocks.map((b) => b.x + (typeof b.width === 'number' ? b.width : parseInt(String(b.width), 10) || 450)))
+      : 800;
+    return Math.max(3500, maxX + 2200 + (canvasExtraWidth || 0));
   }, [blocks, canvasExtraWidth]);
 
   const canvasHeight = useMemo(() => {
-    if (blocks.length === 0) return '100%';
-    const maxY = Math.max(...blocks.map((b) => b.y + (typeof b.height === 'number' ? b.height : parseInt(String(b.height), 10) || 320)));
-    return Math.max(1000, maxY + 700 + (canvasExtraHeight || 0));
+    const maxY = blocks.length > 0 
+      ? Math.max(...blocks.map((b) => b.y + (typeof b.height === 'number' ? b.height : parseInt(String(b.height), 10) || 320)))
+      : 600;
+    return Math.max(2500, maxY + 2000 + (canvasExtraHeight || 0));
   }, [blocks, canvasExtraHeight]);
 
   const formattedDate = useMemo(() => {

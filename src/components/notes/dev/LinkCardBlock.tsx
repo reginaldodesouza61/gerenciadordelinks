@@ -116,6 +116,8 @@ export function LinkCardBlock({
 
   return (
     <Rnd
+      id={`block-rnd-${block.id}`}
+      data-block-id={block.id}
       size={{ 
         width: typeof block.width === 'number' ? block.width : parseInt(String(block.width), 10) || 380, 
         height: typeof block.height === 'number' ? block.height : parseInt(String(block.height), 10) || 190 

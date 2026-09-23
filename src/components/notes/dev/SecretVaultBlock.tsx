@@ -596,6 +596,8 @@ export const SecretVaultBlock = memo(function SecretVaultBlock({
   return (
     <>
       <Rnd
+        id={`block-rnd-${block.id}`}
+        data-block-id={block.id}
         size={{ 
           width: typeof block.width === 'number' ? block.width : parseInt(String(block.width), 10) || 540, 
           height: typeof block.height === 'number' ? block.height : parseInt(String(block.height), 10) || 380 

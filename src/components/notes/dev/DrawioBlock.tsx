@@ -261,6 +261,8 @@ export function DrawioBlock({
   return (
     <>
       <Rnd
+        id={`block-rnd-${block.id}`}
+        data-block-id={block.id}
         size={{ width: widthVal, height: heightVal }}
         position={{ x: block.x, y: Math.max(12, block.y) }}
         style={{

@@ -388,18 +388,17 @@
     background: transparent;
   }
 
-  /* Fluid Block Dragging & Elevation Effects */
+  /* Fluid OneNote Block Dragging & Elevation Effects */
   .onenote-block-dragging {
-    box-shadow: 0 20px 30px -10px rgba(0, 0, 0, 0.18), 0 10px 15px -3px rgba(0, 0, 0, 0.1) !important;
-    opacity: 0.94 !important;
-    transform-origin: center center;
-    transition: box-shadow 0.15s ease, opacity 0.15s ease !important;
+    box-shadow: 0 20px 32px -8px rgba(0, 0, 0, 0.22), 0 10px 18px -4px rgba(0, 0, 0, 0.12) !important;
+    opacity: 0.96 !important;
     will-change: transform;
-    pointer-events: none;
+    cursor: grabbing !important;
+    z-index: 60 !important;
+    transition: box-shadow 0.15s ease, opacity 0.15s ease !important;
   }
 
   .onenote-block-dragging * {
-    pointer-events: none !important;
     user-select: none !important;
   }
 }

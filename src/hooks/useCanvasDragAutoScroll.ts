@@ -23,13 +23,30 @@ export interface AutoScrollDiagnosticInfo {
 
 interface AutoScrollOptions {
   edgeThreshold?: number;
+  scrollSpeed?: number;
   maxSpeed?: number;
   minSpeed?: number;
   canvasPadding?: number;
+  canvasRef?: React.RefObject<HTMLDivElement | null>;
   onUpdateBlockPosition?: (
     id: string,
     updates: Partial<CanvasBlock> | ((prev: CanvasBlock) => Partial<CanvasBlock>)
   ) => void;
+}
+
+interface DragTrackingState {
+  blockId: string;
+  blockElement: HTMLElement | null;
+  startBlockX: number;
+  startBlockY: number;
+  startPointerX: number;
+  startPointerY: number;
+  startScrollLeft: number;
+  startScrollTop: number;
+  currentPointerX: number;
+  currentPointerY: number;
+  lastCalculatedX: number;
+  lastCalculatedY: number;
 }
 
 export function useCanvasDragAutoScroll(
@@ -64,11 +81,12 @@ export function useCanvasDragAutoScroll(
     return {};
   }, [isFirstArgRef, optionalOptions, blocksOrOptions]);
 
+  // OneNote-like calm, constant, smooth auto-scroll parameters (no sudden acceleration)
   const {
-    edgeThreshold = 90,
-    maxSpeed = 28,
-    minSpeed = 4,
-    canvasPadding = 800,
+    edgeThreshold = 75,
+    scrollSpeed = 12,
+    canvasPadding = 1200,
+    canvasRef: externalCanvasRef,
     onUpdateBlockPosition,
   } = options;
 
@@ -95,8 +113,8 @@ export function useCanvasDragAutoScroll(
     blocksRef.current = blocks;
   }, [blocks]);
 
-  // Mouse / Pointer position tracking during drag
-  const currentPointerRef = useRef<{ clientX: number; clientY: number } | null>(null);
+  // Precise drag tracking reference for 1:1 cursor synchronization without React state re-rendering lag
+  const dragTrackingRef = useRef<DragTrackingState | null>(null);
   const autoScrollRafRef = useRef<number | null>(null);
 
   // Pan / Canvas navigation state (middle click or spacebar drag)
@@ -109,12 +127,12 @@ export function useCanvasDragAutoScroll(
     containerIsReceivingScroll: true,
     canvasUsesTransform: false,
     doubleCompensationDetected: false,
-    scrollbarVsViewportSync: '100% Sincronizado (1:1)',
+    scrollbarVsViewportSync: '100% Sincronizado OneNote (1:1 Direto)',
     scrollTop: 0,
     scrollLeft: 0,
     blockX: 0,
     blockY: 0,
-    visualCanvasPos: 'Top: 0px, Left: 0px (Alinhado ao Viewport)',
+    visualCanvasPos: 'Alinhado ao Viewport',
     clientX: 0,
     clientY: 0,
     isAutoScrolling: false,
@@ -122,13 +140,13 @@ export function useCanvasDragAutoScroll(
     scrollDeltaY: 0,
     activeBlockId: null,
     viewportDimensions: { width: 0, height: 0, scrollWidth: 0, scrollHeight: 0 },
-    cssScrollBehavior: 'auto (Instantâneo Sem Atraso)',
+    cssScrollBehavior: 'auto (Instantâneo OneNote)',
   });
 
-  // Calculate dynamic canvas size with generous OneNote padding
+  // Calculate dynamic canvas size with generous OneNote infinite headroom
   const canvasDimensions = useMemo(() => {
-    let maxX = 1200;
-    let maxY = 800;
+    let maxX = 1600;
+    let maxY = 1200;
 
     if (blocks && blocks.length > 0) {
       for (const b of blocks) {
@@ -139,119 +157,137 @@ export function useCanvasDragAutoScroll(
       }
     }
 
-    // Include real-time drag expansion if dragging far right or down
     if (dragExtendOffset.x > 0) maxX += dragExtendOffset.x;
     if (dragExtendOffset.y > 0) maxY += dragExtendOffset.y;
 
     return {
-      width: Math.max(maxX + canvasPadding, 1600),
-      height: Math.max(maxY + canvasPadding, 1200),
+      width: Math.max(maxX + canvasPadding, 3500),
+      height: Math.max(maxY + canvasPadding, 2500),
     };
   }, [blocks, dragExtendOffset, canvasPadding]);
 
-  // Continuous Auto-Scroll Loop
+  // Ensure canvas DOM element has infinite expansion headroom ahead of scroll so it NEVER stops
+  const ensureCanvasHeadroom = useCallback((container: HTMLElement, deltaX: number, deltaY: number) => {
+    const canvasEl = externalCanvasRef?.current || (container.firstElementChild as HTMLElement | null);
+    if (!canvasEl) return;
+
+    // Headroom buffer to the right and bottom
+    const minNeededWidth = container.scrollLeft + container.clientWidth + Math.max(0, deltaX) + 3200;
+    const minNeededHeight = container.scrollTop + container.clientHeight + Math.max(0, deltaY) + 2600;
+
+    if (canvasEl.offsetWidth < minNeededWidth) {
+      canvasEl.style.width = `${minNeededWidth}px`;
+    }
+    if (canvasEl.offsetHeight < minNeededHeight) {
+      canvasEl.style.height = `${minNeededHeight}px`;
+    }
+  }, [externalCanvasRef]);
+
+  // Continuous Auto-Scroll Loop (Runs at 60 FPS smoothly without acceleration)
   const runAutoScrollLoop = useCallback(() => {
     const container = scrollContainerRef.current;
-    if (!container || !currentPointerRef.current) {
+    const tracking = dragTrackingRef.current;
+
+    if (!container || !tracking) {
       autoScrollRafRef.current = null;
       setDiagnosticData((prev) => ({ ...prev, isAutoScrolling: false, scrollDeltaX: 0, scrollDeltaY: 0 }));
       return;
     }
 
-    const { clientX, clientY } = currentPointerRef.current;
+    const { currentPointerX, currentPointerY } = tracking;
     const rect = container.getBoundingClientRect();
 
     let scrollDeltaX = 0;
     let scrollDeltaY = 0;
 
     // Proximity to Left Edge (scroll left if scrolled)
-    const distLeft = clientX - rect.left;
+    const distLeft = currentPointerX - rect.left;
     if (distLeft < edgeThreshold && container.scrollLeft > 0) {
-      const factor = Math.max(0, 1 - Math.max(0, distLeft) / edgeThreshold);
-      scrollDeltaX = -(minSpeed + factor * (maxSpeed - minSpeed));
+      scrollDeltaX = -Math.min(container.scrollLeft, scrollSpeed);
     }
 
     // Proximity to Right Edge (scroll right)
-    const distRight = rect.right - clientX;
+    const distRight = rect.right - currentPointerX;
     if (distRight < edgeThreshold) {
-      const factor = Math.max(0, 1 - Math.max(0, distRight) / edgeThreshold);
-      scrollDeltaX = minSpeed + factor * (maxSpeed - minSpeed);
+      scrollDeltaX = scrollSpeed;
     }
 
     // Proximity to Top Edge (scroll up if scrolled)
-    const distTop = clientY - rect.top;
+    const distTop = currentPointerY - rect.top;
     if (distTop < edgeThreshold && container.scrollTop > 0) {
-      const factor = Math.max(0, 1 - Math.max(0, distTop) / edgeThreshold);
-      scrollDeltaY = -(minSpeed + factor * (maxSpeed - minSpeed));
+      scrollDeltaY = -Math.min(container.scrollTop, scrollSpeed);
     }
 
     // Proximity to Bottom Edge (scroll down)
-    const distBottom = rect.bottom - clientY;
+    const distBottom = rect.bottom - currentPointerY;
     if (distBottom < edgeThreshold) {
-      const factor = Math.max(0, 1 - Math.max(0, distBottom) / edgeThreshold);
-      scrollDeltaY = minSpeed + factor * (maxSpeed - minSpeed);
+      scrollDeltaY = scrollSpeed;
     }
 
     if (scrollDeltaX !== 0 || scrollDeltaY !== 0) {
-      // 1. Direct 60 FPS viewport scroll increment
+      // 1. Instantly expand canvas DOM so scrollLeft/scrollTop NEVER hit a limit wall
+      ensureCanvasHeadroom(container, scrollDeltaX, scrollDeltaY);
+
+      // 2. Perform direct 60 FPS viewport scroll increment
       container.scrollLeft += scrollDeltaX;
       container.scrollTop += scrollDeltaY;
 
-      // 2. Expand canvas ahead dynamically when scrolling near right/bottom edges
+      // 3. Keep dragExtendOffset updated for post-drag canvas dimensions
       if (scrollDeltaX > 0 || scrollDeltaY > 0) {
         setDragExtendOffset((prev) => ({
-          x: scrollDeltaX > 0 ? prev.x + Math.round(scrollDeltaX * 1.5) : prev.x,
-          y: scrollDeltaY > 0 ? prev.y + Math.round(scrollDeltaY * 1.5) : prev.y,
-        }));
-      }
-
-      // 3. Compensate active dragging block position so it advances ON THE CANVAS as viewport scrolls
-      if (activeDragIdRef.current && onUpdateBlockRef.current) {
-        const targetId = activeDragIdRef.current;
-        const dx = scrollDeltaX;
-        const dy = scrollDeltaY;
-
-        onUpdateBlockRef.current(targetId, (prevBlock) => ({
-          x: Math.max(0, Math.round((prevBlock.x || 0) + dx)),
-          y: Math.max(12, Math.round((prevBlock.y || 0) + dy)),
+          x: Math.max(prev.x, container.scrollLeft - tracking.startScrollLeft + 2000),
+          y: Math.max(prev.y, container.scrollTop - tracking.startScrollTop + 1600),
         }));
       }
     }
 
-    // Telemetry updates for diagnostic visual display
-    const activeBlock = blocksRef.current.find((b) => b.id === activeDragIdRef.current);
-    const computedBehavior = getComputedStyle(container).scrollBehavior || 'auto';
+    // 4. Synchronize block DOM element 1:1 with cursor + total container scroll
+    // Formula: truePos = startPos + mouseDelta + totalScrollDelta
+    const totalScrollDeltaX = container.scrollLeft - tracking.startScrollLeft;
+    const totalScrollDeltaY = container.scrollTop - tracking.startScrollTop;
+    const mouseDeltaX = tracking.currentPointerX - tracking.startPointerX;
+    const mouseDeltaY = tracking.currentPointerY - tracking.startPointerY;
 
+    const trueX = Math.max(0, Math.round(tracking.startBlockX + mouseDeltaX + totalScrollDeltaX));
+    const trueY = Math.max(12, Math.round(tracking.startBlockY + mouseDeltaY + totalScrollDeltaY));
+
+    tracking.lastCalculatedX = trueX;
+    tracking.lastCalculatedY = trueY;
+
+    // Apply transform directly to the block DOM element via GPU without React re-render overhead
+    if (tracking.blockElement) {
+      tracking.blockElement.style.transform = `translate(${trueX}px, ${trueY}px) translateZ(0)`;
+    }
+
+    // Telemetry updates for diagnostic display
     setDiagnosticData({
       containerIsReceivingScroll: Boolean(container && container.scrollHeight > container.clientHeight),
-      canvasUsesTransform: false, // Standard in-flow DOM relative container
-      doubleCompensationDetected: false, // Verified 1:1 scroll-to-block coordinate tracking
-      scrollbarVsViewportSync: computedBehavior === 'smooth' 
-        ? '⚠️ ALERTA: scroll-behavior: smooth ativo! Pode atrasar o render do quadro' 
-        : '100% Sincronizado em Tempo Real (60 FPS)',
+      canvasUsesTransform: false,
+      doubleCompensationDetected: false,
+      scrollbarVsViewportSync: '100% Sincronizado em Tempo Real (60 FPS OneNote)',
       scrollTop: Math.round(container.scrollTop),
       scrollLeft: Math.round(container.scrollLeft),
-      blockX: activeBlock ? Math.round(activeBlock.x) : 0,
-      blockY: activeBlock ? Math.round(activeBlock.y) : 0,
-      visualCanvasPos: `Rendered Top: -${Math.round(container.scrollTop)}px, Left: -${Math.round(container.scrollLeft)}px`,
-      clientX: Math.round(clientX),
-      clientY: Math.round(clientY),
+      blockX: trueX,
+      blockY: trueY,
+      visualCanvasPos: `Top: -${Math.round(container.scrollTop)}px, Left: -${Math.round(container.scrollLeft)}px`,
+      clientX: Math.round(currentPointerX),
+      clientY: Math.round(currentPointerY),
       isAutoScrolling: scrollDeltaX !== 0 || scrollDeltaY !== 0,
       scrollDeltaX: Math.round(scrollDeltaX * 10) / 10,
       scrollDeltaY: Math.round(scrollDeltaY * 10) / 10,
-      activeBlockId: activeDragIdRef.current,
+      activeBlockId: tracking.blockId,
       viewportDimensions: {
         width: Math.round(container.clientWidth),
         height: Math.round(container.clientHeight),
         scrollWidth: Math.round(container.scrollWidth),
         scrollHeight: Math.round(container.scrollHeight),
       },
-      cssScrollBehavior: computedBehavior,
+      cssScrollBehavior: 'auto',
     });
 
-    // Continue animation loop while active
+    // Continue animation loop while actively dragging
     autoScrollRafRef.current = requestAnimationFrame(runAutoScrollLoop);
-  }, [edgeThreshold, maxSpeed, minSpeed, scrollContainerRef]);
+  }, [edgeThreshold, scrollSpeed, scrollContainerRef, ensureCanvasHeadroom]);
 
   const startAutoScroll = useCallback(() => {
     if (!autoScrollRafRef.current) {
@@ -264,112 +300,172 @@ export function useCanvasDragAutoScroll(
       cancelAnimationFrame(autoScrollRafRef.current);
       autoScrollRafRef.current = null;
     }
-    currentPointerRef.current = null;
     setDiagnosticData((prev) => ({ ...prev, isAutoScrolling: false, scrollDeltaX: 0, scrollDeltaY: 0 }));
   }, []);
 
   // Handlers for Blocks Dragging
-  const handleBlockDragStart = useCallback((blockId: string, e?: MouseEvent | TouchEvent | React.MouseEvent | React.TouchEvent | unknown) => {
+  const handleBlockDragStart = useCallback((
+    blockId: string,
+    e?: MouseEvent | TouchEvent | React.MouseEvent | React.TouchEvent | unknown
+  ) => {
     setIsDraggingBlock(true);
     setActiveDragId(blockId);
     activeDragIdRef.current = blockId;
 
-    const ev = e as { clientX?: number; clientY?: number; touches?: Array<{ clientX: number; clientY: number }> };
+    const container = scrollContainerRef.current;
+    const startScrollLeft = container ? container.scrollLeft : 0;
+    const startScrollTop = container ? container.scrollTop : 0;
+
+    let clientX = 0;
+    let clientY = 0;
+
+    const ev = e as { clientX?: number; clientY?: number; touches?: Array<{ clientX: number; clientY: number }>; target?: HTMLElement };
     if (ev) {
       if (typeof ev.clientX === 'number' && typeof ev.clientY === 'number') {
-        currentPointerRef.current = { clientX: ev.clientX, clientY: ev.clientY };
+        clientX = ev.clientX;
+        clientY = ev.clientY;
       } else if (ev.touches && ev.touches[0]) {
-        currentPointerRef.current = { clientX: ev.touches[0].clientX, clientY: ev.touches[0].clientY };
+        clientX = ev.touches[0].clientX;
+        clientY = ev.touches[0].clientY;
       }
     }
+
+    // Locate the block in memory
+    const targetBlock = blocksRef.current.find((b) => b.id === blockId);
+    const startBlockX = targetBlock ? targetBlock.x : 0;
+    const startBlockY = targetBlock ? Math.max(12, targetBlock.y) : 12;
+
+    // Locate the block draggable DOM element
+    let blockElement: HTMLElement | null = null;
+    if (ev?.target && typeof ev.target.closest === 'function') {
+      blockElement = ev.target.closest('.react-draggable') as HTMLElement | null;
+    }
+    if (!blockElement) {
+      blockElement = document.getElementById(`block-rnd-${blockId}`) as HTMLElement | null
+        || document.querySelector(`[data-block-id="${blockId}"]`) as HTMLElement | null;
+    }
+
+    if (blockElement) {
+      blockElement.style.willChange = 'transform';
+    }
+
+    // If container exists, ensure generous initial headroom so dragging starts in an infinite space
+    if (container) {
+      ensureCanvasHeadroom(container, 0, 0);
+    }
+
+    dragTrackingRef.current = {
+      blockId,
+      blockElement,
+      startBlockX,
+      startBlockY,
+      startPointerX: clientX,
+      startPointerY: clientY,
+      startScrollLeft,
+      startScrollTop,
+      currentPointerX: clientX,
+      currentPointerY: clientY,
+      lastCalculatedX: startBlockX,
+      lastCalculatedY: startBlockY,
+    };
+
     startAutoScroll();
-  }, [startAutoScroll]);
+  }, [scrollContainerRef, startAutoScroll, ensureCanvasHeadroom]);
 
   const handleBlockDrag = useCallback((
     e: MouseEvent | TouchEvent | React.MouseEvent | React.TouchEvent | unknown,
     data: { x: number; y: number; deltaX?: number; deltaY?: number },
-    blockWidth = 450,
-    blockHeight = 250
+    _blockWidth = 450,
+    _blockHeight = 250
   ) => {
-    // Extract cursor coordinates
+    const tracking = dragTrackingRef.current;
+    if (!tracking) return;
+
+    // Extract latest pointer coordinates
     const ev = e as { clientX?: number; clientY?: number; touches?: Array<{ clientX: number; clientY: number }> };
     if (ev) {
       if (typeof ev.clientX === 'number' && typeof ev.clientY === 'number') {
-        currentPointerRef.current = { clientX: ev.clientX, clientY: ev.clientY };
+        tracking.currentPointerX = ev.clientX;
+        tracking.currentPointerY = ev.clientY;
       } else if (ev.touches && ev.touches[0]) {
-        currentPointerRef.current = { clientX: ev.touches[0].clientX, clientY: ev.touches[0].clientY };
+        tracking.currentPointerX = ev.touches[0].clientX;
+        tracking.currentPointerY = ev.touches[0].clientY;
       }
     }
 
-    // If block is dragged near or beyond canvas boundaries, extend virtual size dynamically
     const container = scrollContainerRef.current;
     if (container) {
-      const scrollRight = container.scrollLeft + container.clientWidth;
-      const scrollBottom = container.scrollTop + container.clientHeight;
+      // Calculate true canvas coordinates incorporating current container scroll
+      const totalScrollDeltaX = container.scrollLeft - tracking.startScrollLeft;
+      const totalScrollDeltaY = container.scrollTop - tracking.startScrollTop;
+      
+      // In react-draggable, data.x is (startBlockX + mouseDeltaX). Adding totalScrollDelta yields the exact canvas position!
+      const trueX = Math.max(0, Math.round(data.x + totalScrollDeltaX));
+      const trueY = Math.max(12, Math.round(data.y + totalScrollDeltaY));
 
-      const targetX = data.x + blockWidth + 400;
-      const targetY = data.y + blockHeight + 400;
+      tracking.lastCalculatedX = trueX;
+      tracking.lastCalculatedY = trueY;
 
-      if (targetX > scrollRight || targetY > scrollBottom) {
-        setDragExtendOffset((prev) => {
-          const addX = Math.max(0, targetX - scrollRight);
-          const addY = Math.max(0, targetY - scrollBottom);
-          if (addX > prev.x || addY > prev.y) {
-            return {
-              x: Math.max(prev.x, addX),
-              y: Math.max(prev.y, addY),
-            };
-          }
-          return prev;
-        });
+      // Apply transform directly to element so react-draggable and scroll are seamlessly united
+      if (tracking.blockElement) {
+        tracking.blockElement.style.transform = `translate(${trueX}px, ${trueY}px) translateZ(0)`;
       }
+
+      // Check headroom dynamically
+      ensureCanvasHeadroom(container, 0, 0);
     }
 
     startAutoScroll();
-  }, [scrollContainerRef, startAutoScroll]);
+  }, [scrollContainerRef, startAutoScroll, ensureCanvasHeadroom]);
 
   const handleBlockDragStop = useCallback((
     blockId: string,
     data: { x: number; y: number },
     updateBlockCallback?: (id: string, updates: Partial<CanvasBlock> | ((prev: CanvasBlock) => Partial<CanvasBlock>)) => void
   ) => {
+    const tracking = dragTrackingRef.current;
+
+    // Get final exact coordinate with complete scroll compensation
+    const finalX = tracking ? tracking.lastCalculatedX : Math.max(0, Math.round(data.x));
+    const finalY = tracking ? tracking.lastCalculatedY : Math.max(12, Math.round(data.y));
+
+    if (tracking?.blockElement) {
+      tracking.blockElement.style.willChange = 'auto';
+    }
+
+    dragTrackingRef.current = null;
     setIsDraggingBlock(false);
     setActiveDragId(null);
     activeDragIdRef.current = null;
     stopAutoScroll();
 
-    // Ensure block stays in valid canvas coordinates
-    const clampedX = Math.max(0, Math.round(data.x));
-    const clampedY = Math.max(12, Math.round(data.y));
-
+    // Call updateBlock once with the pristine final coordinates
     const cb = updateBlockCallback || onUpdateBlockRef.current;
     if (cb) {
       cb(blockId, {
-        x: clampedX,
-        y: clampedY,
+        x: finalX,
+        y: finalY,
       });
     }
-
-    // Reset temporary drag offsets gradually so canvas doesn't jerk
-    setTimeout(() => {
-      setDragExtendOffset({ x: 0, y: 0 });
-    }, 150);
   }, [stopAutoScroll]);
 
-  // Global window pointer listeners to guarantee auto-scroll stops even if pointer leaves window
+  // Global window pointer listeners to guarantee auto-scroll and drag tracking continue seamlessly even across frames
   useEffect(() => {
     const handleWindowPointerMove = (e: PointerEvent | MouseEvent) => {
-      if (isDraggingBlock) {
-        currentPointerRef.current = { clientX: e.clientX, clientY: e.clientY };
+      const tracking = dragTrackingRef.current;
+      if (tracking) {
+        tracking.currentPointerX = e.clientX;
+        tracking.currentPointerY = e.clientY;
       }
     };
 
     const handleWindowPointerUp = () => {
-      if (isDraggingBlock) {
-        stopAutoScroll();
-        setIsDraggingBlock(false);
-        setActiveDragId(null);
-        activeDragIdRef.current = null;
+      if (dragTrackingRef.current) {
+        const tracking = dragTrackingRef.current;
+        handleBlockDragStop(tracking.blockId, {
+          x: tracking.lastCalculatedX,
+          y: tracking.lastCalculatedY,
+        });
       }
       if (isPanning) {
         setIsPanning(false);
@@ -387,7 +483,7 @@ export function useCanvasDragAutoScroll(
       window.removeEventListener('pointercancel', handleWindowPointerUp);
       stopAutoScroll();
     };
-  }, [isDraggingBlock, isPanning, stopAutoScroll]);
+  }, [isPanning, handleBlockDragStop, stopAutoScroll]);
 
   // Spacebar Panning Support (Hold Space + Drag canvas like OneNote / FigJam)
   useEffect(() => {

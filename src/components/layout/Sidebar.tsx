@@ -48,6 +48,19 @@ export function Sidebar() {
     return [];
   });
 
+  // Category Dialog State
+  const [isCategoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [isEditingCategory, setIsEditingCategory] = useState(false);
+  const [categoryName, setCategoryName] = useState('');
+  const [currentCategoryId, setCurrentCategoryId] = useState<string | null>(null);
+
+  // Subcategory Dialog State
+  const [isSubcategoryDialogOpen, setSubcategoryDialogOpen] = useState(false);
+  const [isEditingSubcategory, setIsEditingSubcategory] = useState(false);
+  const [subcategoryName, setSubcategoryName] = useState('');
+  const [subcategoryCategoryId, setSubcategoryCategoryId] = useState('');
+  const [currentSubcategoryId, setCurrentSubcategoryId] = useState<string | null>(null);
+
   const toggleCategory = (categoryId: string) => {
     setExpandedCategories(prev => {
       const next = prev.includes(categoryId)
