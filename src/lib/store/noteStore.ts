@@ -590,7 +590,26 @@ function getInitialNoteState() {
   const initialSections = sortSectionsByStoredOrder(rawCachedSections.length > 0 ? rawCachedSections : DEFAULT_SECTIONS, currentUserId);
 
   const rawCachedPages = getCached<NotePage[]>(pagesKey, currentUserId === DEFAULT_USER_ID ? DEFAULT_PAGES : []);
-  const initialPages = sortPagesByStoredOrder(rawCachedPages.length > 0 ? rawCachedPages : DEFAULT_PAGES, currentUserId);
+  const validSectionIds = new Set(initialSections.map(s => s.id));
+
+  // Sanitize cached pages immediately so UUID titles never flash or render
+  const sanitizedCachedPages = rawCachedPages.map(p => {
+    let cleanTitle = p.titulo;
+    let cleanSecId = p.section_id;
+    if (isValidUuid(cleanTitle)) {
+      if (validSectionIds.has(cleanTitle)) {
+        cleanSecId = cleanTitle;
+      }
+      cleanTitle = 'Sem título';
+    }
+    return {
+      ...p,
+      titulo: cleanTitle,
+      section_id: cleanSecId
+    };
+  });
+
+  const initialPages = sortPagesByStoredOrder(sanitizedCachedPages.length > 0 ? sanitizedCachedPages : DEFAULT_PAGES, currentUserId);
 
   const initialRelations = getCached<NoteLinkRelation[]>(relationsKey, []);
 
@@ -1306,29 +1325,75 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           reconciledPages = DEFAULT_PAGES;
         }
 
-        // Sanitize page section_id and parent_id
+        // Sanitize page titles (fixing corrupted UUID titles from previous bug), section_id, and parent_id
         const validSectionIds = new Set(finalSections.map(s => s.id));
         const validPageIds = new Set(reconciledPages.map(p => p.id));
         const fallbackSectionId = finalSections.length > 0 ? finalSections[0].id : null;
 
+        const pagesToUpdateInDb: NotePage[] = [];
+
         const sanitizedPages = reconciledPages.map(p => {
           let cleanParentId = p.parent_id;
           let cleanSectionId = p.section_id;
+          let cleanTitle = p.titulo;
+          let wasCorrupted = false;
+
+          // Check if title was corrupted with a UUID or section ID
+          if (isValidUuid(cleanTitle)) {
+            // If the title matches a known section ID, rebind the page directly to that section!
+            if (validSectionIds.has(cleanTitle)) {
+              cleanSectionId = cleanTitle;
+            }
+            cleanTitle = 'Sem título';
+            wasCorrupted = true;
+          }
 
           if (!cleanParentId || cleanParentId === 'null' || cleanParentId === 'undefined' || !validPageIds.has(cleanParentId)) {
+            if (cleanParentId !== null) wasCorrupted = true;
             cleanParentId = null;
           }
 
           if ((!cleanSectionId || (validSectionIds.size > 0 && !validSectionIds.has(cleanSectionId))) && fallbackSectionId) {
             cleanSectionId = fallbackSectionId;
+            wasCorrupted = true;
           }
 
-          return {
+          const fixedPage: NotePage = {
             ...p,
+            titulo: cleanTitle,
             parent_id: cleanParentId,
             section_id: cleanSectionId
           };
+
+          if (wasCorrupted) {
+            pagesToUpdateInDb.push(fixedPage);
+          }
+
+          return fixedPage;
         });
+
+        // Asynchronously persist repaired pages to Dexie and Supabase so corruption never returns
+        if (pagesToUpdateInDb.length > 0) {
+          (async () => {
+            for (const fixed of pagesToUpdateInDb) {
+              try {
+                await offlineDb.pages.update(fixed.id, {
+                  titulo: fixed.titulo,
+                  section_id: fixed.section_id,
+                  parent_id: fixed.parent_id,
+                  lastUpdatedAt: Date.now()
+                });
+                await supabase.from('note_pages').update({
+                  titulo: fixed.titulo,
+                  section_id: fixed.section_id,
+                  parent_id: fixed.parent_id
+                }).eq('id', fixed.id);
+              } catch (e) {
+                console.debug('Failed to persist auto-repaired page to database:', e);
+              }
+            }
+          })().catch(() => {});
+        }
 
         const sortedPages = sortPagesByStoredOrder(sanitizedPages, targetUserId);
 

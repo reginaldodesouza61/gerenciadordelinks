@@ -286,17 +286,17 @@ export function NotesContainer() {
                 </h3>
                 <p className="text-gray-500 dark:text-zinc-400 text-sm mb-5 leading-relaxed">
                   {activeSection 
-                    ? 'Esta seção ainda não possui anotações. Crie a primeira página para começar.'
-                    : 'Selecione uma anotação no menu lateral ou crie uma nova para começar a editar no quadro livre.'}
+                    ? 'Esta seção ainda não possui páginas'
+                    : 'Selecione uma página no menu lateral ou crie uma nova para começar a editar no quadro livre.'}
                 </p>
                 <div className="flex flex-wrap items-center justify-center gap-2">
                   {activeSection && (
                     <Button
-                      onClick={() => addPage('Sem título', activeSection.id, user?.id, null)}
+                      onClick={() => addPage('Sem título', activeSection.id, user?.id || 'c72212e7-2b6a-4da7-8745-01eb33414af4', null)}
                       className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-xl shadow-xs"
                     >
                       <Plus className="h-4 w-4" />
-                      Criar Nova Nota nesta Seção
+                      Criar Página
                     </Button>
                   )}
                   <Button
