@@ -290,73 +290,15 @@ function setCached<T>(key: string, data: T) {
 }
 
 function getStoredTrash(): DeletedNoteItem[] {
-  try {
-    const raw = localStorage.getItem(TRASH_STORAGE_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw);
-  } catch (e) {
-    console.error('Error loading trash from storage:', e);
-    return [];
-  }
+  return [];
 }
 
-function saveTrashToStorage(items: DeletedNoteItem[]) {
-  try {
-    localStorage.setItem(TRASH_STORAGE_KEY, JSON.stringify(items));
-    const effectiveUserId = useAuthStore.getState().user?.id;
-    if (effectiveUserId && effectiveUserId !== DEFAULT_USER_ID) {
-      supabase.auth.updateUser({
-        data: { atlas_notes_trash: items }
-      }).catch((err) => {
-        console.debug('Failed to sync trash to Supabase user metadata:', err);
-      });
-    }
-  } catch (e) {
-    console.error('Error saving trash to storage:', e);
-  }
+function saveTrashToStorage(_items: DeletedNoteItem[]) {
+  // No-op: Permanent deletion requested
 }
 
-async function syncTrashWithRemote(currentUserId?: string): Promise<DeletedNoteItem[]> {
-  const localTrash = getStoredTrash();
-  const effectiveUserId = currentUserId || useAuthStore.getState().user?.id;
-  if (!effectiveUserId || effectiveUserId === DEFAULT_USER_ID) {
-    return localTrash;
-  }
-
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const remoteTrash = (session?.user?.user_metadata?.atlas_notes_trash as DeletedNoteItem[]) || [];
-
-    if (!Array.isArray(remoteTrash)) return localTrash;
-
-    // Merge remote and local trash (union by ID)
-    const trashMap = new Map<string, DeletedNoteItem>();
-    remoteTrash.forEach(item => trashMap.set(item.id, item));
-    localTrash.forEach(item => {
-      if (!trashMap.has(item.id)) {
-        trashMap.set(item.id, item);
-      }
-    });
-
-    const mergedTrash = Array.from(trashMap.values());
-    try {
-      localStorage.setItem(TRASH_STORAGE_KEY, JSON.stringify(mergedTrash));
-    } catch {
-      // ignore
-    }
-
-    // If local had new items not yet in remote user_metadata, upload them
-    if (mergedTrash.length > remoteTrash.length) {
-      supabase.auth.updateUser({
-        data: { atlas_notes_trash: mergedTrash }
-      }).catch(console.debug);
-    }
-
-    return mergedTrash;
-  } catch (err) {
-    console.debug('Failed to sync trash with remote metadata:', err);
-    return localTrash;
-  }
+async function syncTrashWithRemote(_currentUserId?: string): Promise<DeletedNoteItem[]> {
+  return [];
 }
 
 function getStoredActivePageId(userId?: string): string | null {
@@ -578,6 +520,22 @@ function sortPagesByStoredOrder(pages: NotePage[], userId?: string): NotePage[] 
   });
 }
 
+export interface NoteDiagnosticResult {
+  authUid: string | null;
+  supabaseCountTargetUser: number;
+  supabaseCountDefaultUser: number;
+  nullOrInvalidSectionCount: number;
+  zustandPageCount: number;
+  zustandSectionCount: number;
+  indexedDbPageCount: number;
+  indexedDbSectionCount: number;
+  fetchNotesReturnedData: boolean;
+  notesSidebarFilteringIssues: string[];
+  activeSectionIdStatus: { id: string | null; isValid: boolean };
+  activePageIdStatus: { id: string | null; isValid: boolean };
+  rootCauseSummary: string;
+}
+
 interface NoteState {
   sections: NoteSection[];
   pages: NotePage[];
@@ -587,6 +545,10 @@ interface NoteState {
   activePageId: string | null;
   isLoading: boolean;
   
+  // Diagnostics & Recovery
+  runDiagnostics: () => Promise<NoteDiagnosticResult>;
+  repairAndRestoreNotes: () => Promise<void>;
+
   // Offline-first Sync Status map
   pageSyncStatuses: Record<string, 'synced' | 'pending' | 'conflict'>;
   resolveConflict: (pageId: string, resolution: 'local' | 'remote') => Promise<void>;
@@ -1095,72 +1057,22 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const pagesKey = getUserCacheKey(targetUserId, 'note_pages');
     const relationsKey = getUserCacheKey(targetUserId, 'note_relations');
 
-    const storedTrash = await syncTrashWithRemote(targetUserId);
-    const trashedSectionIds = new Set<string>();
-    const trashedPageIds = new Set<string>();
-    for (const item of storedTrash) {
-      if (item.type === 'section') {
-        trashedSectionIds.add(item.id);
-        trashedSectionIds.add(sanitizeUuid(item.id));
-        if (item.sectionPages) {
-          item.sectionPages.forEach(p => {
-            trashedPageIds.add(p.id);
-            trashedPageIds.add(sanitizeUuid(p.id));
-          });
-        }
-      } else if (item.type === 'page') {
-        trashedPageIds.add(item.id);
-        trashedPageIds.add(sanitizeUuid(item.id));
-        if (item.subpages) {
-          item.subpages.forEach(sub => {
-            trashedPageIds.add(sub.id);
-            trashedPageIds.add(sanitizeUuid(sub.id));
-          });
-        }
-      }
-    }
-
-    // Load Dexie tombstones into trashed sets & save remote trash to local tombstones
+    // Clear any legacy tombstones from Dexie to prevent any accidental ghost hiding
     try {
       if (offlineDb.tombstones) {
-        for (const tSecId of trashedSectionIds) {
-          await offlineDb.tombstones.put({
-            id: sanitizeUuid(tSecId),
-            type: 'section',
-            userId: targetUserId,
-            deletedAt: Date.now()
-          });
-        }
-        for (const tPageId of trashedPageIds) {
-          await offlineDb.tombstones.put({
-            id: sanitizeUuid(tPageId),
-            type: 'page',
-            userId: targetUserId,
-            deletedAt: Date.now()
-          });
-        }
-
-        const tombstones = await offlineDb.tombstones.toArray();
-        for (const t of tombstones) {
-          if (t.type === 'section') {
-            trashedSectionIds.add(t.id);
-            trashedSectionIds.add(sanitizeUuid(t.id));
-          } else {
-            trashedPageIds.add(t.id);
-            trashedPageIds.add(sanitizeUuid(t.id));
-          }
-        }
+        await offlineDb.tombstones.clear();
       }
-    } catch (tombErr) {
-      console.debug('Failed to read/write Dexie tombstones:', tombErr);
+    } catch {
+      // ignore
     }
 
-    const rawCachedSections = getCached<NoteSection[]>(sectionsKey, targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS : []);
-    const localCachedSections = sortSectionsByStoredOrder(rawCachedSections, targetUserId)
-      .filter(s => !trashedSectionIds.has(s.id) && !trashedSectionIds.has(sanitizeUuid(s.id)));
-    const rawCachedPages = getCached<NotePage[]>(pagesKey, targetUserId === DEFAULT_USER_ID ? DEFAULT_PAGES : []);
-    const localCachedPages = sortPagesByStoredOrder(rawCachedPages, targetUserId)
-      .filter(p => !trashedPageIds.has(p.id) && !trashedPageIds.has(sanitizeUuid(p.id)) && !trashedSectionIds.has(p.section_id) && !trashedSectionIds.has(sanitizeUuid(p.section_id)));
+    const userDefaultSections = DEFAULT_SECTIONS.map(s => ({ ...s, user_id: targetUserId }));
+    const userDefaultPages = DEFAULT_PAGES.map(p => ({ ...p, user_id: targetUserId }));
+
+    const rawCachedSections = getCached<NoteSection[]>(sectionsKey, userDefaultSections);
+    const localCachedSections = sortSectionsByStoredOrder(rawCachedSections, targetUserId);
+    const rawCachedPages = getCached<NotePage[]>(pagesKey, userDefaultPages);
+    const localCachedPages = sortPagesByStoredOrder(rawCachedPages, targetUserId);
     const cachedRelations = getCached<NoteLinkRelation[]>(relationsKey, []);
 
     let dexiePages: LocalNotePage[] = [];
@@ -1174,22 +1086,18 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       console.debug('Failed to read Dexie storage during fetchNotes:', e);
     }
 
-    const userDexiePages = dexiePages
-      .filter(p => p.user_id === targetUserId || targetUserId === DEFAULT_USER_ID)
-      .filter(p => !trashedPageIds.has(p.id) && !trashedPageIds.has(sanitizeUuid(p.id)) && !trashedSectionIds.has(p.section_id) && !trashedSectionIds.has(sanitizeUuid(p.section_id)));
-    const userDexieSections = dexieSections
-      .filter(s => s.user_id === targetUserId || targetUserId === DEFAULT_USER_ID)
-      .filter(s => !trashedSectionIds.has(s.id) && !trashedSectionIds.has(sanitizeUuid(s.id)));
+    const userDexiePages = dexiePages.filter(p => p.user_id === targetUserId || p.user_id === DEFAULT_USER_ID || !p.user_id);
+    const userDexieSections = dexieSections.filter(s => s.user_id === targetUserId || s.user_id === DEFAULT_USER_ID || !s.user_id);
 
     // Merge immediate in-memory view
     const immediateSectionsMap = new Map<string, NoteSection>();
-    (localCachedSections.length > 0 ? localCachedSections : (targetUserId === DEFAULT_USER_ID ? DEFAULT_SECTIONS.filter(s => !trashedSectionIds.has(s.id)) : [])).forEach(s => immediateSectionsMap.set(s.id, s));
-    userDexieSections.forEach(s => immediateSectionsMap.set(s.id, s));
+    (localCachedSections.length > 0 ? localCachedSections : userDefaultSections).forEach(s => immediateSectionsMap.set(s.id, { ...s, user_id: targetUserId }));
+    userDexieSections.forEach(s => immediateSectionsMap.set(s.id, { ...s, user_id: targetUserId }));
     const immediateSections = sortSectionsByStoredOrder(Array.from(immediateSectionsMap.values()), targetUserId);
 
     const immediatePagesMap = new Map<string, NotePage>();
-    (localCachedPages.length > 0 ? localCachedPages : (targetUserId === DEFAULT_USER_ID ? DEFAULT_PAGES.filter(p => !trashedPageIds.has(p.id) && !trashedSectionIds.has(p.section_id)) : [])).forEach(p => immediatePagesMap.set(p.id, p));
-    userDexiePages.forEach(p => immediatePagesMap.set(p.id, p));
+    (localCachedPages.length > 0 ? localCachedPages : userDefaultPages).forEach(p => immediatePagesMap.set(p.id, { ...p, user_id: targetUserId }));
+    userDexiePages.forEach(p => immediatePagesMap.set(p.id, { ...p, user_id: targetUserId }));
     const immediatePages = sortPagesByStoredOrder(Array.from(immediatePagesMap.values()), targetUserId);
 
     // Determine immediate active page & section
@@ -1236,14 +1144,22 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
     try {
       // Use a timeout race so database queries never hang indefinitely
+      const sectionsQuery = targetUserId !== DEFAULT_USER_ID
+        ? supabase.from('note_sections').select('*').or(`user_id.eq.${targetUserId},user_id.eq.${DEFAULT_USER_ID},user_id.is.null`).order('created_at', { ascending: true })
+        : supabase.from('note_sections').select('*').eq('user_id', DEFAULT_USER_ID).order('created_at', { ascending: true });
+
+      const pagesQuery = targetUserId !== DEFAULT_USER_ID
+        ? supabase.from('note_pages').select('*').or(`user_id.eq.${targetUserId},user_id.eq.${DEFAULT_USER_ID},user_id.is.null`).order('created_at', { ascending: true })
+        : supabase.from('note_pages').select('*').eq('user_id', DEFAULT_USER_ID).order('created_at', { ascending: true });
+
       const queryPromise = Promise.all([
-        supabase.from('note_sections').select('*').eq('user_id', targetUserId).order('created_at', { ascending: true }),
-        supabase.from('note_pages').select('*').eq('user_id', targetUserId).order('created_at', { ascending: true }),
+        sectionsQuery,
+        pagesQuery,
         supabase.from('note_link_relations').select('*')
       ]);
 
       const timeoutPromise = new Promise<null>((resolve) => 
-        setTimeout(() => resolve(null), 3000)
+        setTimeout(() => resolve(null), 3500)
       );
 
       const result = await Promise.race([queryPromise, timeoutPromise]);
@@ -1254,50 +1170,63 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         const rawSections = (sectionsRes.data as NoteSection[]) || [];
         const rawPagesData = (pagesRes.data as NotePage[]) || [];
 
+        // Claim any unowned/default sections for logged in targetUserId in background
+        if (targetUserId !== DEFAULT_USER_ID) {
+          rawSections.forEach(s => {
+            if (s.user_id !== targetUserId) {
+              supabase.from('note_sections').update({ user_id: targetUserId }).eq('id', s.id).then().catch(console.debug);
+            }
+          });
+          rawPagesData.forEach(p => {
+            if (p.user_id !== targetUserId) {
+              supabase.from('note_pages').update({ user_id: targetUserId }).eq('id', p.id).then().catch(console.debug);
+            }
+          });
+        }
+
         // 1. SECTIONS MERGING & RECONCILIATION
         const mergedSectionsMap = new Map<string, NoteSection>();
-        // Populate with immediate local sections first to retain order information
-        immediateSections.forEach(s => {
-          if (!trashedSectionIds.has(s.id) && !trashedSectionIds.has(sanitizeUuid(s.id))) {
-            mergedSectionsMap.set(s.id, s);
-          }
-        });
-
-        const pendingQueue = await offlineDb.syncQueue.toArray();
-        const pendingPageIds = new Set(pendingQueue.map(item => item.pageId));
-        const offlineCreatedPageIds = new Set(pendingQueue.filter(item => item.action === 'create').map(item => item.pageId));
-        const deletedPageIds = new Set(pendingQueue.filter(item => item.action === 'delete').map(item => item.pageId));
-
-        // Merge remote sections, preserving local .ordem if present
+        
+        // Add remote sections
         rawSections.forEach(s => {
-          if (trashedSectionIds.has(s.id) || trashedSectionIds.has(sanitizeUuid(s.id))) {
-            // Background cleanup of remote trashed section
-            supabase.from('note_pages').delete().eq('section_id', s.id).then().catch(console.debug);
-            supabase.from('note_sections').delete().eq('id', s.id).then().catch(console.debug);
-            return;
-          }
-          const localSec = mergedSectionsMap.get(s.id);
-          mergedSectionsMap.set(s.id, {
-            ...s,
-            ordem: (localSec && localSec.ordem !== undefined) ? localSec.ordem : s.ordem
-          });
+          const cleanSec = { ...s, user_id: targetUserId };
+          mergedSectionsMap.set(s.id, cleanSec);
+          mergedSectionsMap.set(sanitizeUuid(s.id), cleanSec);
         });
 
-        // If we fetched sections from Supabase, purge any local sections that no longer exist on server and are not pending creation
-        if (rawSections.length > 0) {
-          const remoteSectionIds = new Set(rawSections.map(s => s.id).concat(rawSections.map(s => sanitizeUuid(s.id))));
-          for (const [secId, sec] of mergedSectionsMap.entries()) {
-            if (!remoteSectionIds.has(secId) && !remoteSectionIds.has(sanitizeUuid(secId))) {
-              mergedSectionsMap.delete(secId);
-              if (offlineDb.sections) offlineDb.sections.delete(secId).catch(console.debug);
+        // Add immediate local/dexie sections that might not be on server yet
+        immediateSections.forEach(s => {
+          const cleanSecId = sanitizeUuid(s.id);
+          if (!mergedSectionsMap.has(s.id) && !mergedSectionsMap.has(cleanSecId)) {
+            const secToKeep = { ...s, user_id: targetUserId };
+            mergedSectionsMap.set(s.id, secToKeep);
+            // Backup missing section to Supabase
+            if (targetUserId !== DEFAULT_USER_ID) {
+              supabase.from('note_sections').upsert([{
+                id: cleanSecId,
+                nome: s.nome,
+                user_id: targetUserId
+              }]).catch(console.debug);
             }
           }
+        });
+
+        // Ensure at least default sections exist if map is empty
+        if (mergedSectionsMap.size === 0) {
+          userDefaultSections.forEach(ds => {
+            mergedSectionsMap.set(ds.id, ds);
+            if (targetUserId !== DEFAULT_USER_ID) {
+              supabase.from('note_sections').upsert([{
+                id: ds.id,
+                nome: ds.nome,
+                user_id: targetUserId
+              }]).catch(console.debug);
+            }
+          });
         }
 
         const finalSections = sortSectionsByStoredOrder(
-          Array.from(mergedSectionsMap.values()).length > 0 
-            ? Array.from(mergedSectionsMap.values()) 
-            : ((targetUserId === DEFAULT_USER_ID && storedTrash.length === 0) ? DEFAULT_SECTIONS : []), 
+          Array.from(new Map(Array.from(mergedSectionsMap.values()).map(s => [sanitizeUuid(s.id), s])).values()),
           targetUserId
         );
 
@@ -1306,10 +1235,6 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           try {
             for (const sec of finalSections) {
               await offlineDb.sections.put(sec);
-            }
-            // Clean any trashed sections from Dexie
-            for (const tSecId of trashedSectionIds) {
-              await offlineDb.sections.delete(tSecId);
             }
           } catch (dexSecErr) {
             console.debug('Failed to save sections to Dexie:', dexSecErr);
@@ -1339,50 +1264,37 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         // Reconcile and merge fetched Supabase pages with Dexie IndexedDB & local cache
         const localDexiePages = await offlineDb.pages.toArray();
         const dexieMap = new Map(localDexiePages.map(p => [p.id, p]));
+        const pendingQueue = await offlineDb.syncQueue.toArray();
+        const pendingPageIds = new Set(pendingQueue.map(item => item.pageId));
         const initialSyncStatuses: Record<string, 'synced' | 'pending' | 'conflict'> = {};
 
         const mergedPagesMap = new Map<string, NotePage>();
 
-        // First, add all remote pages that aren't deleted in pending sync queue or trashed
+        // Add decrypted remote pages
         for (const remotePage of decryptedRemotePages) {
-          const isTrashed = trashedPageIds.has(remotePage.id) || 
-            trashedPageIds.has(sanitizeUuid(remotePage.id)) ||
-            trashedSectionIds.has(remotePage.section_id) ||
-            trashedSectionIds.has(sanitizeUuid(remotePage.section_id));
-
-          if (isTrashed) {
-            // Background cleanup of remote trashed page
-            supabase.from('note_pages').delete().eq('id', remotePage.id).then().catch(console.debug);
-            offlineDb.pages.delete(remotePage.id).catch(console.debug);
-            continue;
-          }
-
-          if (deletedPageIds.has(remotePage.id) || deletedPageIds.has(sanitizeUuid(remotePage.id))) {
-            continue;
-          }
-
-          const localMatch = dexieMap.get(remotePage.id) || dexieMap.get(sanitizeUuid(remotePage.id));
-          const isPendingSync = pendingPageIds.has(remotePage.id) || pendingPageIds.has(sanitizeUuid(remotePage.id));
+          const cleanId = sanitizeUuid(remotePage.id);
+          const localMatch = dexieMap.get(remotePage.id) || dexieMap.get(cleanId);
+          const isPendingSync = pendingPageIds.has(remotePage.id) || pendingPageIds.has(cleanId);
 
           if (localMatch) {
             initialSyncStatuses[remotePage.id] = isPendingSync ? 'pending' : localMatch.syncStatus;
             
-            // Preserve local changes (including moved section_id, parent_id, titulo, and conteudo)
             const shouldUseLocal = isPendingSync || 
               localMatch.syncStatus === 'pending' || 
               localMatch.syncStatus === 'conflict' ||
               (localMatch.lastUpdatedAt && localMatch.lastUpdatedAt > new Date(remotePage.created_at).getTime());
 
             if (shouldUseLocal) {
-              mergedPagesMap.set(remotePage.id, {
+              mergedPagesMap.set(cleanId, {
                 ...remotePage,
+                id: cleanId,
                 titulo: localMatch.titulo ?? remotePage.titulo,
                 conteudo: localMatch.conteudo ?? remotePage.conteudo,
                 section_id: localMatch.section_id ?? remotePage.section_id,
                 parent_id: localMatch.parent_id !== undefined ? localMatch.parent_id : remotePage.parent_id
               });
             } else {
-              mergedPagesMap.set(remotePage.id, remotePage);
+              mergedPagesMap.set(cleanId, { ...remotePage, id: cleanId });
               if (
                 localMatch.conteudo !== remotePage.conteudo || 
                 localMatch.titulo !== remotePage.titulo ||
@@ -1395,74 +1307,80 @@ export const useNoteStore = create<NoteState>((set, get) => ({
                   section_id: remotePage.section_id,
                   parent_id: remotePage.parent_id,
                   lastUpdatedAt: Date.now()
-                });
+                }).catch(() => {});
               }
             }
           } else {
-            // New remote page not in Dexie yet
-            mergedPagesMap.set(remotePage.id, remotePage);
+            mergedPagesMap.set(cleanId, { ...remotePage, id: cleanId });
             await offlineDb.pages.put({
               ...remotePage,
+              id: cleanId,
               localVersion: 1,
               remoteVersion: 1,
               syncStatus: 'synced',
               lastUpdatedAt: Date.now()
-            });
+            }).catch(() => {});
             initialSyncStatuses[remotePage.id] = 'synced';
           }
         }
 
-        // Second, preserve ONLY genuinely offline-created local Dexie pages that have not yet been synced
+        // Add local Dexie pages that might not be on server yet and queue them
         for (const localPage of localDexiePages) {
-          if (trashedPageIds.has(localPage.id) || trashedPageIds.has(sanitizeUuid(localPage.id)) || trashedSectionIds.has(localPage.section_id) || trashedSectionIds.has(sanitizeUuid(localPage.section_id))) {
-            await offlineDb.pages.delete(localPage.id);
-            continue;
-          }
-          if (deletedPageIds.has(localPage.id) || deletedPageIds.has(sanitizeUuid(localPage.id))) {
-            await offlineDb.pages.delete(localPage.id);
-            continue;
-          }
-
-          if (!mergedPagesMap.has(localPage.id) && !mergedPagesMap.has(sanitizeUuid(localPage.id))) {
-            const isCreatedOffline = offlineCreatedPageIds.has(localPage.id) || offlineCreatedPageIds.has(sanitizeUuid(localPage.id));
+          const cleanId = sanitizeUuid(localPage.id);
+          if (!mergedPagesMap.has(cleanId) && !mergedPagesMap.has(localPage.id)) {
+            mergedPagesMap.set(cleanId, {
+              ...localPage,
+              id: cleanId,
+              user_id: targetUserId
+            });
+            initialSyncStatuses[cleanId] = 'pending';
             
-            if (isCreatedOffline) {
-              // Valid page created offline on this device waiting to be synced to Supabase
-              mergedPagesMap.set(localPage.id, {
-                ...localPage,
-                user_id: targetUserId
-              });
-              initialSyncStatuses[localPage.id] = 'pending';
-            } else {
-              // Page was deleted remotely on another browser/device - purge it locally
-              await offlineDb.pages.delete(localPage.id);
+            // Queue sync to Supabase so it's safely saved in the cloud
+            if (targetUserId !== DEFAULT_USER_ID) {
+              await offlineDb.syncQueue.put({
+                pageId: cleanId,
+                action: 'create',
+                payload: {
+                  id: cleanId,
+                  titulo: localPage.titulo,
+                  conteudo: localPage.conteudo,
+                  section_id: sanitizeUuid(localPage.section_id),
+                  parent_id: sanitizeUuidOrNull(localPage.parent_id),
+                  user_id: targetUserId,
+                  created_at: localPage.created_at || new Date().toISOString()
+                },
+                timestamp: Date.now(),
+                attempts: 0
+              }).catch(console.debug);
             }
           }
         }
 
-        // Third, preserve ONLY genuinely offline-created cached pages
+        // Add local cached pages that might not be in Dexie or Supabase
         for (const cachedPage of localCachedPages) {
-          if (trashedPageIds.has(cachedPage.id) || trashedPageIds.has(sanitizeUuid(cachedPage.id)) || trashedSectionIds.has(cachedPage.section_id) || trashedSectionIds.has(sanitizeUuid(cachedPage.section_id))) {
-            continue;
-          }
-          if (deletedPageIds.has(cachedPage.id) || deletedPageIds.has(sanitizeUuid(cachedPage.id))) {
-            continue;
-          }
-          if (!mergedPagesMap.has(cachedPage.id) && !mergedPagesMap.has(sanitizeUuid(cachedPage.id))) {
-            const isCreatedOffline = offlineCreatedPageIds.has(cachedPage.id) || offlineCreatedPageIds.has(sanitizeUuid(cachedPage.id));
-            if (isCreatedOffline) {
-              mergedPagesMap.set(cachedPage.id, {
-                ...cachedPage,
-                user_id: targetUserId
-              });
-              initialSyncStatuses[cachedPage.id] = 'pending';
-            }
+          const cleanId = sanitizeUuid(cachedPage.id);
+          if (!mergedPagesMap.has(cleanId) && !mergedPagesMap.has(cachedPage.id)) {
+            mergedPagesMap.set(cleanId, {
+              ...cachedPage,
+              id: cleanId,
+              user_id: targetUserId
+            });
+            initialSyncStatuses[cleanId] = 'pending';
+            await offlineDb.pages.put({
+              ...cachedPage,
+              id: cleanId,
+              user_id: targetUserId,
+              localVersion: 1,
+              remoteVersion: 0,
+              syncStatus: 'pending',
+              lastUpdatedAt: Date.now()
+            }).catch(() => {});
           }
         }
 
         let reconciledPages = Array.from(mergedPagesMap.values());
-        if (reconciledPages.length === 0 && targetUserId === DEFAULT_USER_ID && storedTrash.length === 0) {
-          reconciledPages = DEFAULT_PAGES;
+        if (reconciledPages.length === 0) {
+          reconciledPages = userDefaultPages;
         }
 
         // Sanitize page titles (fixing corrupted UUID titles from previous bug), section_id, and parent_id
@@ -1622,6 +1540,29 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           isLoading: false
         });
 
+        // Ensure user's sections and pages are permanently synced in Supabase
+        if (targetUserId !== DEFAULT_USER_ID) {
+          (async () => {
+            for (const sec of finalSections) {
+              await supabase.from('note_sections').upsert([{
+                id: sanitizeUuid(sec.id),
+                nome: sec.nome,
+                user_id: targetUserId
+              }]).catch(console.debug);
+            }
+            for (const p of sortedPages) {
+              await supabase.from('note_pages').upsert([{
+                id: sanitizeUuid(p.id),
+                titulo: p.titulo,
+                conteudo: p.conteudo,
+                section_id: sanitizeUuid(p.section_id),
+                parent_id: sanitizeUuidOrNull(p.parent_id),
+                user_id: targetUserId
+              }]).catch(console.debug);
+            }
+          })().catch(() => {});
+        }
+
         get().syncPendingQueue().catch(console.error);
       }
     } catch (error) {
@@ -1754,35 +1695,19 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     set(st => ({
       sections: remainingSections,
       pages: remainingPages,
-      deletedItems: nextTrash,
+      deletedItems: [],
       activeSectionId: isCurrentActiveSection ? (remainingSections.length > 0 ? remainingSections[0].id : null) : st.activeSectionId,
       activePageId: isCurrentActivePage ? (remainingPages.length > 0 ? remainingPages[0].id : null) : st.activePageId
     }));
 
-    // IndexedDB removal & Tombstone registration
+    // Exclusão definitiva do Dexie
     try {
-      if (offlineDb.tombstones) {
-        await offlineDb.tombstones.put({
-          id: cleanId,
-          type: 'section',
-          userId: effectiveUserId,
-          deletedAt: Date.now()
-        });
-      }
       if (offlineDb.sections) {
         await offlineDb.sections.delete(cleanId);
         if (id !== cleanId) await offlineDb.sections.delete(id);
       }
       for (const p of pagesToDelete) {
         const pId = sanitizeUuid(p.id);
-        if (offlineDb.tombstones) {
-          await offlineDb.tombstones.put({
-            id: pId,
-            type: 'page',
-            userId: effectiveUserId,
-            deletedAt: Date.now()
-          });
-        }
         await offlineDb.pages.delete(p.id);
         if (pId !== p.id) await offlineDb.pages.delete(pId);
         await offlineDb.syncQueue.where('pageId').equals(p.id).delete();
@@ -1792,24 +1717,15 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       console.debug('Dexie section delete error:', e);
     }
 
-    // Remote Supabase removal: delete child pages first to satisfy foreign key constraints, then delete section
+    // Exclusão definitiva remota no Supabase
     try {
       await supabase.from('note_pages').delete().eq('section_id', cleanId);
       await supabase.from('note_sections').delete().eq('id', cleanId);
     } catch (e) {
-      console.debug('Section deleted locally, background sync pending:', e);
+      console.debug('Section deleted locally, remote error:', e);
     }
 
-    toast('Seção enviada para a Lixeira', {
-      description: `"${sectionToDelete.nome}" e suas notas associadas.`,
-      duration: 6000,
-      action: {
-        label: 'Desfazer',
-        onClick: () => {
-          get().restoreItem(sectionToDelete.id);
-        }
-      }
-    });
+    toast.success(`Seção "${sectionToDelete.nome}" e suas anotações foram excluídas permanentemente.`);
   },
 
   reorderSections: (newSections: NoteSection[]) => {
@@ -2147,18 +2063,6 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const subpagesToDelete = getSubpages(pageToDelete.id);
     const allPagesToDelete = [pageToDelete, ...subpagesToDelete];
 
-    const trashItem: DeletedNoteItem = {
-      id: pageToDelete.id,
-      type: 'page',
-      title: pageToDelete.titulo,
-      deletedAt: new Date().toISOString(),
-      pageData: pageToDelete,
-      subpages: subpagesToDelete
-    };
-
-    const nextTrash = [trashItem, ...state.deletedItems.filter(item => item.id !== cleanId && item.id !== id)];
-    saveTrashToStorage(nextTrash);
-
     const remainingPages = state.pages.filter(p => !allPagesToDelete.some(dp => dp.id === p.id));
     savePageOrder(remainingPages.map(p => p.id), currentUserId);
     setCached(getUserCacheKey(currentUserId, 'note_pages'), remainingPages);
@@ -2173,21 +2077,13 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
     set({
       pages: remainingPages,
-      deletedItems: nextTrash,
+      deletedItems: [],
       activePageId: isCurrentActivePage ? (remainingPages.length > 0 ? remainingPages[0].id : null) : state.activePageId
     });
 
     try {
       for (const p of allPagesToDelete) {
         const cId = sanitizeUuid(p.id);
-        if (offlineDb.tombstones) {
-          await offlineDb.tombstones.put({
-            id: cId,
-            type: 'page',
-            userId: effectiveUserId,
-            deletedAt: Date.now()
-          });
-        }
         await offlineDb.pages.delete(p.id);
         if (cId !== p.id) await offlineDb.pages.delete(cId);
         await offlineDb.syncQueue.where('pageId').equals(p.id).delete();
@@ -2204,16 +2100,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       console.error('Dexie queue delete failed:', e);
     }
 
-    toast('Anotação enviada para a Lixeira', {
-      description: `"${pageToDelete.titulo}"`,
-      duration: 6000,
-      action: {
-        label: 'Desfazer',
-        onClick: () => {
-          get().restoreItem(pageToDelete.id);
-        }
-      }
-    });
+    toast.success(`Anotação "${pageToDelete.titulo}" excluída permanentemente.`);
   },
 
   reorderPages: (newPages: NotePage[]) => {
@@ -2541,5 +2428,196 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       }
     }
     set({ activePageId: id });
+  },
+
+  runDiagnostics: async () => {
+    const authUser = useAuthStore.getState().user;
+    const authUid = authUser?.id || null;
+    const targetUserId = authUid || DEFAULT_USER_ID;
+
+    // 1. Supabase count for target user
+    let supabaseCountTargetUser = 0;
+    let supabaseCountDefaultUser = 0;
+    try {
+      const { count: cTarget } = await supabase
+        .from('note_pages')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', targetUserId);
+      supabaseCountTargetUser = cTarget || 0;
+
+      if (targetUserId !== DEFAULT_USER_ID) {
+        const { count: cDefault } = await supabase
+          .from('note_pages')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', DEFAULT_USER_ID);
+        supabaseCountDefaultUser = cDefault || 0;
+      }
+    } catch {
+      // ignore
+    }
+
+    // 2. Zustand state metrics
+    const pages = get().pages;
+    const sections = get().sections;
+    const zustandPageCount = pages.length;
+    const zustandSectionCount = sections.length;
+
+    // 3. IndexedDB counts
+    let indexedDbPageCount = 0;
+    let indexedDbSectionCount = 0;
+    try {
+      indexedDbPageCount = await offlineDb.pages.count();
+      if (offlineDb.sections) {
+        indexedDbSectionCount = await offlineDb.sections.count();
+      }
+    } catch {
+      // ignore
+    }
+
+    // 4. Check for pages with null/invalid section_id
+    const sectionIds = new Set(sections.map(s => s.id).concat(sections.map(s => sanitizeUuid(s.id))));
+    const nullOrInvalidPages = pages.filter(p => !p.section_id || !sectionIds.has(p.section_id) && !sectionIds.has(sanitizeUuid(p.section_id)));
+    const nullOrInvalidSectionCount = nullOrInvalidPages.length;
+
+    // 5. Check Sidebar filtering issues
+    const notesSidebarFilteringIssues: string[] = [];
+    if (sections.length === 0 && pages.length > 0) {
+      notesSidebarFilteringIssues.push('Existem páginas na memória, mas zero seções. As páginas não aparecem no menu.');
+    }
+    if (nullOrInvalidSectionCount > 0) {
+      notesSidebarFilteringIssues.push(`${nullOrInvalidSectionCount} página(s) possuem section_id nulo ou não correspondente a nenhuma seção.`);
+    }
+
+    // 6. Active Section & Active Page Status
+    const activeSecId = get().activeSectionId;
+    const activeSecValid = Boolean(activeSecId && sections.some(s => s.id === activeSecId || sanitizeUuid(s.id) === sanitizeUuid(activeSecId)));
+
+    const activePgId = get().activePageId;
+    const activePgValid = Boolean(activePgId && pages.some(p => p.id === activePgId || sanitizeUuid(p.id) === sanitizeUuid(activePgId)));
+
+    if (activeSecId && !activeSecValid) {
+      notesSidebarFilteringIssues.push(`activeSectionId (${activeSecId}) aponta para uma seção inexistente.`);
+    }
+    if (activePgId && !activePgValid) {
+      notesSidebarFilteringIssues.push(`activePageId (${activePgId}) aponta para uma página inexistente.`);
+    }
+
+    // 7. Root Cause Summary
+    let rootCauseSummary = 'Todas as verificações passaram. Suas anotações estão sincronizadas e ativas.';
+    if (supabaseCountDefaultUser > 0 && authUid) {
+      rootCauseSummary = `Foram encontradas ${supabaseCountDefaultUser} anotações salvas sob o ID de visitante (guest). Clique em 'Reparar' para transferi-las e vinculá-las ao seu usuário (${authUid}).`;
+    } else if (sections.length === 0) {
+      rootCauseSummary = 'As seções padrão não estavam inicializadas para o seu usuário. O reparo recriará as seções e reatribuirá suas anotações.';
+    } else if (nullOrInvalidSectionCount > 0) {
+      rootCauseSummary = `Existem ${nullOrInvalidSectionCount} anotações desvinculadas. O reparo irá reatribuí-las para a sua seção principal.`;
+    } else if (zustandPageCount === 0 && (supabaseCountTargetUser > 0 || indexedDbPageCount > 0)) {
+      rootCauseSummary = 'Existem notas salvas no banco de dados, mas o cache local estava desatualizado. O reparo irá forçar a recarga completa dos dados.';
+    }
+
+    return {
+      authUid,
+      supabaseCountTargetUser,
+      supabaseCountDefaultUser,
+      nullOrInvalidSectionCount,
+      zustandPageCount,
+      zustandSectionCount,
+      indexedDbPageCount,
+      indexedDbSectionCount,
+      fetchNotesReturnedData: zustandPageCount > 0 || supabaseCountTargetUser > 0,
+      notesSidebarFilteringIssues,
+      activeSectionIdStatus: { id: activeSecId, isValid: activeSecValid },
+      activePageIdStatus: { id: activePgId, isValid: activePgValid },
+      rootCauseSummary
+    };
+  },
+
+  repairAndRestoreNotes: async () => {
+    const authUser = useAuthStore.getState().user;
+    const authUid = authUser?.id || null;
+    const targetUserId = authUid || DEFAULT_USER_ID;
+
+    // 1. Claim all guest/default IndexedDB pages/sections
+    try {
+      const allDexiePages = await offlineDb.pages.toArray();
+      for (const p of allDexiePages) {
+        if (!p.user_id || p.user_id === DEFAULT_USER_ID) {
+          await offlineDb.pages.update(p.id, { user_id: targetUserId });
+        }
+      }
+      if (offlineDb.sections) {
+        const allDexieSections = await offlineDb.sections.toArray();
+        for (const s of allDexieSections) {
+          if (!s.user_id || s.user_id === DEFAULT_USER_ID) {
+            await offlineDb.sections.update(s.id, { user_id: targetUserId });
+          }
+        }
+      }
+    } catch (e) {
+      console.debug('Dexie claim error:', e);
+    }
+
+    // 2. Claim all guest/default Supabase pages & sections
+    if (authUid && authUid !== DEFAULT_USER_ID) {
+      try {
+        await supabase.from('note_sections').update({ user_id: authUid }).eq('user_id', DEFAULT_USER_ID);
+        await supabase.from('note_pages').update({ user_id: authUid }).eq('user_id', DEFAULT_USER_ID);
+        await supabase.from('note_sections').update({ user_id: authUid }).is('user_id', null);
+        await supabase.from('note_pages').update({ user_id: authUid }).is('user_id', null);
+      } catch (e) {
+        console.debug('Supabase claim error:', e);
+      }
+    }
+
+    // 3. Clear throttle timestamps to force clean remote query
+    lastFetchTimestampMap.delete(targetUserId);
+    activeFetchPromiseMap.delete(targetUserId);
+
+    // 4. Force full fetch Notes
+    await get().fetchNotes(targetUserId);
+
+    // 5. Verify & repair sections/pages in memory if necessary
+    const state = get();
+    let currentSections = state.sections;
+
+    if (currentSections.length === 0) {
+      const newSec = await get().addSection('Geral', targetUserId);
+      currentSections = [newSec];
+    }
+
+    const firstSecId = currentSections[0].id;
+    const validSecIds = new Set(currentSections.map(s => s.id).concat(currentSections.map(s => sanitizeUuid(s.id))));
+
+    // Fix orphan or unassigned pages
+    const updatedPages = state.pages.map(p => {
+      if (!p.section_id || !validSecIds.has(p.section_id) && !validSecIds.has(sanitizeUuid(p.section_id))) {
+        const fixed = { ...p, section_id: firstSecId };
+        supabase.from('note_pages').update({ section_id: firstSecId }).eq('id', p.id).then().catch(console.debug);
+        offlineDb.pages.update(p.id, { section_id: firstSecId }).catch(console.debug);
+        return fixed;
+      }
+      return p;
+    });
+
+    // Expand all sections in localStorage
+    try {
+      localStorage.setItem('meuhub_notes_expanded_sections', JSON.stringify(currentSections.map(s => s.id)));
+    } catch {
+      // ignore
+    }
+
+    const nextActiveSec = currentSections.some(s => s.id === state.activeSectionId) ? state.activeSectionId : firstSecId;
+    const secPages = updatedPages.filter(p => p.section_id === nextActiveSec);
+    const nextActivePage = secPages.length > 0 ? secPages[0].id : (updatedPages.length > 0 ? updatedPages[0].id : null);
+
+    saveActiveSectionId(nextActiveSec, targetUserId);
+    if (nextActivePage) saveActivePageId(nextActivePage, targetUserId);
+
+    set({
+      sections: currentSections,
+      pages: updatedPages,
+      activeSectionId: nextActiveSec,
+      activePageId: nextActivePage,
+      isLoading: false
+    });
   }
 }));

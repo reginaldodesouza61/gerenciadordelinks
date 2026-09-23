@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { 
   Plus, Edit2, Trash, ChevronDown, ChevronRight, FileText, Folder, 
   ChevronLeft, Trash2, RotateCcw, GripVertical, ChevronUp, PanelLeftClose,
-  Search, Cloud, CloudOff, RefreshCw, AlertTriangle
+  Search, Cloud, CloudOff, RefreshCw, AlertTriangle, Wrench
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { useAuthStore } from '@/lib/store/authStore';
 import { cn } from '@/lib/utils';
 import { NotePage } from '@/types/notes';
-import { TrashModal } from './TrashModal';
+import { DiagnosticModal } from './DiagnosticModal';
 import { toast } from 'sonner';
 
 interface NotesSidebarProps {
@@ -110,6 +110,7 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
   // Dialog states
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [isDiagnosticOpen, setIsDiagnosticOpen] = useState(false);
   const [isTrashOpen, setIsTrashOpen] = useState(false);
   const [dialogType, setDialogType] = useState<'section' | 'page'>('section');
   const [deleteType, setDeleteType] = useState<'section' | 'page'>('page');
@@ -577,11 +578,11 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
           <Button
             variant="outline"
             size="icon"
-            onClick={() => setIsTrashOpen(true)}
-            className="h-9 w-9 rounded-xl border-border bg-white dark:bg-zinc-800 text-slate-500 hover:text-amber-600 dark:hover:text-amber-400 shrink-0 shadow-2xs"
-            title="Lixeira de páginas e seções excluídas"
+            onClick={() => setIsDiagnosticOpen(true)}
+            className="h-9 w-9 rounded-xl border-border bg-white dark:bg-zinc-800 text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 shrink-0 shadow-2xs"
+            title="Diagnóstico e Reparo do Banco de Anotações"
           >
-            <Trash2 size={15} />
+            <Wrench size={15} />
           </Button>
           {onCollapse && (
             <Button
@@ -771,31 +772,29 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
                 </div>
               );
             })}
+
+            {/* Fallback rendering for any orphan pages with missing section_id */}
+            {(() => {
+              const orphanPages = pages.filter(p => !p.parent_id && !sections.some(s => s.id === p.section_id || sanitizeUuid(s.id) === sanitizeUuid(p.section_id)));
+              if (orphanPages.length === 0) return null;
+              return (
+                <div className="space-y-1 w-full pt-2 border-t border-dashed border-amber-300 dark:border-amber-800/60">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400 px-2 py-1">
+                    <AlertTriangle size={13} />
+                    <span>Anotações Avulsas ({orphanPages.length})</span>
+                  </div>
+                  <div className="ml-2 space-y-0.5 border-l-2 border-amber-200 dark:border-amber-900/60 pl-1">
+                    {orphanPages.map(page => renderPage(page, 0, orphanPages))}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
 
-      {/* Sidebar Footer - Ultra-Compact Notion/OneNote Style */}
-      <div className="h-7 px-2.5 border-t border-slate-200/50 dark:border-zinc-800/50 bg-slate-50/20 dark:bg-zinc-900/20 flex items-center justify-between shrink-0 select-none">
-        <button
-          type="button"
-          onClick={() => setIsTrashOpen(true)}
-          className="flex items-center gap-1.5 px-2 h-5 rounded hover:bg-slate-200/50 dark:hover:bg-zinc-800/60 text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 transition-colors text-xs font-medium"
-          title="Lixeira & Recuperação"
-        >
-          <Trash2 size={12} className="text-slate-400 dark:text-zinc-500 shrink-0" />
-          <span>Lixeira</span>
-          {(deletedItems || []).length > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-100/80 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300">
-              {(deletedItems || []).length}
-            </span>
-          )}
-        </button>
-
-        <span className="text-[10px] font-medium text-slate-400/70 dark:text-zinc-500/70 tracking-tight pr-1">
-          Atlas Workspace
-        </span>
-      </div>
+      {/* Diagnostic Modal */}
+      <DiagnosticModal open={isDiagnosticOpen} onOpenChange={setIsDiagnosticOpen} />
 
       {/* Reusable Dialog */}
       <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) setParentPageId(null); }}>
@@ -827,19 +826,22 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle className="text-slate-800 dark:text-zinc-100">Confirmar Exclusão</DialogTitle>
+            <DialogTitle className="text-slate-800 dark:text-zinc-100 flex items-center gap-2">
+              <Trash2 className="w-5 h-5 text-red-500" />
+              Confirmar Exclusão Permanente
+            </DialogTitle>
           </DialogHeader>
           <div className="py-4 text-sm text-slate-600 dark:text-zinc-300 space-y-2">
             <p>
-              Deseja mover esta {deleteType === 'section' ? 'seção' : 'página'} para a lixeira?
+              Deseja excluir permanentemente esta {deleteType === 'section' ? 'seção e todas as suas anotações' : 'página'}?
             </p>
-            <p className="text-xs text-muted-foreground">
-              Você poderá desfazê-la imediatamente ou restaurá-la a qualquer momento na Lixeira.
+            <p className="text-xs text-rose-500/90 font-medium">
+              Atenção: Os dados serão excluídos definitivamente da nuvem e do dispositivo, sem opção de restauração.
             </p>
           </div>
           <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>Cancelar</Button>
-            <Button variant="destructive" className="bg-red-600 hover:bg-red-700 text-white" onClick={confirmDelete}>Mover para Lixeira</Button>
+            <Button variant="destructive" className="bg-red-600 hover:bg-red-700 text-white" onClick={confirmDelete}>Excluir Permanentemente</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -888,9 +890,6 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Trash / Deleted Notes Modal */}
-      <TrashModal open={isTrashOpen} onOpenChange={setIsTrashOpen} />
     </div>
   );
 }
