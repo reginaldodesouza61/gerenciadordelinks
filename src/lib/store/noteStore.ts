@@ -721,94 +721,81 @@ export const useNoteStore = create<NoteState>((set, get) => ({
   },
 
   migrateLocalNotesToUser: async (newUserId: string) => {
-    console.log(`[Migration] Iniciando migração de notas locais do IndexedDB para o usuário autenticado: ${newUserId}`);
+    console.log(`[Migration] Verificando notas e seções locais para migração ao usuário: ${newUserId}`);
     let migratedPages = 0;
     let migratedSections = 0;
 
     try {
-      // 1. Migrar seções locais para o novo UID e garantir presença em note_sections do Supabase
-      let localSections = await offlineDb.sections.toArray();
-      if (localSections.length === 0) {
-        localSections = DEFAULT_SECTIONS.map(s => ({ ...s, user_id: newUserId }));
-      }
+      // 1. Migrar SOMENTE seções anônimas/convidado locais para o novo UID
+      const localSections = await offlineDb.sections.toArray();
+      const unmigratedSections = localSections.filter(s => 
+        !s.user_id || s.user_id === DEFAULT_USER_ID || s.user_id === 'c72212e7-2b6a-4da7-8745-01eb33414af4'
+      );
 
-      for (const sec of localSections) {
-        const updatedSec = { ...sec, user_id: newUserId };
-        await offlineDb.sections.put(updatedSec);
-        
-        // Upsert na tabela remota note_sections com o JWT da sessão ativa
-        try {
-          const { error: secErr } = await supabase.from('note_sections').upsert([{
-            id: updatedSec.id,
-            nome: updatedSec.nome,
-            user_id: newUserId
-          }]);
-          if (!secErr) migratedSections++;
-        } catch (sErr) {
-          console.debug('[Migration] Erro ao sincronizar seção com Supabase:', sErr);
+      if (unmigratedSections.length > 0) {
+        for (const sec of unmigratedSections) {
+          const updatedSec = { ...sec, user_id: newUserId };
+          await offlineDb.sections.put(updatedSec);
+          
+          try {
+            const { error: secErr } = await supabase.from('note_sections').upsert([{
+              id: updatedSec.id,
+              nome: updatedSec.nome,
+              user_id: newUserId
+            }]);
+            if (!secErr) migratedSections++;
+          } catch (sErr) {
+            console.debug('[Migration] Erro ao sincronizar seção com Supabase:', sErr);
+          }
         }
       }
 
-      // 2. Migrar páginas locais para o novo UID e enfileirar para nuvem
-      let localPages = await offlineDb.pages.toArray();
-      if (localPages.length === 0) {
-        localPages = DEFAULT_PAGES.map(p => ({
-          ...p,
-          user_id: newUserId,
-          localVersion: 1,
-          remoteVersion: 0,
-          syncStatus: 'pending' as const,
-          lastUpdatedAt: Date.now()
-        }));
-      }
+      // 2. Migrar SOMENTE páginas anônimas/convidado locais para o novo UID e enfileirar
+      const localPages = await offlineDb.pages.toArray();
+      const unmigratedPages = localPages.filter(p => 
+        !p.user_id || p.user_id === DEFAULT_USER_ID || p.user_id === 'c72212e7-2b6a-4da7-8745-01eb33414af4'
+      );
 
-      const updatedPages: NotePage[] = [];
-      for (const page of localPages) {
-        const cleanPageId = sanitizeUuid(page.id) || page.id;
-        const updatedPage = {
-          ...page,
-          id: cleanPageId,
-          user_id: newUserId,
-          syncStatus: 'pending' as const,
-          lastUpdatedAt: Date.now()
-        };
-        await offlineDb.pages.put(updatedPage);
-        updatedPages.push(updatedPage);
-
-        // Enfileira na syncQueue
-        await offlineDb.syncQueue.put({
-          pageId: cleanPageId,
-          action: 'create',
-          payload: {
+      if (unmigratedPages.length > 0) {
+        for (const page of unmigratedPages) {
+          const cleanPageId = sanitizeUuid(page.id) || page.id;
+          const updatedPage = {
+            ...page,
             id: cleanPageId,
-            titulo: updatedPage.titulo,
-            conteudo: updatedPage.conteudo,
-            section_id: sanitizeUuid(updatedPage.section_id),
-            parent_id: sanitizeUuidOrNull(updatedPage.parent_id),
             user_id: newUserId,
-            created_at: updatedPage.created_at || new Date().toISOString()
-          },
-          timestamp: Date.now(),
-          attempts: 0
-        });
-        migratedPages++;
+            syncStatus: 'pending' as const,
+            lastUpdatedAt: Date.now()
+          };
+          await offlineDb.pages.put(updatedPage);
+
+          await offlineDb.syncQueue.put({
+            pageId: cleanPageId,
+            action: 'create',
+            payload: {
+              id: cleanPageId,
+              titulo: updatedPage.titulo,
+              conteudo: updatedPage.conteudo,
+              section_id: sanitizeUuid(updatedPage.section_id),
+              parent_id: sanitizeUuidOrNull(updatedPage.parent_id),
+              user_id: newUserId,
+              created_at: updatedPage.created_at || new Date().toISOString()
+            },
+            timestamp: Date.now(),
+            attempts: 0
+          });
+          migratedPages++;
+        }
       }
 
-      // Atualiza estado em memória e caches locais
-      set({
-        pages: updatedPages,
-        sections: localSections.map(s => ({ ...s, user_id: newUserId }))
-      });
-      setCached(getUserCacheKey(newUserId, 'note_pages'), updatedPages);
-      setCached(getUserCacheKey(newUserId, 'note_sections'), localSections);
-
-      // Dispara envio imediato da fila para o Supabase
-      await get().syncPendingQueue();
+      // Dispara envio da fila apenas se houver itens migradas
+      if (migratedPages > 0 || migratedSections > 0) {
+        await get().syncPendingQueue();
+      }
 
       return { migratedPages, migratedSections };
     } catch (err) {
       console.error('[Migration] Falha na migração automática para Supabase:', err);
-      return { migratedPages, migratedSections };
+      return { migratedPages: 0, migratedSections: 0 };
     }
   },
 
@@ -885,24 +872,6 @@ export const useNoteStore = create<NoteState>((set, get) => ({
             updatePayload.conteudo = await sanitizeAndEncryptNoteContent(updatePayload.conteudo);
           }
 
-          // Garantir integridade referencial: seção pai DEVE existir no Supabase antes de inserir nota
-          const targetSectionId = (updatePayload.section_id as string) || localPage?.section_id;
-          if (targetSectionId && activeUserId) {
-            try {
-              const localSec = (await offlineDb.sections.get(targetSectionId)) ||
-                get().sections.find(s => s.id === targetSectionId);
-              if (localSec) {
-                await supabase.from('note_sections').upsert([{
-                  id: targetSectionId,
-                  nome: localSec.nome || 'Geral',
-                  user_id: activeUserId
-                }]);
-              }
-            } catch (secErr) {
-              console.debug('[Sync] Verificação de seção pai:', secErr);
-            }
-          }
-
           let dbError = null;
           if (action === 'update') {
             const { error, count } = await supabase.from('note_pages').update(updatePayload).eq('id', cleanPageId);
@@ -944,6 +913,15 @@ export const useNoteStore = create<NoteState>((set, get) => ({
             if (errCode === '22P02' || errMsg.includes('22P02') || errMsg.includes('invalid input syntax for type uuid')) {
               console.warn(`[Sync] Dropping invalid UUID queue item ${id} due to 22P02:`, dbError);
               if (id) await offlineDb.syncQueue.delete(id);
+              continue;
+            }
+            if (errCode === '23503' || errMsg.includes('foreign key') || errMsg.includes('violates foreign key')) {
+              console.warn(`[Sync] Dropping queue item ${id} because target section no longer exists (23503 FK):`, dbError);
+              if (id) await offlineDb.syncQueue.delete(id);
+              if (localPage) await offlineDb.pages.delete(localPage.id);
+              set(st => ({
+                pages: st.pages.filter(p => p.id !== cleanPageId && p.id !== pageId)
+              }));
               continue;
             }
             throw dbError;
@@ -1621,18 +1599,41 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       activePageId: isCurrentActivePage ? (remainingPages.length > 0 ? remainingPages[0].id : null) : st.activePageId
     }));
 
-    // Exclusão definitiva do Dexie
+    // Exclusão definitiva no Dexie (IndexedDB)
     try {
       if (offlineDb.sections) {
         await offlineDb.sections.delete(cleanId);
         if (id !== cleanId) await offlineDb.sections.delete(id);
       }
-      for (const p of pagesToDelete) {
-        const pId = sanitizeUuid(p.id);
-        await offlineDb.pages.delete(p.id);
-        if (pId !== p.id) await offlineDb.pages.delete(pId);
-        await offlineDb.syncQueue.where('pageId').equals(p.id).delete();
-        if (pId !== p.id) await offlineDb.syncQueue.where('pageId').equals(pId).delete();
+      
+      // Expurgar do Dexie todas as páginas pertencentes a esta seção
+      if (offlineDb.pages) {
+        const dexiePages = await offlineDb.pages.toArray();
+        for (const p of dexiePages) {
+          const pCleanSec = p.section_id ? sanitizeUuid(p.section_id) : '';
+          if (p.section_id === cleanId || p.section_id === id || pCleanSec === cleanId) {
+            await offlineDb.pages.delete(p.id);
+          }
+        }
+        for (const p of pagesToDelete) {
+          const pId = sanitizeUuid(p.id);
+          await offlineDb.pages.delete(p.id);
+          if (pId !== p.id) await offlineDb.pages.delete(pId);
+        }
+      }
+
+      // Expurgar da fila de sincronização (syncQueue)
+      if (offlineDb.syncQueue) {
+        const queueItems = await offlineDb.syncQueue.toArray();
+        for (const item of queueItems) {
+          const itemPageId = item.pageId ? sanitizeUuid(item.pageId) : '';
+          const itemSecId = item.payload?.section_id ? sanitizeUuid(String(item.payload.section_id)) : '';
+          const isDeletedPage = pagesToDelete.some(p => p.id === item.pageId || sanitizeUuid(p.id) === itemPageId);
+
+          if (isDeletedPage || itemSecId === cleanId || itemSecId === id || itemPageId === cleanId || itemPageId === id) {
+            if (item.id) await offlineDb.syncQueue.delete(item.id);
+          }
+        }
       }
     } catch (e) {
       console.debug('Dexie section delete error:', e);
