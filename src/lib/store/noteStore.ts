@@ -1071,7 +1071,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
 
     const rawCachedSections = getCached<NoteSection[]>(sectionsKey, userDefaultSections);
     const localCachedSections = sortSectionsByStoredOrder(rawCachedSections, targetUserId);
-    const rawCachedPages = getCached<NotePage[]>(pagesKey, userDefaultPages);
+    const rawCachedPages = getCached<NotePage[]>(pagesKey, []);
     const localCachedPages = sortPagesByStoredOrder(rawCachedPages, targetUserId);
     const cachedRelations = getCached<NoteLinkRelation[]>(relationsKey, []);
 
@@ -1096,7 +1096,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     const immediateSections = sortSectionsByStoredOrder(Array.from(immediateSectionsMap.values()), targetUserId);
 
     const immediatePagesMap = new Map<string, NotePage>();
-    (localCachedPages.length > 0 ? localCachedPages : userDefaultPages).forEach(p => immediatePagesMap.set(p.id, { ...p, user_id: targetUserId }));
+    localCachedPages.forEach(p => immediatePagesMap.set(p.id, { ...p, user_id: targetUserId }));
     userDexiePages.forEach(p => immediatePagesMap.set(p.id, { ...p, user_id: targetUserId }));
     const immediatePages = sortPagesByStoredOrder(Array.from(immediatePagesMap.values()), targetUserId);
 
@@ -1720,7 +1720,9 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     // Exclusão definitiva remota no Supabase
     try {
       await supabase.from('note_pages').delete().eq('section_id', cleanId);
+      if (id !== cleanId) await supabase.from('note_pages').delete().eq('section_id', id);
       await supabase.from('note_sections').delete().eq('id', cleanId);
+      if (id !== cleanId) await supabase.from('note_sections').delete().eq('id', id);
     } catch (e) {
       console.debug('Section deleted locally, remote error:', e);
     }
@@ -2000,7 +2002,10 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       });
 
       // Direct Supabase online update
-      const directDbPayload: Record<string, unknown> = {};
+      const activeUserId = useAuthStore.getState().user?.id || userId || DEFAULT_USER_ID;
+      const directDbPayload: Record<string, unknown> = {
+        user_id: activeUserId
+      };
       if (cleanUpdates.titulo !== undefined) directDbPayload.titulo = cleanUpdates.titulo;
       if (cleanUpdates.section_id !== undefined) directDbPayload.section_id = cleanUpdates.section_id;
       if (cleanUpdates.parent_id !== undefined) directDbPayload.parent_id = cleanUpdates.parent_id;
@@ -2013,17 +2018,46 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       }
 
       if (Object.keys(directDbPayload).length > 0) {
-        supabase.from('note_pages').update(directDbPayload).eq('id', cleanId).then(({ error }) => {
-          if (!error) {
-            offlineDb.pages.update(cleanId, { syncStatus: 'synced', remoteVersion: currentLocalVersion }).catch(() => {});
-            set((state) => ({
-              pageSyncStatuses: { ...state.pageSyncStatuses, [cleanId]: 'synced', [id]: 'synced' }
-            }));
-          } else {
-            console.debug('Direct note_pages update error:', error.message);
+        const performUpdate = async () => {
+          const { error, count } = await supabase.from('note_pages').update(directDbPayload).eq('id', cleanId);
+          if (error || count === 0) {
+            if (id !== cleanId) {
+              await supabase.from('note_pages').update(directDbPayload).eq('id', id);
+            }
+            // If 0 rows were updated, upsert the full pageData to guarantee section_id and parent_id update on Supabase
+            let encryptedContent = pageData.conteudo;
+            if (pageData.conteudo) {
+              try {
+                encryptedContent = await sanitizeAndEncryptNoteContent(pageData.conteudo);
+              } catch {
+                encryptedContent = pageData.conteudo;
+              }
+            }
+
+            await supabase.from('note_pages').upsert([{
+              id: cleanId,
+              titulo: pageData.titulo,
+              section_id: pageData.section_id,
+              parent_id: pageData.parent_id,
+              user_id: activeUserId,
+              conteudo: encryptedContent,
+              created_at: pageData.created_at
+            }]);
           }
-        }).catch((err) => {
-          console.debug('Direct note_pages update offline:', err);
+
+          await offlineDb.pages.update(cleanId, { 
+            syncStatus: 'synced', 
+            remoteVersion: currentLocalVersion,
+            lastUpdatedAt: Date.now() 
+          }).catch(() => {});
+
+          set((state) => ({
+            pageSyncStatuses: { ...state.pageSyncStatuses, [cleanId]: 'synced', [id]: 'synced' }
+          }));
+        };
+
+        performUpdate().catch((err) => {
+          console.debug('Direct note_pages update failed:', err);
         });
       }
 
@@ -2084,14 +2118,29 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     try {
       for (const p of allPagesToDelete) {
         const cId = sanitizeUuid(p.id);
+        
+        // Abort any in-flight update requests for this page
+        if (activeAbortControllers.has(cId)) {
+          activeAbortControllers.get(cId)?.abort();
+          activeAbortControllers.delete(cId);
+        }
+        if (activeAbortControllers.has(p.id)) {
+          activeAbortControllers.get(p.id)?.abort();
+          activeAbortControllers.delete(p.id);
+        }
+
+        // Delete from local IndexedDB & pending sync queue
         await offlineDb.pages.delete(p.id);
         if (cId !== p.id) await offlineDb.pages.delete(cId);
         await offlineDb.syncQueue.where('pageId').equals(p.id).delete();
         if (cId !== p.id) await offlineDb.syncQueue.where('pageId').equals(cId).delete();
         
-        // Exclusão remota imediata no Supabase
+        // Direct remote deletion in Supabase (deleting by primary key ID)
         try {
           await supabase.from('note_pages').delete().eq('id', cId);
+          if (cId !== p.id) {
+            await supabase.from('note_pages').delete().eq('id', p.id);
+          }
         } catch (subErr) {
           console.debug('Supabase direct note delete error:', subErr);
         }
