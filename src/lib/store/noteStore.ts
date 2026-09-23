@@ -1319,16 +1319,8 @@ export const useNoteStore = create<NoteState>((set, get) => ({
           }
         }
 
-        // Second, preserve ONLY genuinely offline-created pages (action === 'create' in syncQueue)
-        const createdOfflinePageIds = new Set(
-          pendingQueue
-            .filter(item => item.action === 'create')
-            .map(item => item.pageId)
-            .concat(pendingQueue.filter(item => item.action === 'create').map(item => sanitizeUuid(item.pageId)))
-        );
-
+        // Second, preserve all local Dexie pages that are not in trash/tombstones
         for (const localPage of localDexiePages) {
-          if (localPage.user_id !== targetUserId && targetUserId !== DEFAULT_USER_ID) continue;
           if (trashedPageIds.has(localPage.id) || trashedPageIds.has(sanitizeUuid(localPage.id)) || trashedSectionIds.has(localPage.section_id) || trashedSectionIds.has(sanitizeUuid(localPage.section_id))) {
             await offlineDb.pages.delete(localPage.id);
             continue;
@@ -1338,16 +1330,48 @@ export const useNoteStore = create<NoteState>((set, get) => ({
             continue;
           }
 
-          if (!mergedPagesMap.has(localPage.id)) {
-            const isGenuinelyCreatedOffline = createdOfflinePageIds.has(localPage.id) || createdOfflinePageIds.has(sanitizeUuid(localPage.id));
-            if (isGenuinelyCreatedOffline) {
-              mergedPagesMap.set(localPage.id, localPage);
-              initialSyncStatuses[localPage.id] = 'pending';
-            } else if (rawPagesData.length > 0) {
-              // The page was synced previously but no longer exists on Supabase => DELETED REMOTELY!
-              // Purge it from local Dexie and do NOT resurrect!
+          if (!mergedPagesMap.has(localPage.id) && !mergedPagesMap.has(sanitizeUuid(localPage.id))) {
+            // Check if page was previously synced with server but deleted remotely
+            const wasDeletedRemotely = rawPagesData.length > 0 && 
+              localPage.syncStatus === 'synced' && 
+              (localPage.remoteVersion || 0) > 0 && 
+              !pendingPageIds.has(localPage.id);
+
+            if (wasDeletedRemotely) {
               await offlineDb.pages.delete(localPage.id);
+            } else {
+              // Valid local page (created offline, pending sync, or from local cache)
+              mergedPagesMap.set(localPage.id, {
+                ...localPage,
+                user_id: targetUserId
+              });
+              initialSyncStatuses[localPage.id] = 'pending';
             }
+          }
+        }
+
+        // Third, preserve any local cached pages from localStorage
+        for (const cachedPage of localCachedPages) {
+          if (trashedPageIds.has(cachedPage.id) || trashedPageIds.has(sanitizeUuid(cachedPage.id)) || trashedSectionIds.has(cachedPage.section_id) || trashedSectionIds.has(sanitizeUuid(cachedPage.section_id))) {
+            continue;
+          }
+          if (deletedPageIds.has(cachedPage.id) || deletedPageIds.has(sanitizeUuid(cachedPage.id))) {
+            continue;
+          }
+          if (!mergedPagesMap.has(cachedPage.id) && !mergedPagesMap.has(sanitizeUuid(cachedPage.id))) {
+            mergedPagesMap.set(cachedPage.id, {
+              ...cachedPage,
+              user_id: targetUserId
+            });
+            await offlineDb.pages.put({
+              ...cachedPage,
+              user_id: targetUserId,
+              localVersion: 1,
+              remoteVersion: 0,
+              syncStatus: 'pending',
+              lastUpdatedAt: Date.now()
+            });
+            initialSyncStatuses[cachedPage.id] = 'pending';
           }
         }
 
@@ -1357,34 +1381,41 @@ export const useNoteStore = create<NoteState>((set, get) => ({
         }
 
         // Sanitize page titles (fixing corrupted UUID titles from previous bug), section_id, and parent_id
-        const validSectionIds = new Set(finalSections.map(s => s.id));
-        const validPageIds = new Set(reconciledPages.map(p => p.id));
+        const validSectionIds = new Set(
+          finalSections.map(s => s.id).concat(finalSections.map(s => sanitizeUuid(s.id)))
+        );
+        const validPageIds = new Set(
+          reconciledPages.map(p => p.id).concat(reconciledPages.map(p => sanitizeUuid(p.id)))
+        );
         const fallbackSectionId = finalSections.length > 0 ? finalSections[0].id : null;
 
         const pagesToUpdateInDb: NotePage[] = [];
 
         const sanitizedPages = reconciledPages.map(p => {
-          let cleanParentId = p.parent_id;
-          let cleanSectionId = p.section_id;
+          let cleanParentId = p.parent_id ? (sanitizeUuidOrNull(p.parent_id) || p.parent_id) : null;
+          let cleanSectionId = p.section_id ? (sanitizeUuid(p.section_id) || p.section_id) : '';
           let cleanTitle = p.titulo;
           let wasCorrupted = false;
 
           // Check if title was corrupted with a UUID or section ID
           if (isValidUuid(cleanTitle)) {
-            // If the title matches a known section ID, rebind the page directly to that section!
-            if (validSectionIds.has(cleanTitle)) {
-              cleanSectionId = cleanTitle;
+            const sectionMatchByTitle = finalSections.find(s => s.id === cleanTitle || sanitizeUuid(s.id) === sanitizeUuid(cleanTitle));
+            if (sectionMatchByTitle) {
+              cleanSectionId = sectionMatchByTitle.id;
             }
             cleanTitle = 'Sem título';
             wasCorrupted = true;
           }
 
-          if (!cleanParentId || cleanParentId === 'null' || cleanParentId === 'undefined' || !validPageIds.has(cleanParentId)) {
-            if (cleanParentId !== null) wasCorrupted = true;
+          if (cleanParentId && !validPageIds.has(cleanParentId) && !validPageIds.has(sanitizeUuid(cleanParentId))) {
             cleanParentId = null;
+            wasCorrupted = true;
           }
 
-          if ((!cleanSectionId || (validSectionIds.size > 0 && !validSectionIds.has(cleanSectionId))) && fallbackSectionId) {
+          const sectionMatch = finalSections.find(s => s.id === cleanSectionId || sanitizeUuid(s.id) === sanitizeUuid(cleanSectionId));
+          if (sectionMatch) {
+            cleanSectionId = sectionMatch.id;
+          } else if (fallbackSectionId) {
             cleanSectionId = fallbackSectionId;
             wasCorrupted = true;
           }

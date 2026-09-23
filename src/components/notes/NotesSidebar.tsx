@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNoteStore } from '@/lib/store/noteStore';
+import { useNoteStore, sanitizeUuid } from '@/lib/store/noteStore';
 import { Button } from '@/components/ui/button';
 import { 
   Plus, Edit2, Trash, ChevronDown, ChevronRight, FileText, Folder, 
@@ -399,7 +399,9 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
 
   // Render a page and its nested subpages recursively
   const renderPage = (page: NotePage, depth = 0, siblingsList: NotePage[] = []) => {
-    const subpages = pages.filter(p => p.parent_id === page.id);
+    const subpages = pages.filter(p => 
+      p.parent_id === page.id || (p.parent_id && page.id && sanitizeUuid(p.parent_id) === sanitizeUuid(page.id))
+    );
     const hasSubpages = subpages.length > 0;
     const isExpanded = expandedPages.includes(page.id);
     const isActive = activePageId === page.id;
@@ -609,7 +611,10 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
               const isOverThis = dragOverSectionId === section.id;
               const isFirst = idx === 0;
               const isLast = idx === sections.length - 1;
-              const rootPages = pages.filter(p => p.section_id === section.id && !p.parent_id);
+              const rootPages = pages.filter(p => 
+                (p.section_id === section.id || sanitizeUuid(p.section_id) === sanitizeUuid(section.id)) && 
+                !p.parent_id
+              );
 
               return (
                 <div 
