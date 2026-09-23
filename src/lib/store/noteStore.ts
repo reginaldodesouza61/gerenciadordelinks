@@ -831,7 +831,17 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       await auditAndRepairSyncQueue();
 
       const queue = await offlineDb.syncQueue.toArray();
-      if (queue.length === 0) return;
+      if (queue.length === 0) {
+        // If sync queue is empty, ensure all pages (except manual conflicts) are marked as synced
+        set((state) => {
+          const nextStatuses: Record<string, 'synced' | 'pending' | 'conflict'> = {};
+          for (const p of state.pages) {
+            nextStatuses[p.id] = state.pageSyncStatuses[p.id] === 'conflict' ? 'conflict' : 'synced';
+          }
+          return { pageSyncStatuses: nextStatuses };
+        });
+        return;
+      }
 
       // Obtém usuário ativo com sessão real no Supabase Auth
       const { data: { session: activeSession } } = await supabase.auth.getSession();
@@ -1341,11 +1351,33 @@ export const useNoteStore = create<NoteState>((set, get) => ({
               await offlineDb.pages.delete(localPage.id);
             } else {
               // Valid local page (created offline, pending sync, or from local cache)
+              const isPendingInQueue = pendingPageIds.has(localPage.id) || pendingPageIds.has(sanitizeUuid(localPage.id));
+              const isLocalPending = localPage.syncStatus === 'pending';
+              const needsSync = isPendingInQueue || isLocalPending;
+
               mergedPagesMap.set(localPage.id, {
                 ...localPage,
                 user_id: targetUserId
               });
-              initialSyncStatuses[localPage.id] = 'pending';
+              initialSyncStatuses[localPage.id] = needsSync ? 'pending' : (localPage.syncStatus || 'synced');
+
+              // If it needs sync and isn't queued yet, enqueue it so syncPendingQueue pushes it to server
+              if (needsSync && !isPendingInQueue) {
+                await offlineDb.syncQueue.put({
+                  pageId: localPage.id,
+                  action: 'create',
+                  payload: {
+                    id: sanitizeUuid(localPage.id),
+                    titulo: localPage.titulo,
+                    conteudo: localPage.conteudo,
+                    section_id: sanitizeUuid(localPage.section_id),
+                    parent_id: sanitizeUuidOrNull(localPage.parent_id),
+                    user_id: targetUserId
+                  },
+                  timestamp: Date.now(),
+                  attempts: 0
+                });
+              }
             }
           }
         }
@@ -1359,6 +1391,7 @@ export const useNoteStore = create<NoteState>((set, get) => ({
             continue;
           }
           if (!mergedPagesMap.has(cachedPage.id) && !mergedPagesMap.has(sanitizeUuid(cachedPage.id))) {
+            const isPendingInQueue = pendingPageIds.has(cachedPage.id) || pendingPageIds.has(sanitizeUuid(cachedPage.id));
             mergedPagesMap.set(cachedPage.id, {
               ...cachedPage,
               user_id: targetUserId
@@ -1368,10 +1401,10 @@ export const useNoteStore = create<NoteState>((set, get) => ({
               user_id: targetUserId,
               localVersion: 1,
               remoteVersion: 0,
-              syncStatus: 'pending',
+              syncStatus: isPendingInQueue ? 'pending' : 'synced',
               lastUpdatedAt: Date.now()
             });
-            initialSyncStatuses[cachedPage.id] = 'pending';
+            initialSyncStatuses[cachedPage.id] = isPendingInQueue ? 'pending' : 'synced';
           }
         }
 

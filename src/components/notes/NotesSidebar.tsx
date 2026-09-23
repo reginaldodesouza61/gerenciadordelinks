@@ -468,10 +468,10 @@ export function NotesSidebar({ onCollapse, onOpenSearch }: NotesSidebarProps) {
             )}
             <FileText size={13} className={cn("shrink-0 mt-1", isActive ? "text-indigo-500" : "text-gray-400 dark:text-zinc-500")} />
             <span className="text-[13px] break-words leading-snug flex-1 select-text" title={page.titulo}>{page.titulo}</span>
-            {pageSyncStatuses[page.id] === 'pending' && (
+            {(pageSyncStatuses[page.id] === 'pending' || pageSyncStatuses[sanitizeUuid(page.id)] === 'pending') && (
               <RefreshCw size={10} className="text-amber-500 animate-spin shrink-0 ml-1 mt-1" title="Alterações locais pendentes de sincronização" />
             )}
-            {pageSyncStatuses[page.id] === 'conflict' && (
+            {(pageSyncStatuses[page.id] === 'conflict' || pageSyncStatuses[sanitizeUuid(page.id)] === 'conflict') && (
               <button
                 type="button"
                 onClick={(e) => {
